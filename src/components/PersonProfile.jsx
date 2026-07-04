@@ -26,6 +26,7 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
   const [nurturer, setNurturer] = useState(null)
   const [derived, setDerived] = useState([])
   const [manual, setManual] = useState([])
+  const [events, setEvents] = useState([])
   const [satsangs, setSatsangs] = useState([])
   const [calls, setCalls] = useState([])
   const [err, setErr] = useState(null)
@@ -44,7 +45,7 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
         supabase.from('people').select('center:centers!people_center_id_fkey(name)').eq('id', personId).maybeSingle(),
         supabase.from('nurturer_assignments').select('nurturer:nurturers!nurturer_assignments_nurturer_id_fkey(full_name)').eq('meditator_id', personId).limit(1),
         supabase.from('manual_tags').select('id, tag').eq('person_id', personId).order('created_at', { ascending: false }),
-        supabase.from('attendance').select('activities!attendance_activity_id_fkey(activity_type)').eq('person_id', personId),
+        supabase.from('attendance').select('time_in, activities!attendance_activity_id_fkey(name, activity_type, activity_date)').eq('person_id', personId),
         supabase.from('satsang_attendance').select('satsang_name, language, medium, satsang_date').eq('person_id', personId).order('satsang_date', { ascending: false }),
         supabase.from('journeys').select('type, calls(reachability, sadhana_status, remarks, completed_at)').eq('person_id', personId),
       ])
@@ -54,6 +55,10 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
       setCenter(ctr.data?.center?.name || null)
       setNurturer(nur.data?.[0]?.nurturer?.full_name || null)
       setManual(mt.data || [])
+      const evs = (att.data || [])
+        .map((a) => ({ name: a.activities?.name, type: a.activities?.activity_type, date: a.activities?.activity_date || a.time_in }))
+        .sort((x, y) => new Date(y.date || 0) - new Date(x.date || 0))
+      setEvents(evs)
       const types = new Set()
       for (const a of att.data || []) { const t = a.activities?.activity_type; if (t && t !== 'general') types.add(t) }
       setDerived([...types])
@@ -78,6 +83,11 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
     setManual((m) => m.filter((x) => x.id !== id))
     const { error } = await supabase.from('manual_tags').delete().eq('id', id)
     if (error) { onToast('Could not remove tag'); load() } else onChanged && onChanged()
+  }
+  async function applyTag(tag) {
+    const { data, error } = await supabase.from('manual_tags').insert({ person_id: personId, tag }).select('id, tag').single()
+    if (error) return onToast(error.message.includes('duplicate') ? 'Tag already exists.' : 'Could not apply tag.')
+    setManual((m) => [data, ...m]); onToast(`Applied “${tag}” tag.`); onChanged && onChanged()
   }
   async function addAsVolunteer() {
     setBusy(true)
@@ -108,6 +118,14 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
   const hasPhone = !!p?.phone
   const wa = p && hasPhone ? `https://wa.me/91${waNum(p.phone)}` : undefined
   const progTags = p?.tags || []
+
+  // Seva-tag rule (STATED, not silent auto-tagging): attending 3+ events in the same
+  // seva area suggests that area's tag; a coordinator applies it explicitly below.
+  const SEVA_GROUP = { event_setup: 'Setup', satsang: 'Satsang Seva', ashram_visit: 'Ashram Seva' }
+  const SEVA_THRESHOLD = 3
+  const sevaCounts = {}
+  for (const e of events) { const g = SEVA_GROUP[e.type]; if (g) sevaCounts[g] = (sevaCounts[g] || 0) + 1 }
+  const sevaSuggestions = Object.entries(sevaCounts).filter(([label, n]) => n >= SEVA_THRESHOLD && !manual.some((m) => m.tag === label))
 
   return (
     <SidePanel onClose={onClose}>
@@ -189,6 +207,12 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
               {derived.filter((d) => !manual.some((m) => m.tag === d)).map((d) => (<span key={d} style={{ fontSize: 11.5, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '3px 9px', borderRadius: 7 }}>{d}</span>))}
               {manual.length === 0 && derived.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>No tags yet.</span>}
             </div>
+            {sevaSuggestions.map(([label, n]) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 12.5, color: '#5C4A2E', background: '#FBF1E4', border: '1px dashed #D8B98E', borderRadius: 9, padding: '8px 11px', marginBottom: 8 }}>
+                <span>Attended <strong>{label}</strong> {n}× — rule: {SEVA_THRESHOLD}+ suggests the {label} tag.</span>
+                <button className="btn btn-ghost" style={{ padding: '5px 11px', fontSize: 12, flexShrink: 0 }} onClick={() => applyTag(label)}>Apply “{label}”</button>
+              </div>
+            ))}
             <div style={{ display: 'flex', gap: 6 }}>
               <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addTag()} placeholder="Add a tag…" style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 8, padding: '7px 10px', fontSize: 12.5, fontFamily: 'inherit', outline: 'none' }} />
               <button className="btn btn-ghost" onClick={addTag}>Add tag</button>
@@ -204,6 +228,20 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                     <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Satsang</th><th style={th}>Language</th><th style={th}>Medium</th><th style={th}>Date</th></tr></thead>
                     <tbody>{satsangs.map((s, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{s.satsang_name || '—'}</td><td style={td}>{s.language || '—'}</td><td style={td}>{s.medium || '—'}</td><td style={td}>{fmt(s.satsang_date) || '—'}</td></tr>))}</tbody>
+                  </table>
+                </div>
+              )}
+          </Section>
+
+          {/* Event Attendance */}
+          <Section title="Event Attendance" count={events.length}>
+            {events.length === 0
+              ? <Empty label="No event attendance recorded yet." />
+              : (
+                <div className="card" style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                    <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Event</th><th style={th}>Type</th><th style={th}>Date</th></tr></thead>
+                    <tbody>{events.map((e, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{e.name || '—'}</td><td style={td}>{e.type || '—'}</td><td style={td}>{fmt(e.date) || '—'}</td></tr>))}</tbody>
                   </table>
                 </div>
               )}

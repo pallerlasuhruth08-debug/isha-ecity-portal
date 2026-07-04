@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
+import WalkinCapture from '../components/WalkinCapture'
 
 const STAGES = ['Thinking', 'Planning', 'Executing', 'Reminder', 'Done']
 const STAGE_PILL = {
@@ -19,7 +20,7 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
-export default function Events({ onToast }) {
+export default function Events({ me, isCoordinator = false, onToast }) {
   const [acts, setActs] = useState(null)
   const [stages, setStages] = useState({})
   const [err, setErr] = useState(null)
@@ -55,7 +56,7 @@ export default function Events({ onToast }) {
   const loading = !acts && !err
   const open = openId ? (acts || []).find((a) => a.id === openId) : null
 
-  if (open) return <Detail activity={open} stage={stages[open.id] || 'Planning'} onStage={(st) => setStage(open.id, st)} onBack={() => setOpenId(null)} onToast={onToast} />
+  if (open) return <Detail activity={open} stage={stages[open.id] || 'Planning'} onStage={(st) => setStage(open.id, st)} onBack={() => setOpenId(null)} me={me} isCoordinator={isCoordinator} onToast={onToast} />
 
   return (
     <Pad>
@@ -93,7 +94,7 @@ export default function Events({ onToast }) {
   )
 }
 
-function Detail({ activity, stage, onStage, onBack, onToast }) {
+function Detail({ activity, stage, onStage, onBack, me, isCoordinator, onToast }) {
   const [attendees, setAttendees] = useState(null)
   const [todos, setTodos] = useState([])
   const [err, setErr] = useState(null)
@@ -101,6 +102,7 @@ function Detail({ activity, stage, onStage, onBack, onToast }) {
   const [results, setResults] = useState([])
   const [todoLabel, setTodoLabel] = useState('')
   const [busy, setBusy] = useState(false)
+  const [capturing, setCapturing] = useState(false)
 
   async function load() {
     try {
@@ -161,7 +163,9 @@ function Detail({ activity, stage, onStage, onBack, onToast }) {
     }
   }
 
-  const attCount = attendees?.length ?? 0
+  const resolved = (attendees || []).filter((r) => r.person_id)
+  const unresolvedCount = (attendees || []).filter((r) => !r.person_id).length
+  const attCount = resolved.length
 
   return (
     <Pad>
@@ -198,6 +202,17 @@ function Detail({ activity, stage, onStage, onBack, onToast }) {
             <span className="pill" style={pill('#EAF2E5', '#4E7C3F')}>{attCount} present</span>
           </div>
 
+          {isCoordinator && (
+            <button className="btn btn-primary" style={{ width: '100%', padding: '11px', fontSize: 14, marginBottom: 12 }} onClick={() => setCapturing(true)}>
+              + Capture walk-in
+            </button>
+          )}
+          {unresolvedCount > 0 && (
+            <div style={{ fontSize: 12.5, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 9, padding: '8px 11px', marginBottom: 12 }}>
+              {unresolvedCount} unresolved walk-in{unresolvedCount > 1 ? 's' : ''} — resolve in the <strong>Unresolved</strong> queue.
+            </div>
+          )}
+
           <div style={{ position: 'relative', marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: '8px 12px' }}>
               {Icon.search(15)}
@@ -218,10 +233,10 @@ function Detail({ activity, stage, onStage, onBack, onToast }) {
 
           {attendees === null ? (
             <Loading label="Loading attendance…" />
-          ) : attendees.length === 0 ? (
+          ) : resolved.length === 0 ? (
             <Empty label="No one marked present yet." />
           ) : (
-            attendees.map((r, i) => (
+            resolved.map((r, i) => (
               <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid #F4EEE2' }}>
                 <div style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>{initials(r.person?.full_name || '?')}</div>
                 <div style={{ fontSize: 13, fontWeight: 500 }}>{r.person?.full_name || 'Unknown'}</div>
@@ -256,6 +271,16 @@ function Detail({ activity, stage, onStage, onBack, onToast }) {
           ))}
         </div>
       </div>
+
+      {capturing && (
+        <WalkinCapture
+          activity={activity}
+          me={me}
+          onClose={() => setCapturing(false)}
+          onChanged={load}
+          onToast={onToast}
+        />
+      )}
     </Pad>
   )
 }

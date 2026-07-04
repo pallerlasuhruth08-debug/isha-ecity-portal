@@ -10,6 +10,7 @@ export const ALL_TABS = [
   'advance',
   'interest',
   'campaigns',
+  'unresolved',
 ]
 
 export const ROLES = {
@@ -42,7 +43,7 @@ export const ROLES = {
     label: 'Volunteer Coordinator',
     who: 'Divya Menon',
     scope: 'Sector 4',
-    tabs: ['dashboard', 'volunteers', 'planning', 'events', 'nurturing', 'interest', 'campaigns'],
+    tabs: ['dashboard', 'volunteers', 'planning', 'events', 'nurturing', 'interest', 'campaigns', 'unresolved'],
   },
   meditator: {
     key: 'meditator',
@@ -87,6 +88,7 @@ export const TAB_TITLES = {
   advance: ['Advance Programmes', 'Bhava Spandana, Shoonya, Samyama & Guru Puja'],
   interest: ['Interest Inbox', 'Post-programme & verbal interest — triage and route'],
   campaigns: ['Campaigns', 'Insight-led outreach for volunteers & meditators'],
+  unresolved: ['Unresolved', 'Walk-in attendance awaiting a match'],
 }
 
 export const TAB_LABELS = {
@@ -99,4 +101,5 @@ export const TAB_LABELS = {
   advance: 'Advance Programmes',
   interest: 'Interest Inbox',
   campaigns: 'Campaigns',
+  unresolved: 'Unresolved',
 }

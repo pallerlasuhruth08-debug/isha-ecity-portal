@@ -12,6 +12,7 @@ const NAV = [
   { key: 'advance', icon: 'advance' },
   { key: 'interest', icon: 'interest' },
   { key: 'campaigns', icon: 'campaigns' },
+  { key: 'unresolved', icon: 'unresolved' },
 ]
 
 export default function Sidebar({ role, view, tabs, onNavigate }) {

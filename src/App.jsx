@@ -11,6 +11,7 @@ import Advance from './views/Advance'
 import Nurturing from './views/Nurturing'
 import Events from './views/Events'
 import Planning from './views/Planning'
+import Unresolved from './views/Unresolved'
 import Placeholder from './views/Placeholder'
 import Login from './views/Login'
 import { ROLES, TAB_TITLES, TAB_LABELS } from './lib/roles'
@@ -38,6 +39,11 @@ function Portal({ profile, email }) {
   const [toast, setToast] = useState(null)
   const toastTimer = useRef(null)
 
+  // AUTHORITATIVE permission gate — derived from the real logged-in profile.role,
+  // NOT the (cosmetic, demo) persona switcher. Coordinator-capable roles get can_all()
+  // server-side (RLS is the true backstop); this only decides which controls to render.
+  const isCoordinator = ['admin', 'sector_nurturer', 'center_coordinator'].includes(profile?.role)
+
   const roleDef = ROLES[role]
   const tabs = roleDef.tabs
   // If the current view isn't allowed for this role, fall back to the first tab.
@@ -63,11 +69,12 @@ function Portal({ profile, email }) {
       case 'volunteers':
         return <Volunteers onToast={showToast} onNavigate={setView} />
       case 'campaigns':
-        // Caller persona works through their own assigned call lists.
+        // Caller persona works through their own assigned call lists. The coordinator
+        // view exposes dial/log/edit controls only when the REAL role is coordinator.
         return role === 'caller' ? (
-          <CallerWorkspace myId={profile?.id} onToast={showToast} />
+          <CallerWorkspace me={profile} onToast={showToast} />
         ) : (
-          <Campaigns onToast={showToast} onNavigate={setView} />
+          <Campaigns me={profile} isCoordinator={isCoordinator} onToast={showToast} onNavigate={setView} />
         )
       case 'meditators':
         return <Meditators onToast={showToast} />
@@ -78,9 +85,11 @@ function Portal({ profile, email }) {
       case 'nurturing':
         return <Nurturing onToast={showToast} />
       case 'events':
-        return <Events onToast={showToast} />
+        return <Events me={profile} isCoordinator={isCoordinator} onToast={showToast} />
       case 'planning':
         return <Planning onToast={showToast} />
+      case 'unresolved':
+        return <Unresolved me={profile} isCoordinator={isCoordinator} onToast={showToast} />
       default:
         return <Placeholder view={activeView} title={TAB_LABELS[activeView]} />
     }

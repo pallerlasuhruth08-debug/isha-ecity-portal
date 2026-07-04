@@ -1,29 +1,42 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { pill, initials, avatarFor } from '../lib/ui'
+import { initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
+import { statusOf, pillFor, fmtWhen, DEFAULT_OUTCOME } from '../lib/calllog'
+import { fillTemplate } from '../lib/phone'
+import ReachButtons from '../components/ReachButtons'
+import CallLogDialog from '../components/CallLogDialog'
+import CampaignScriptPanel from '../components/CampaignScriptPanel'
 
-const OUTCOMES = [
-  { key: 'answered', label: 'Answered' },
-  { key: 'will_call_back', label: 'Will call back' },
-  { key: 'not_reachable', label: 'Not reachable' },
-]
-const REACH_PILL = {
-  answered: pill('#EAF2E5', '#4E7C3F'),
-  will_call_back: pill('#FBEAD9', '#C28A2A'),
-  not_reachable: pill('#FBE6E0', '#B5532F'),
-  pending: pill('#F1EADD', '#8C7E6B'),
-}
-
-export default function CallerWorkspace({ myId, onToast }) {
+export default function CallerWorkspace({ me, onToast }) {
+  const myId = me?.id
+  const myName = me?.full_name || ''
   const [journeys, setJourneys] = useState(null)
-  const [callsByJ, setCallsByJ] = useState({})
+  const [logsByJ, setLogsByJ] = useState({}) // journey_id -> [call_logs] newest-first
+  const [actorNames, setActorNames] = useState({}) // profile.id -> full_name
   const [err, setErr] = useState(null)
   const [openCampaign, setOpenCampaign] = useState(null)
   const [logFor, setLogFor] = useState(null) // journey being logged
-  const [outcome, setOutcome] = useState('answered')
-  const [remarks, setRemarks] = useState('')
-  const [busy, setBusy] = useState(false)
+
+  // Option B: tapping Call arms a return-prompt. When the caller comes back to the
+  // tab (visible after it went hidden for the dialer), auto-open the log dialog.
+  const [armed, setArmed] = useState(null)
+  const wentHiddenRef = useRef(false)
+  useEffect(() => {
+    function onVis() {
+      if (document.visibilityState === 'hidden') {
+        if (armed) wentHiddenRef.current = true
+      } else if (document.visibilityState === 'visible') {
+        if (armed && wentHiddenRef.current) {
+          setLogFor(armed)
+          setArmed(null)
+          wentHiddenRef.current = false
+        }
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [armed])
 
   async function load() {
     if (!myId) {
@@ -33,26 +46,35 @@ export default function CallerWorkspace({ myId, onToast }) {
     try {
       const { data: js, error } = await supabase
         .from('journeys')
-        .select('id, campaign_id, person:people!journeys_person_id_fkey(full_name, phone), campaign:campaigns!journeys_campaign_id_fkey(id, name, audience, goal)')
+        .select('id, person_id, campaign_id, status, person:people!journeys_person_id_fkey(full_name, phone), campaign:campaigns!journeys_campaign_id_fkey(id, name, audience, goal, script, whatsapp_template, sms_template)')
         .eq('assigned_to', myId)
         .not('campaign_id', 'is', null)
+        .neq('status', 'dropped')
         .limit(1000)
       if (error) throw error
       const ids = (js || []).map((j) => j.id)
-      let calls = []
+      let logs = []
       if (ids.length) {
-        const { data: cs, error: e2 } = await supabase
-          .from('calls')
-          .select('id, journey_id, call_no, due_date, completed_at, reachability, remarks')
+        const { data: ls, error: e2 } = await supabase
+          .from('call_logs')
+          .select('id, journey_id, reachability, remarks, logged_at, logged_by')
           .in('journey_id', ids)
-          .order('call_no', { ascending: true })
+          .order('logged_at', { ascending: false })
         if (e2) throw e2
-        calls = cs || []
+        logs = ls || []
       }
       const byJ = {}
-      for (const c of calls) (byJ[c.journey_id] ||= []).push(c)
+      for (const l of logs) (byJ[l.journey_id] ||= []).push(l)
+      // Resolve logged_by -> name so history shows who actually logged each call.
+      const actorIds = [...new Set(logs.map((l) => l.logged_by).filter(Boolean))]
+      const names = {}
+      if (actorIds.length) {
+        const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', actorIds)
+        for (const p of profs || []) names[p.id] = p.full_name
+      }
       setJourneys(js || [])
-      setCallsByJ(byJ)
+      setLogsByJ(byJ)
+      setActorNames(names)
     } catch (e) {
       setErr(e.message || String(e))
     }
@@ -62,65 +84,31 @@ export default function CallerWorkspace({ myId, onToast }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myId])
 
-  // Group journeys by campaign, with assigned/remaining/done tallies.
   const campaigns = useMemo(() => {
     const map = {}
     for (const j of journeys || []) {
       const c = j.campaign
       if (!c) continue
-      const g = (map[c.id] ||= { id: c.id, name: c.name, audience: c.audience || c.goal || '', journeys: [], assigned: 0, remaining: 0, done: 0 })
-      const calls = callsByJ[j.id] || []
-      const anyDone = calls.some((x) => x.completed_at)
+      const g = (map[c.id] ||= { ...c, audience: c.audience || c.goal || '', journeys: [], assigned: 0, toCall: 0, logged: 0 })
+      const logs = logsByJ[j.id] || []
       g.journeys.push(j)
       g.assigned += 1
-      if (anyDone) g.done += 1
-      else g.remaining += 1
+      if (logs.length) g.logged += 1
+      else g.toCall += 1
     }
     return Object.values(map)
-  }, [journeys, callsByJ])
+  }, [journeys, logsByJ])
 
   const totals = useMemo(
-    () => campaigns.reduce((a, c) => ({ assigned: a.assigned + c.assigned, remaining: a.remaining + c.remaining }), { assigned: 0, remaining: 0 }),
+    () => campaigns.reduce((a, c) => ({ assigned: a.assigned + c.assigned, toCall: a.toCall + c.toCall }), { assigned: 0, toCall: 0 }),
     [campaigns],
   )
-
-  function pendingCall(journeyId) {
-    const calls = (callsByJ[journeyId] || []).filter((c) => !c.completed_at).sort((a, b) => a.call_no - b.call_no)
-    return calls[0] || null
-  }
-
-  async function saveLog() {
-    if (!logFor) return
-    setBusy(true)
-    try {
-      const pend = pendingCall(logFor.id)
-      const payload = { completed_at: new Date().toISOString(), reachability: outcome, remarks: remarks || null, logged_by: myId }
-      if (pend) {
-        const { error } = await supabase.from('calls').update(payload).eq('id', pend.id)
-        if (error) throw error
-      } else {
-        const existing = callsByJ[logFor.id] || []
-        const nextNo = existing.reduce((m, c) => Math.max(m, c.call_no), 0) + 1
-        const { error } = await supabase.from('calls').insert({ journey_id: logFor.id, call_no: nextNo, due_date: new Date().toISOString().slice(0, 10), ...payload })
-        if (error) throw error
-      }
-      onToast(`Call with ${logFor.person?.full_name || 'contact'} logged.`)
-      setLogFor(null)
-      setRemarks('')
-      setOutcome('answered')
-      load()
-    } catch (e) {
-      onToast('Could not log call: ' + (e.message || e))
-    } finally {
-      setBusy(false)
-    }
-  }
 
   const loading = !journeys && !err
   if (loading) return <Pad><Loading label="Loading your call lists…" /></Pad>
   if (err) return <Pad><ErrorCard>{err}</ErrorCard></Pad>
 
-  // ---- campaign workspace ----
+  // ---- campaign call list ----
   if (openCampaign) {
     const c = campaigns.find((x) => x.id === openCampaign)
     if (!c) return <Pad><Empty label="Campaign not found." /></Pad>
@@ -137,58 +125,65 @@ export default function CallerWorkspace({ myId, onToast }) {
           </div>
           <div style={{ display: 'flex', gap: 22 }}>
             <Stat v={c.assigned} label="assigned to me" color="#9C4A14" />
-            <Stat v={c.remaining} label="to call" color="#C2691F" />
-            <Stat v={c.done} label="done" color="#4E7C3F" />
+            <Stat v={c.toCall} label="to call" color="#C2691F" />
+            <Stat v={c.logged} label="logged" color="#4E7C3F" />
           </div>
         </div>
 
+        {/* Callers see the coordinator's current script + message templates (read-only). */}
+        <CampaignScriptPanel campaign={c} />
+
         <div className="card" style={{ overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1.2fr 1fr 1fr', gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 260px 90px', gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
             <span>Contact</span>
-            <span>Phone</span>
-            <span>Last outcome</span>
-            <span>Action</span>
+            <span>Status</span>
+            <span>Reach out</span>
+            <span>Log</span>
           </div>
           {c.journeys.map((j, i) => {
-            const calls = callsByJ[j.id] || []
-            const done = calls.filter((x) => x.completed_at).sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at))[0]
+            const logs = logsByJ[j.id] || []
+            const status = statusOf(logs)
+            const phone = j.person?.phone
+            const last = logs[0]
+            const name = j.person?.full_name || 'Unknown'
             return (
-              <div key={j.id} className="rowhover" style={{ display: 'grid', gridTemplateColumns: '1.8fr 1.2fr 1fr 1fr', gap: 12, padding: '13px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center' }}>
+              <div key={j.id} className="rowhover" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 260px 90px', gap: 12, padding: '13px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 600 }}>{initials(j.person?.full_name || '?')}</div>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.person?.full_name || 'Unknown'}</div>
+                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>{initials(name)}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
+                    <div style={{ fontSize: 12, color: phone ? 'var(--ink-soft)' : 'var(--muted-2)' }}>{phone || 'no phone on record'}</div>
+                  </div>
                 </div>
-                <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>{j.person?.phone || '—'}</div>
-                <div><span className="pill" style={REACH_PILL[done?.reachability || 'pending']}>{done ? done.reachability.replace('_', ' ') : 'to call'}</span></div>
                 <div>
-                  <button className="btn btn-ghost" style={{ padding: '6px 11px', fontSize: 12 }} onClick={() => { setLogFor(j); setOutcome('answered'); setRemarks('') }}>
-                    Log call
-                  </button>
+                  <span className="pill" style={pillFor(status)}>{status}</span>
+                  {last && <div style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 4 }}>{logs.length} log{logs.length > 1 ? 's' : ''} · {fmtWhen(last.logged_at)} · by {actorNames[last.logged_by] || '—'}</div>}
+                </div>
+                <ReachButtons
+                  phone={phone}
+                  smsText={fillTemplate(c.sms_template, { name, myName })}
+                  waText={fillTemplate(c.whatsapp_template, { name, myName })}
+                  onArm={() => { setArmed(j); wentHiddenRef.current = false }}
+                />
+                <div>
+                  <button className="btn btn-ghost" style={{ padding: '6px 11px', fontSize: 12 }} onClick={() => setLogFor(j)}>Log</button>
                 </div>
               </div>
             )
           })}
+          {c.journeys.length === 0 && <div style={{ padding: 22 }}><Empty label="No one assigned in this campaign." /></div>}
         </div>
 
         {logFor && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 }} onClick={() => setLogFor(null)}>
-            <div className="card" style={{ width: 420, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
-              <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 4px' }}>Log call</h3>
-              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>{logFor.person?.full_name} · {logFor.person?.phone || '—'}</div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-                {OUTCOMES.map((o) => (
-                  <button key={o.key} onClick={() => setOutcome(o.key)} className="btn" style={{ padding: '8px 13px', fontSize: 12.5, background: outcome === o.key ? '#241B14' : '#fff', color: outcome === o.key ? '#F6ECDC' : 'var(--ink-soft)', border: outcome === o.key ? 'none' : '1px solid var(--border)' }}>
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-              <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Remarks (optional)…" rows={3} style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', fontSize: 13, fontFamily: 'inherit', outline: 'none', resize: 'vertical', marginBottom: 16 }} />
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                <button className="btn btn-ghost" onClick={() => setLogFor(null)}>Cancel</button>
-                <button className="btn btn-primary" disabled={busy} onClick={saveLog}>{busy ? 'Saving…' : 'Save call'}</button>
-              </div>
-            </div>
-          </div>
+          <CallLogDialog
+            journey={logFor}
+            logs={logsByJ[logFor.id] || []}
+            actorNames={actorNames}
+            myId={myId}
+            onClose={() => setLogFor(null)}
+            onSaved={load}
+            onToast={onToast}
+          />
         )}
       </Pad>
     )
@@ -204,7 +199,7 @@ export default function CallerWorkspace({ myId, onToast }) {
         </div>
         <div style={{ display: 'flex', gap: 24 }}>
           <Stat v={totals.assigned} label="calls assigned" color="#9C4A14" />
-          <Stat v={totals.remaining} label="still to call" color="#C2691F" />
+          <Stat v={totals.toCall} label="still to call" color="#C2691F" />
         </div>
       </div>
 
@@ -216,8 +211,8 @@ export default function CallerWorkspace({ myId, onToast }) {
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>{c.audience}</div>
             <div style={{ display: 'flex', gap: 22, paddingTop: 14, borderTop: '1px solid #F2EBDD' }}>
               <Stat v={c.assigned} label="assigned" color="#9C4A14" small />
-              <Stat v={c.remaining} label="to call" color="#C2691F" small />
-              <Stat v={c.done} label="done" color="#4E7C3F" small />
+              <Stat v={c.toCall} label="to call" color="#C2691F" small />
+              <Stat v={c.logged} label="logged" color="#4E7C3F" small />
             </div>
           </div>
         ))}
