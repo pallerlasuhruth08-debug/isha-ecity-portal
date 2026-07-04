@@ -6,6 +6,7 @@ import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerBar, SelectionBar } from
 import { useTableSelection } from '../lib/useTableSelection'
 import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
+import { fetchActivityTypes } from '../lib/activityTypes'
 
 const STAGE_TO_STATUS = { New: 'new', 'Reached out': 'contacted', Oriented: 'matched', Active: 'active' }
 const STATUS_TO_STAGE = { new: 'New', contacted: 'Reached out', matched: 'Oriented', active: 'active', inactive: 'New' }
@@ -33,11 +34,12 @@ export default function Volunteers({ onToast }) {
 
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
-  const [fil, setFil] = useState({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', group: '', tag: '' })
+  const [fil, setFil] = useState({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', group: '', tag: '', atype: '' })
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [progIds, setProgIds] = useState(null) // group filter -> person ids ('loading'|array|null)
   const [tagIds, setTagIds] = useState(null) // manual-tag filter -> person ids
+  const [atypeIds, setAtypeIds] = useState(null) // activity-type filter -> person ids who attended that type
 
   const sel = useTableSelection()
   const [showForm, setShowForm] = useState(false)
@@ -47,7 +49,7 @@ export default function Volunteers({ onToast }) {
   const [tagRow, setTagRow] = useState(null)
   const [tagInput, setTagInput] = useState('')
 
-  const [opts, setOpts] = useState({ centres: [], langs: [], ieYears: [], groups: [], tags: [] })
+  const [opts, setOpts] = useState({ centres: [], langs: [], ieYears: [], groups: [], tags: [], atypes: [] })
   const [groupMap, setGroupMap] = useState({}) // raw_value -> group_name
   const [rawValues, setRawValues] = useState([]) // distinct volunteer_history.activity
 
@@ -73,12 +75,13 @@ export default function Volunteers({ onToast }) {
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const [centres, langsRes, ieRes, rawRes, agRes] = await Promise.all([
+      const [centres, langsRes, ieRes, rawRes, agRes, atypes] = await Promise.all([
         supabase.from('centers').select('id, name').order('name'),
         supabase.from('volunteer_profiles').select('languages').not('languages', 'is', null).limit(2000),
         supabase.from('people').select('ie_date').eq('is_volunteer', true).not('ie_date', 'is', null).order('ie_date', { ascending: true }).limit(1),
         supabase.from('volunteer_history').select('activity').not('activity', 'is', null).limit(4000),
         supabase.from('activity_groups').select('raw_value, group_name'),
+        fetchActivityTypes().catch(() => []),
       ])
       if (!alive) return
       const langs = uniq((langsRes.data || []).map((r) => r.languages)).sort()
@@ -91,7 +94,7 @@ export default function Volunteers({ onToast }) {
       for (let y = nowY; y >= minYear; y--) ieYears.push(String(y))
       setGroupMap(map)
       setRawValues(raws)
-      setOpts((o) => ({ ...o, centres: (centres.data || []).map((c) => ({ v: c.id, label: c.name || c.id })), langs, ieYears, groups }))
+      setOpts((o) => ({ ...o, centres: (centres.data || []).map((c) => ({ v: c.id, label: c.name || c.id })), langs, ieYears, groups, atypes: (atypes || []).map((t) => ({ v: t.id, label: t.label })) }))
       loadTagOptions()
     })()
     return () => {
@@ -140,10 +143,33 @@ export default function Volunteers({ onToast }) {
     }
   }, [fil.tag])
 
+  // Activity-TYPE filter -> person_ids who ATTENDED an event of that type (by id).
+  // Same rows as the event's type: attendance.activity_type_id (inherited from the event).
+  useEffect(() => {
+    if (!fil.atype) {
+      setAtypeIds(null)
+      return
+    }
+    let alive = true
+    setAtypeIds('loading')
+    supabase
+      .from('attendance')
+      .select('person_id')
+      .eq('activity_type_id', fil.atype)
+      .not('person_id', 'is', null)
+      .then(({ data }) => {
+        if (alive) setAtypeIds([...new Set((data || []).map((r) => r.person_id))])
+      })
+    return () => {
+      alive = false
+    }
+  }, [fil.atype])
+
   const applyFilters = useCallback(
     (q) => {
       if (Array.isArray(progIds)) q = q.in('person_id', progIds.length ? progIds : [NIL])
       if (Array.isArray(tagIds)) q = q.in('person_id', tagIds.length ? tagIds : [NIL])
+      if (Array.isArray(atypeIds)) q = q.in('person_id', atypeIds.length ? atypeIds : [NIL])
       if (fil.stage && STAGE_TO_STATUS[fil.stage]) q = q.eq('status', STAGE_TO_STATUS[fil.stage])
       if (fil.stage === 'Core Group') q = q.contains('tags', ['core_team'])
       if (fil.lang) q = q.eq('languages', fil.lang)
@@ -157,7 +183,7 @@ export default function Volunteers({ onToast }) {
       if (debounced) q = q.or(`full_name.ilike.%${debounced}%,pincode.ilike.%${debounced}%`)
       return q
     },
-    [fil, debounced, progIds, tagIds],
+    [fil, debounced, progIds, tagIds, atypeIds],
   )
 
   const fetchAllIds = useCallback(async () => {
@@ -180,7 +206,7 @@ export default function Volunteers({ onToast }) {
   const loadPage = useCallback(async () => {
     setLoading(true)
     setErr(null)
-    if ((fil.group && !Array.isArray(progIds)) || (fil.tag && !Array.isArray(tagIds))) return
+    if ((fil.group && !Array.isArray(progIds)) || (fil.tag && !Array.isArray(tagIds)) || (fil.atype && !Array.isArray(atypeIds))) return
     try {
       let q = applyFilters(
         supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, last_active_date, tags, last_activity_at', { count: 'exact' }),
@@ -215,15 +241,15 @@ export default function Volunteers({ onToast }) {
       const ids = mapped.map((m) => m.id)
       if (ids.length) {
         const [attRes, mtRes] = await Promise.all([
-          supabase.from('attendance').select('person_id, activities!attendance_activity_id_fkey(activity_type)').in('person_id', ids),
+          supabase.from('attendance').select('person_id, atype:activity_types(label)').in('person_id', ids),
           supabase.from('manual_tags').select('person_id, tag').in('person_id', ids),
         ])
         const att = {}
         for (const a of attRes.data || []) {
           const b = (att[a.person_id] ||= { count: 0, types: new Set() })
           b.count += 1
-          const t = a.activities?.activity_type
-          if (t && t !== 'general') b.types.add(t)
+          const t = a.atype?.label
+          if (t) b.types.add(t)
         }
         const mtags = {}
         for (const m of mtRes.data || []) (mtags[m.person_id] ||= []).push(m.tag)
@@ -242,7 +268,7 @@ export default function Volunteers({ onToast }) {
     } finally {
       setLoading(false)
     }
-  }, [applyFilters, page, pageSize, fil.group, fil.tag, progIds, tagIds])
+  }, [applyFilters, page, pageSize, fil.group, fil.tag, fil.atype, progIds, tagIds, atypeIds])
 
   useEffect(() => {
     loadPage()
@@ -275,7 +301,7 @@ export default function Volunteers({ onToast }) {
 
   const setF = (k) => (e) => setFil((f) => ({ ...f, [k]: e.target.value }))
   const clearFil = () => {
-    setFil({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', group: '', tag: '' })
+    setFil({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', group: '', tag: '', atype: '' })
     setSearch(''); setDateFrom(''); setDateTo('')
   }
   const filterActive = !!(debounced || Object.values(fil).some(Boolean) || dateFrom || dateTo)
@@ -292,7 +318,8 @@ export default function Volunteers({ onToast }) {
   const selStyle = { padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }
   const selectDefs = [
     { k: 'stage', all: 'All stages', opts: ['New', 'Reached out', 'Oriented', 'Active', 'Core Group'] },
-    { k: 'group', all: 'Any activity group', opts: opts.groups },
+    { k: 'atype', all: 'Any activity type', opts: opts.atypes },
+    { k: 'group', all: 'Any activity group (legacy)', opts: opts.groups },
     { k: 'tag', all: 'Any tag', opts: opts.tags },
     { k: 'lang', all: 'Any language', opts: opts.langs },
     { k: 'centre', all: 'All centres', opts: opts.centres },

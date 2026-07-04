@@ -45,7 +45,7 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
         supabase.from('people').select('center:centers!people_center_id_fkey(name)').eq('id', personId).maybeSingle(),
         supabase.from('nurturer_assignments').select('nurturer:nurturers!nurturer_assignments_nurturer_id_fkey(full_name)').eq('meditator_id', personId).limit(1),
         supabase.from('manual_tags').select('id, tag').eq('person_id', personId).order('created_at', { ascending: false }),
-        supabase.from('attendance').select('time_in, activities!attendance_activity_id_fkey(name, activity_type, activity_date)').eq('person_id', personId),
+        supabase.from('attendance').select('time_in, activity_type_id, activities!attendance_activity_id_fkey(name, activity_date), atype:activity_types(label)').eq('person_id', personId),
         supabase.from('satsang_attendance').select('satsang_name, language, medium, satsang_date').eq('person_id', personId).order('satsang_date', { ascending: false }),
         supabase.from('journeys').select('type, calls(reachability, sadhana_status, remarks, completed_at)').eq('person_id', personId),
       ])
@@ -56,11 +56,11 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
       setNurturer(nur.data?.[0]?.nurturer?.full_name || null)
       setManual(mt.data || [])
       const evs = (att.data || [])
-        .map((a) => ({ name: a.activities?.name, type: a.activities?.activity_type, date: a.activities?.activity_date || a.time_in }))
+        .map((a) => ({ name: a.activities?.name, type: a.atype?.label || null, date: a.activities?.activity_date || a.time_in }))
         .sort((x, y) => new Date(y.date || 0) - new Date(x.date || 0))
       setEvents(evs)
       const types = new Set()
-      for (const a of att.data || []) { const t = a.activities?.activity_type; if (t && t !== 'general') types.add(t) }
+      for (const a of att.data || []) { const t = a.atype?.label; if (t) types.add(t) }
       setDerived([...types])
       setSatsangs(sat.data || [])
       const cs = []
@@ -119,12 +119,12 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
   const wa = p && hasPhone ? `https://wa.me/91${waNum(p.phone)}` : undefined
   const progTags = p?.tags || []
 
-  // Seva-tag rule (STATED, not silent auto-tagging): attending 3+ events in the same
-  // seva area suggests that area's tag; a coordinator applies it explicitly below.
-  const SEVA_GROUP = { event_setup: 'Setup', satsang: 'Satsang Seva', ashram_visit: 'Ashram Seva' }
+  // Seva-tag rule (STATED, not silent auto-tagging): attending 3+ events of the SAME
+  // activity type (the shared activity_types vocabulary) suggests that type as a tag;
+  // a coordinator applies it explicitly below. No hardcoded map — the type IS the tag.
   const SEVA_THRESHOLD = 3
   const sevaCounts = {}
-  for (const e of events) { const g = SEVA_GROUP[e.type]; if (g) sevaCounts[g] = (sevaCounts[g] || 0) + 1 }
+  for (const e of events) { const g = e.type; if (g) sevaCounts[g] = (sevaCounts[g] || 0) + 1 }
   const sevaSuggestions = Object.entries(sevaCounts).filter(([label, n]) => n >= SEVA_THRESHOLD && !manual.some((m) => m.tag === label))
 
   return (

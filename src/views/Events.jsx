@@ -5,6 +5,7 @@ import { pill, initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import WalkinCapture from '../components/WalkinCapture'
 import { ensureVolunteer } from '../lib/volunteers'
+import { fetchActivityTypes } from '../lib/activityTypes'
 
 const STAGES = ['Thinking', 'Planning', 'Executing', 'Reminder', 'Done']
 const STAGE_PILL = {
@@ -24,19 +25,22 @@ function fmtDate(d) {
 export default function Events({ me, isCoordinator = false, onToast }) {
   const [acts, setActs] = useState(null)
   const [stages, setStages] = useState({})
+  const [types, setTypes] = useState([])
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
 
   async function load() {
     try {
-      const [a, s] = await Promise.all([
-        supabase.from('activities').select('id, name, center_id, activity_date, activity_type, is_open, description').order('activity_date', { ascending: false }).limit(200),
+      const [a, s, t] = await Promise.all([
+        supabase.from('activities').select('id, name, center_id, activity_date, activity_type, activity_type_id, is_open, description').order('activity_date', { ascending: false }).limit(200),
         supabase.from('event_stages').select('activity_id, stage'),
+        fetchActivityTypes().catch(() => []),
       ])
       if (a.error) throw a.error
       if (s.error) throw s.error
       setActs(a.data || [])
       setStages(Object.fromEntries((s.data || []).map((r) => [r.activity_id, r.stage])))
+      setTypes(t || [])
     } catch (e) {
       setErr(e.message || String(e))
     }
@@ -57,7 +61,7 @@ export default function Events({ me, isCoordinator = false, onToast }) {
   const loading = !acts && !err
   const open = openId ? (acts || []).find((a) => a.id === openId) : null
 
-  if (open) return <Detail activity={open} stage={stages[open.id] || 'Planning'} onStage={(st) => setStage(open.id, st)} onBack={() => setOpenId(null)} me={me} isCoordinator={isCoordinator} onToast={onToast} />
+  if (open) return <Detail activity={open} stage={stages[open.id] || 'Planning'} onStage={(st) => setStage(open.id, st)} onBack={() => setOpenId(null)} me={me} isCoordinator={isCoordinator} types={types} onActivityChanged={load} onToast={onToast} />
 
   return (
     <Pad>
@@ -95,7 +99,7 @@ export default function Events({ me, isCoordinator = false, onToast }) {
   )
 }
 
-function Detail({ activity, stage, onStage, onBack, me, isCoordinator, onToast }) {
+function Detail({ activity, stage, onStage, onBack, me, isCoordinator, types = [], onActivityChanged, onToast }) {
   const [attendees, setAttendees] = useState(null)
   const [todos, setTodos] = useState([])
   const [err, setErr] = useState(null)
@@ -134,7 +138,7 @@ function Detail({ activity, stage, onStage, onBack, me, isCoordinator, onToast }
   async function addAttendee(p) {
     setBusy(true)
     try {
-      const { error } = await supabase.from('attendance').insert({ activity_id: activity.id, person_id: p.id })
+      const { error } = await supabase.from('attendance').insert({ activity_id: activity.id, person_id: p.id, activity_type_id: activity.activity_type_id || null })
       if (error) throw error
       // Auto-promote: resolved event attendance confirms volunteer status.
       await ensureVolunteer(p.id, { source: 'event_attendance' })
@@ -179,7 +183,27 @@ function Detail({ activity, stage, onStage, onBack, me, isCoordinator, onToast }
 
       <div className="card" style={{ padding: 24, marginBottom: 20 }}>
         <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>{activity.name}</h2>
-        <div style={{ fontSize: 13, color: 'var(--muted)' }}>{fmtDate(activity.activity_date)} · {activity.center_id} · {activity.activity_type || 'general'}</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)' }}>{fmtDate(activity.activity_date)} · {activity.center_id}</div>
+
+        {/* activity type — the shared vocabulary; attendees inherit this id */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#5C5142' }}>Activity type</span>
+          <select
+            value={activity.activity_type_id || ''}
+            disabled={!isCoordinator}
+            onChange={async (e) => {
+              const id = e.target.value || null
+              const { error } = await supabase.from('activities').update({ activity_type_id: id }).eq('id', activity.id)
+              if (error) return onToast('Could not set type: ' + error.message)
+              onToast('Event type updated.')
+              onActivityChanged?.()
+            }}
+            style={{ fontSize: 13, padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)' }}
+          >
+            <option value="">— none —</option>
+            {types.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </select>
+        </div>
 
         {/* stage stepper */}
         <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>

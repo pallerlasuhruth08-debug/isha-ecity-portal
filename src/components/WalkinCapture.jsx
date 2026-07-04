@@ -70,6 +70,8 @@ export default function WalkinCapture({ activity, me, onClose, onToast, onChange
     captured_email2: emb || null,
     captured_by: me?.id || null,
     capture_source: 'walk_in',
+    // Inherit the event's type BY ID (never re-typed / stored as text).
+    activity_type_id: activity.activity_type_id || null,
   })
 
   async function markPresent(person) {
