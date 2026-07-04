@@ -1,0 +1,196 @@
+/* ============================================================
+   Volunteer Care Portal — design system
+   Ported from "Volunteer Care Portal.dc.html" (Claude Design)
+   ============================================================ */
+:root {
+  --bg: #f4ede1;
+  --panel: #fbf6ec;
+  --panel-2: #fff;
+  --ink: #2a2017;
+  --ink-soft: #5c5142;
+  --muted: #8c7e6b;
+  --muted-2: #a8997f;
+  --border: #e7dcc9;
+  --border-soft: #ece3d4;
+
+  /* sidebar */
+  --sb-bg: #241b14;
+  --sb-ink: #f5ebdb;
+  --sb-muted: #a89376;
+  --sb-section: #7c6a52;
+
+  /* brand accents */
+  --orange: #c2691f;
+  --orange-2: #e79248;
+  --orange-3: #b0541a;
+  --green: #2f6e5e;
+  --green-2: #3d6e60;
+  --amber: #c28a2a;
+  --rust: #9c4a14;
+  --leaf: #4e7c3f;
+  --red: #b5532f;
+
+  --shadow-lg: 0 18px 44px rgba(60, 40, 20, 0.18);
+  --shadow-md: 0 4px 12px rgba(176, 84, 26, 0.35);
+  --radius: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+body {
+  font-family: 'Hanken Grotesk', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+h1,
+h2,
+h3 {
+  font-family: 'Newsreader', serif;
+}
+button {
+  font-family: inherit;
+}
+
+/* scrollbars */
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-thumb {
+  background: #dcd0bc;
+  border-radius: 9px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #cbbca2;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollarea {
+  scrollbar-width: thin;
+  scrollbar-color: #dcd0bc transparent;
+}
+
+/* interactive helpers ported from the design */
+.navitem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 500;
+  margin-bottom: 3px;
+  background: transparent;
+  color: var(--sb-muted);
+  border: none;
+  width: 100%;
+  text-align: left;
+  transition: filter 0.12s ease;
+}
+.navitem:hover {
+  filter: brightness(1.12);
+}
+.navitem.active {
+  background: rgba(224, 138, 60, 0.18);
+  color: #f6ecdc;
+}
+.rowhover:hover {
+  background: #fbf6ec !important;
+}
+
+/* generic card / button primitives */
+.card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 11px;
+  padding: 10px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--ink);
+}
+.btn-primary {
+  background: linear-gradient(150deg, var(--orange-2), var(--orange-3));
+  color: #fff;
+  border: none;
+  box-shadow: var(--shadow-md);
+}
+.btn-ghost {
+  background: #fff;
+  color: var(--ink-soft);
+}
+.pill {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+/* toast */
+.toast {
+  position: fixed;
+  bottom: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #241b14;
+  color: #f6ecdc;
+  padding: 13px 20px;
+  border-radius: 13px;
+  font-size: 13.5px;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  z-index: 200;
+  max-width: 90vw;
+}
+
+/* responsive rules ported from the design's <style> block */
+@media (max-width: 1080px) {
+  .dash-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .dash-grid2 {
+    grid-template-columns: 1fr !important;
+  }
+}
+@media (max-width: 860px) {
+  .app-sidebar {
+    width: 72px !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+  .sidebar-label,
+  .sidebar-brand-text,
+  .sidebar-foot-text,
+  .sidebar-section-h {
+    display: none !important;
+  }
+  .topbar-search {
+    display: none !important;
+  }
+  .main-pad {
+    padding-left: 18px !important;
+    padding-right: 18px !important;
+  }
+}

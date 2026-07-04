@@ -1,0 +1,102 @@
+// Role model ported from the Volunteer Care Portal design (ROLES + tabs).
+// Each role controls which nav tabs are visible and the header scope label.
+export const ALL_TABS = [
+  'dashboard',
+  'volunteers',
+  'planning',
+  'events',
+  'nurturing',
+  'meditators',
+  'advance',
+  'interest',
+  'campaigns',
+]
+
+export const ROLES = {
+  centre: {
+    key: 'centre',
+    label: 'Centre Coordinator',
+    who: 'Meera M.',
+    scope: 'All sectors',
+    tabs: ALL_TABS,
+    full: true,
+  },
+  sector: {
+    key: 'sector',
+    label: 'Sector Coordinator',
+    who: 'Arvind R.',
+    scope: 'Sector 4 only',
+    tabs: ALL_TABS,
+    full: true,
+  },
+  nurturing: {
+    key: 'nurturing',
+    label: 'Nurturing Coordinator',
+    who: 'Ananya Rao',
+    scope: 'All sectors',
+    tabs: ALL_TABS,
+    full: true,
+  },
+  volunteer: {
+    key: 'volunteer',
+    label: 'Volunteer Coordinator',
+    who: 'Divya Menon',
+    scope: 'Sector 4',
+    tabs: ['dashboard', 'volunteers', 'planning', 'events', 'nurturing', 'interest', 'campaigns'],
+  },
+  meditator: {
+    key: 'meditator',
+    label: 'Meditator Coordinator',
+    who: 'Karthik V.',
+    scope: 'All meditators',
+    tabs: ['dashboard', 'meditators', 'interest', 'campaigns'],
+  },
+  advance: {
+    key: 'advance',
+    label: 'Advance Program Coordinator',
+    who: 'Shankar P.',
+    scope: 'Advance cohorts',
+    tabs: ['dashboard', 'advance', 'nurturing', 'interest', 'campaigns'],
+  },
+  caller: {
+    key: 'caller',
+    label: 'Caller',
+    who: 'Meena K',
+    scope: 'Assigned call lists',
+    tabs: ['campaigns'],
+  },
+}
+
+export const ROLE_ORDER = [
+  'centre',
+  'sector',
+  'nurturing',
+  'volunteer',
+  'meditator',
+  'advance',
+  'caller',
+]
+
+export const TAB_TITLES = {
+  dashboard: ['Dashboard', 'Volunteer & meditator care at a glance'],
+  volunteers: ['Volunteers', 'Organised by journey stage'],
+  planning: ['Planning', 'Calendar & the things that need to get done'],
+  events: ['Events', 'Run the day — attendance, walk-ins & to-dos'],
+  nurturing: ['Nurturing & Care', 'Volunteer core groups & nurturers'],
+  meditators: ['Meditators', 'Nurturing those who have completed programmes'],
+  advance: ['Advance Programmes', 'Bhava Spandana, Shoonya, Samyama & Guru Puja'],
+  interest: ['Interest Inbox', 'Post-programme & verbal interest — triage and route'],
+  campaigns: ['Campaigns', 'Insight-led outreach for volunteers & meditators'],
+}
+
+export const TAB_LABELS = {
+  dashboard: 'Dashboard',
+  volunteers: 'Volunteers',
+  planning: 'Planning',
+  events: 'Events',
+  nurturing: 'Nurturing & Care',
+  meditators: 'Meditators',
+  advance: 'Advance Programmes',
+  interest: 'Interest Inbox',
+  campaigns: 'Campaigns',
+}
