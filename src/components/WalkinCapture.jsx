@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { initials } from '../lib/ui'
+import { ensureVolunteer } from '../lib/volunteers'
 
 const last10 = (p) => String(p || '').replace(/\D/g, '').slice(-10)
 
@@ -27,6 +28,9 @@ export default function WalkinCapture({ activity, me, onClose, onToast, onChange
   const em = email.trim()
   const emb = email2.trim()
   const canSearch = !!(p10 || p10b || em || emb)
+  // An unresolved entry with no identifying detail is unresolvable — require a name
+  // plus at least one contact field so a human can match it later.
+  const canSaveUnresolved = !!(name.trim() && (p10 || em))
 
   function resetForm() {
     setPhone(''); setEmail(''); setName(''); setPhone2(''); setEmail2(''); setShowSecondary(false)
@@ -80,7 +84,9 @@ export default function WalkinCapture({ activity, me, onClose, onToast, onChange
       }
       const { error } = await supabase.from('attendance').insert({ activity_id: activity.id, person_id: person.id, ...capturedFields() })
       if (error) throw error
-      onToast?.(`${person.full_name} marked present.`)
+      // Auto-promote: resolved event attendance confirms volunteer status.
+      await ensureVolunteer(person.id, { source: 'event_attendance' })
+      onToast?.(`${person.full_name} marked present — confirmed as volunteer.`)
       setRecent((r) => [{ name: person.full_name, kind: 'matched' }, ...r].slice(0, 6))
       onChanged?.()
       resetForm()
@@ -92,6 +98,10 @@ export default function WalkinCapture({ activity, me, onClose, onToast, onChange
   }
 
   async function saveUnresolved() {
+    if (!canSaveUnresolved) {
+      onToast?.('Add a name and at least one phone or email so this can be resolved later.')
+      return
+    }
     setBusy(true)
     try {
       // Duplicate unresolved for this event (same phone or email) -> warn + skip.
@@ -177,7 +187,7 @@ export default function WalkinCapture({ activity, me, onClose, onToast, onChange
                 <button className="btn btn-primary" disabled={busy} onClick={() => markPresent(p)} style={{ padding: '8px 12px', fontSize: 13 }}>Present</button>
               </div>
             ))}
-            <button onClick={saveUnresolved} disabled={busy} className="btn btn-ghost" style={{ fontSize: 12.5, padding: '8px 0', color: 'var(--muted)' }}>None of these — save as unresolved</button>
+            <button onClick={saveUnresolved} disabled={busy || !canSaveUnresolved} title={canSaveUnresolved ? '' : 'Needs a name + one contact'} className="btn btn-ghost" style={{ fontSize: 12.5, padding: '8px 0', color: 'var(--muted)', opacity: canSaveUnresolved ? 1 : 0.5 }}>None of these — save as unresolved</button>
           </div>
         )}
 
@@ -187,7 +197,8 @@ export default function WalkinCapture({ activity, me, onClose, onToast, onChange
             <div style={{ fontSize: 13, color: 'var(--ink-soft)', lineHeight: 1.5, marginBottom: 14 }}>
               Ask the volunteer to wait and <strong>search Ishangam manually</strong> in its own screen. If you still can’t find them, save the details — they’ll wait in the unresolved queue for a human to match or promote.
             </div>
-            <button className="btn btn-primary" disabled={busy} onClick={saveUnresolved} style={{ width: '100%', padding: '12px', fontSize: 14 }}>Save as unresolved</button>
+            <button className="btn btn-primary" disabled={busy || !canSaveUnresolved} onClick={saveUnresolved} style={{ width: '100%', padding: '12px', fontSize: 14, opacity: canSaveUnresolved ? 1 : 0.6 }}>Save as unresolved</button>
+            {!canSaveUnresolved && <div style={{ fontSize: 11.5, color: '#9C4A14', marginTop: 8, textAlign: 'center' }}>Enter a name and at least one phone/email to save.</div>}
           </div>
         )}
 

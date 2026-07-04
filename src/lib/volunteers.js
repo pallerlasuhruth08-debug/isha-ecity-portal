@@ -1,0 +1,17 @@
+import { supabase } from './supabase'
+
+// The canonical "make this person a volunteer" operation. The Volunteers list is
+// driven by the presence of a volunteer_profiles row (inner-joined to people), so a
+// person only appears there once this runs — setting people.is_volunteer alone is NOT
+// enough. Auto-promote (confirmed): any resolved event attendance grants volunteer
+// status by ensuring BOTH the flag and the profile row.
+// ignoreDuplicates: never downgrade an existing volunteer's profile/status.
+export async function ensureVolunteer(personId, { source = 'event_attendance' } = {}) {
+  if (!personId) return
+  const flag = await supabase.from('people').update({ is_volunteer: true }).eq('id', personId)
+  if (flag.error) throw flag.error
+  const prof = await supabase
+    .from('volunteer_profiles')
+    .upsert({ person_id: personId, status: 'active', interest_source: source }, { onConflict: 'person_id', ignoreDuplicates: true })
+  if (prof.error) throw prof.error
+}

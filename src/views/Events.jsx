@@ -4,6 +4,7 @@ import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import WalkinCapture from '../components/WalkinCapture'
+import { ensureVolunteer } from '../lib/volunteers'
 
 const STAGES = ['Thinking', 'Planning', 'Executing', 'Reminder', 'Done']
 const STAGE_PILL = {
@@ -135,9 +136,11 @@ function Detail({ activity, stage, onStage, onBack, me, isCoordinator, onToast }
     try {
       const { error } = await supabase.from('attendance').insert({ activity_id: activity.id, person_id: p.id })
       if (error) throw error
+      // Auto-promote: resolved event attendance confirms volunteer status.
+      await ensureVolunteer(p.id, { source: 'event_attendance' })
       setQ('')
       setResults([])
-      onToast(`${p.full_name} marked present.`)
+      onToast(`${p.full_name} marked present — confirmed as volunteer.`)
       load()
     } catch (e) {
       onToast('Could not mark present: ' + (e.message || e))

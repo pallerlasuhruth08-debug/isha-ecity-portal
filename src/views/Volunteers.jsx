@@ -145,16 +145,16 @@ export default function Volunteers({ onToast }) {
       if (Array.isArray(progIds)) q = q.in('person_id', progIds.length ? progIds : [NIL])
       if (Array.isArray(tagIds)) q = q.in('person_id', tagIds.length ? tagIds : [NIL])
       if (fil.stage && STAGE_TO_STATUS[fil.stage]) q = q.eq('status', STAGE_TO_STATUS[fil.stage])
-      if (fil.stage === 'Core Group') q = q.contains('people.tags', ['core_team'])
+      if (fil.stage === 'Core Group') q = q.contains('tags', ['core_team'])
       if (fil.lang) q = q.eq('languages', fil.lang)
-      if (fil.centre) q = q.eq('people.center_id', fil.centre)
-      if (fil.ie) q = q.gte('people.ie_date', `${fil.ie}-01-01`).lte('people.ie_date', `${fil.ie}-12-31`)
-      if (fil.bsp === 'done') q = q.not('people.bsp_date', 'is', null)
-      if (fil.bsp === 'no') q = q.is('people.bsp_date', null)
-      if (fil.last === '30') q = q.gte('people.last_active_date', daysAgoISO(30))
-      if (fil.last === '90') q = q.gte('people.last_active_date', daysAgoISO(90))
-      if (fil.last === 'quiet') q = q.lt('people.last_active_date', daysAgoISO(90))
-      if (debounced) q = q.or(`full_name.ilike.%${debounced}%,pincode.ilike.%${debounced}%`, { referencedTable: 'people' })
+      if (fil.centre) q = q.eq('center_id', fil.centre)
+      if (fil.ie) q = q.gte('ie_date', `${fil.ie}-01-01`).lte('ie_date', `${fil.ie}-12-31`)
+      if (fil.bsp === 'done') q = q.not('bsp_date', 'is', null)
+      if (fil.bsp === 'no') q = q.is('bsp_date', null)
+      if (fil.last === '30') q = q.gte('last_active_date', daysAgoISO(30))
+      if (fil.last === '90') q = q.gte('last_active_date', daysAgoISO(90))
+      if (fil.last === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
+      if (debounced) q = q.or(`full_name.ilike.%${debounced}%,pincode.ilike.%${debounced}%`)
       return q
     },
     [fil, debounced, progIds, tagIds],
@@ -165,7 +165,7 @@ export default function Volunteers({ onToast }) {
     let from = 0
     const CHUNK = 1000
     for (let g = 0; g < 50; g++) {
-      let q = applyFilters(supabase.from('volunteer_profiles').select('person_id, people!inner(id)'))
+      let q = applyFilters(supabase.from('volunteer_list').select('person_id'))
       q = q.order('person_id', { ascending: true }).range(from, from + CHUNK - 1)
       const { data, error } = await q
       if (error) throw error
@@ -183,25 +183,29 @@ export default function Volunteers({ onToast }) {
     if ((fil.group && !Array.isArray(progIds)) || (fil.tag && !Array.isArray(tagIds))) return
     try {
       let q = applyFilters(
-        supabase.from('volunteer_profiles').select('person_id, status, languages, people!inner(id, full_name, phone, pincode, area, center_id, ie_date, bsp_date, last_active_date, tags)', { count: 'exact' }),
+        supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, last_active_date, tags, last_activity_at', { count: 'exact' }),
       )
-      q = q.order('person_id', { ascending: true }).range(page * pageSize, page * pageSize + pageSize - 1)
+      // Query-level sort over the FULL dataset: most-recent activity first (nulls last),
+      // person_id as a stable tiebreak — so page 1 is globally most-recent.
+      q = q
+        .order('last_activity_at', { ascending: false, nullsFirst: false })
+        .order('person_id', { ascending: true })
+        .range(page * pageSize, page * pageSize + pageSize - 1)
       const { data, count, error } = await q
       if (error) throw error
 
       const mapped = (data || [])
-        .filter((r) => r.people)
+        .filter((r) => r.id)
         .map((r) => {
-          const p = r.people
-          const isCore = (p.tags || []).includes('core_team')
+          const isCore = (r.tags || []).includes('core_team')
           return {
-            id: p.id,
-            name: p.full_name || 'Unknown',
-            phone: p.phone || '',
+            id: r.id,
+            name: r.full_name || 'Unknown',
+            phone: r.phone || '',
             stage: isCore ? 'Core Group' : STATUS_TO_STAGE[r.status] || 'New',
-            programs: [p.ie_date && 'IE', p.bsp_date && 'BSP'].filter(Boolean).join(' · ') || '—',
-            where: [p.area, p.pincode].filter(Boolean).join(' · ') || p.center_id || '—',
-            last: lastActiveLabel(p.last_active_date),
+            programs: [r.ie_date && 'IE', r.bsp_date && 'BSP'].filter(Boolean).join(' · ') || '—',
+            where: [r.area, r.pincode].filter(Boolean).join(' · ') || r.center_id || '—',
+            last: lastActiveLabel(r.last_activity_at),
             attended: 0,
             derivedTags: [],
             manualTags: [],
