@@ -129,7 +129,7 @@ export function PagerBar({ page, pageCount, total, pageSize, onPage, onPageSize 
 }
 
 // Selection banner shared by campaign-capable tables.
-export function SelectionBar({ isAllMode, count, onCreate, onClear }) {
+export function SelectionBar({ isAllMode, count, onCreate, onAssign, onClear }) {
   if (count <= 0) return null
   return (
     <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', marginBottom: 14, background: '#FBF1E6', borderColor: '#EBD9C2', flexWrap: 'wrap' }}>
@@ -137,7 +137,8 @@ export function SelectionBar({ isAllMode, count, onCreate, onClear }) {
         {isAllMode ? `All ${count} matching this filter selected` : `${count} selected`}
       </span>
       <div style={{ flex: 1 }} />
-      <button className="btn btn-primary" onClick={onCreate}>Create campaign</button>
+      {onAssign && <button className="btn btn-ghost" onClick={onAssign}>Assign to nurturer</button>}
+      {onCreate && <button className="btn btn-primary" onClick={onCreate}>Create campaign</button>}
       <button className="btn btn-ghost" onClick={onClear}>Clear selection</button>
     </div>
   )

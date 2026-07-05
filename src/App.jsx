@@ -67,7 +67,7 @@ function Portal({ profile, email }) {
       case 'dashboard':
         return <Dashboard onToast={showToast} onNavigate={setView} />
       case 'volunteers':
-        return <Volunteers onToast={showToast} onNavigate={setView} />
+        return <Volunteers me={profile} onToast={showToast} onNavigate={setView} />
       case 'campaigns':
         // Caller persona works through their own assigned call lists. The coordinator
         // view exposes dial/log/edit controls only when the REAL role is coordinator.
@@ -77,7 +77,7 @@ function Portal({ profile, email }) {
           <Campaigns me={profile} isCoordinator={isCoordinator} onToast={showToast} onNavigate={setView} />
         )
       case 'meditators':
-        return <Meditators onToast={showToast} />
+        return <Meditators me={profile} onToast={showToast} />
       case 'interest':
         return <Interest onToast={showToast} />
       case 'advance':

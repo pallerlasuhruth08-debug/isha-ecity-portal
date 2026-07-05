@@ -6,6 +6,7 @@ import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerBar, SelectionBar } from
 import { useTableSelection } from '../lib/useTableSelection'
 import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
+import AssignNurturerDialog from '../components/AssignNurturerDialog'
 
 const PROGRAMS = [
   { key: 'all', label: 'All programmes' },
@@ -34,7 +35,7 @@ function lastActive(d) {
   return `Quiet ${Math.round(days / 30)}mo`
 }
 
-export default function Meditators({ onToast }) {
+export default function Meditators({ me, onToast }) {
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -46,8 +47,12 @@ export default function Meditators({ onToast }) {
   const [debounced, setDebounced] = useState('')
   const [prog, setProg] = useState('all')
   const [recency, setRecency] = useState('any')
+  const [needsNurt, setNeedsNurt] = useState(false)
+  const [coveredIds, setCoveredIds] = useState(null) // person ids WITH an active nurturer (to exclude)
   const sel = useTableSelection()
   const [showForm, setShowForm] = useState(false)
+  const [showAssign, setShowAssign] = useState(false)
+  const [assignIds, setAssignIds] = useState([])
   const [formIds, setFormIds] = useState([])
   const [resolving, setResolving] = useState(false)
   const [profileId, setProfileId] = useState(null)
@@ -61,7 +66,18 @@ export default function Meditators({ onToast }) {
     setPage(0)
     sel.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounced, prog, recency])
+  }, [debounced, prog, recency, needsNurt])
+
+  // 'Needs a nurturer' -> exclude people who already have an active nurturer.
+  useEffect(() => {
+    if (!needsNurt) { setCoveredIds(null); return }
+    let alive = true
+    setCoveredIds('loading')
+    supabase.from('nurturing_assignments').select('cared_person_id').eq('active', true).not('nurturer_person_id', 'is', null).then(({ data }) => {
+      if (alive) setCoveredIds([...new Set((data || []).map((r) => r.cared_person_id))])
+    })
+    return () => { alive = false }
+  }, [needsNurt])
   useEffect(() => {
     setPage(0)
   }, [pageSize])
@@ -74,10 +90,11 @@ export default function Meditators({ onToast }) {
       if (recency === '30') q = q.gte('last_active_date', daysAgoISO(30))
       if (recency === '90') q = q.gte('last_active_date', daysAgoISO(90))
       if (recency === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
+      if (needsNurt && Array.isArray(coveredIds) && coveredIds.length) q = q.not('id', 'in', `(${coveredIds.join(',')})`)
       if (debounced) q = q.or(`full_name.ilike.%${debounced}%,pincode.ilike.%${debounced}%`)
       return q
     },
-    [prog, recency, debounced],
+    [prog, recency, debounced, needsNurt, coveredIds],
   )
 
   const fetchAllIds = useCallback(async () => {
@@ -98,6 +115,7 @@ export default function Meditators({ onToast }) {
   }, [applyFilters])
 
   const loadPage = useCallback(async () => {
+    if (needsNurt && !Array.isArray(coveredIds)) return // wait for the covered set
     setLoading(true)
     setErr(null)
     try {
@@ -115,7 +133,7 @@ export default function Meditators({ onToast }) {
     } finally {
       setLoading(false)
     }
-  }, [applyFilters, page, pageSize])
+  }, [applyFilters, page, pageSize, needsNurt, coveredIds])
 
   useEffect(() => {
     loadPage()
@@ -131,6 +149,19 @@ export default function Meditators({ onToast }) {
     try {
       setFormIds(await sel.resolveIds(fetchAllIds))
       setShowForm(true)
+    } catch (e) {
+      onToast('Could not resolve selection: ' + (e.message || e))
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  async function openAssign() {
+    if (sel.count(total) === 0) return
+    setResolving(true)
+    try {
+      setAssignIds(await sel.resolveIds(fetchAllIds))
+      setShowAssign(true)
     } catch (e) {
       onToast('Could not resolve selection: ' + (e.message || e))
     } finally {
@@ -167,9 +198,13 @@ export default function Meditators({ onToast }) {
         <select value={recency} onChange={(e) => setRecency(e.target.value)} style={selStyle}>
           {RECENCY.map((r) => (<option key={r.key} value={r.key}>{r.label}</option>))}
         </select>
+        <select value={needsNurt ? 'needs' : ''} onChange={(e) => setNeedsNurt(e.target.value === 'needs')} style={selStyle}>
+          <option value="">Nurturer · any</option>
+          <option value="needs">Needs a nurturer</option>
+        </select>
       </div>
 
-      <SelectionBar isAllMode={sel.isAllMode} count={selCount} onCreate={openCampaign} onClear={sel.clear} />
+      <SelectionBar isAllMode={sel.isAllMode} count={selCount} onCreate={openCampaign} onAssign={openAssign} onClear={sel.clear} />
 
       <div className="card" style={{ overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, alignItems: 'center' }}>
@@ -214,6 +249,9 @@ export default function Meditators({ onToast }) {
           onToast={onToast}
           onCreated={() => sel.clear()}
         />
+      )}
+      {showAssign && (
+        <AssignNurturerDialog personIds={assignIds} label="meditators" me={me} onClose={() => setShowAssign(false)} onToast={onToast} onDone={() => { setShowAssign(false); sel.clear(); loadPage() }} />
       )}
       {profileId && <PersonProfile personId={profileId} onClose={() => setProfileId(null)} onToast={onToast} onChanged={loadPage} />}
     </Pad>

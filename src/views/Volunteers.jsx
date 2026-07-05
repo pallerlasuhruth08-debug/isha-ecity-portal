@@ -6,6 +6,7 @@ import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerBar, SelectionBar } from
 import { useTableSelection } from '../lib/useTableSelection'
 import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
+import AssignNurturerDialog from '../components/AssignNurturerDialog'
 import { fetchActivityTypes } from '../lib/activityTypes'
 
 const STAGE_TO_STATUS = { New: 'new', 'Reached out': 'contacted', Oriented: 'matched', Active: 'active' }
@@ -24,7 +25,7 @@ const todayISO = () => new Date().toISOString().slice(0, 10)
 const uniq = (a) => [...new Set(a.filter(Boolean))]
 const NIL = '00000000-0000-0000-0000-000000000000'
 
-export default function Volunteers({ onToast }) {
+export default function Volunteers({ me, onToast }) {
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -34,15 +35,18 @@ export default function Volunteers({ onToast }) {
 
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
-  const [fil, setFil] = useState({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', group: '', tag: '', atype: '' })
+  const [fil, setFil] = useState({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', group: '', tag: '', atype: '', nurt: '' })
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [progIds, setProgIds] = useState(null) // group filter -> person ids ('loading'|array|null)
   const [tagIds, setTagIds] = useState(null) // manual-tag filter -> person ids
   const [atypeIds, setAtypeIds] = useState(null) // activity-type filter -> person ids who attended that type
+  const [coveredIds, setCoveredIds] = useState(null) // 'needs nurturer' -> person ids WITH an active nurturer (to exclude)
 
   const sel = useTableSelection()
   const [showForm, setShowForm] = useState(false)
+  const [showAssign, setShowAssign] = useState(false)
+  const [assignIds, setAssignIds] = useState([])
   const [formIds, setFormIds] = useState([])
   const [resolving, setResolving] = useState(false)
   const [profileId, setProfileId] = useState(null)
@@ -165,11 +169,24 @@ export default function Volunteers({ onToast }) {
     }
   }, [fil.atype])
 
+  // 'Needs a nurturer' (unassigned OR orphaned) = people NOT in the set with an active
+  // nurturer. Load the covered set (active assignment WITH a nurturer) to exclude.
+  useEffect(() => {
+    if (fil.nurt !== 'needs') { setCoveredIds(null); return }
+    let alive = true
+    setCoveredIds('loading')
+    supabase.from('nurturing_assignments').select('cared_person_id').eq('active', true).not('nurturer_person_id', 'is', null).then(({ data }) => {
+      if (alive) setCoveredIds([...new Set((data || []).map((r) => r.cared_person_id))])
+    })
+    return () => { alive = false }
+  }, [fil.nurt])
+
   const applyFilters = useCallback(
     (q) => {
       if (Array.isArray(progIds)) q = q.in('person_id', progIds.length ? progIds : [NIL])
       if (Array.isArray(tagIds)) q = q.in('person_id', tagIds.length ? tagIds : [NIL])
       if (Array.isArray(atypeIds)) q = q.in('person_id', atypeIds.length ? atypeIds : [NIL])
+      if (fil.nurt === 'needs' && Array.isArray(coveredIds) && coveredIds.length) q = q.not('person_id', 'in', `(${coveredIds.join(',')})`)
       if (fil.stage && STAGE_TO_STATUS[fil.stage]) q = q.eq('status', STAGE_TO_STATUS[fil.stage])
       if (fil.stage === 'Core Group') q = q.contains('tags', ['core_team'])
       if (fil.lang) q = q.eq('languages', fil.lang)
@@ -183,7 +200,7 @@ export default function Volunteers({ onToast }) {
       if (debounced) q = q.or(`full_name.ilike.%${debounced}%,pincode.ilike.%${debounced}%`)
       return q
     },
-    [fil, debounced, progIds, tagIds, atypeIds],
+    [fil, debounced, progIds, tagIds, atypeIds, coveredIds],
   )
 
   const fetchAllIds = useCallback(async () => {
@@ -206,7 +223,7 @@ export default function Volunteers({ onToast }) {
   const loadPage = useCallback(async () => {
     setLoading(true)
     setErr(null)
-    if ((fil.group && !Array.isArray(progIds)) || (fil.tag && !Array.isArray(tagIds)) || (fil.atype && !Array.isArray(atypeIds))) return
+    if ((fil.group && !Array.isArray(progIds)) || (fil.tag && !Array.isArray(tagIds)) || (fil.atype && !Array.isArray(atypeIds)) || (fil.nurt === 'needs' && !Array.isArray(coveredIds))) return
     try {
       let q = applyFilters(
         supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, last_active_date, tags, last_activity_at', { count: 'exact' }),
@@ -268,7 +285,7 @@ export default function Volunteers({ onToast }) {
     } finally {
       setLoading(false)
     }
-  }, [applyFilters, page, pageSize, fil.group, fil.tag, fil.atype, progIds, tagIds, atypeIds])
+  }, [applyFilters, page, pageSize, fil.group, fil.tag, fil.atype, fil.nurt, progIds, tagIds, atypeIds, coveredIds])
 
   useEffect(() => {
     loadPage()
@@ -280,6 +297,19 @@ export default function Volunteers({ onToast }) {
     try {
       setFormIds(await sel.resolveIds(fetchAllIds))
       setShowForm(true)
+    } catch (e) {
+      onToast('Could not resolve selection: ' + (e.message || e))
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  async function openAssign() {
+    if (sel.count(total) === 0) return
+    setResolving(true)
+    try {
+      setAssignIds(await sel.resolveIds(fetchAllIds))
+      setShowAssign(true)
     } catch (e) {
       onToast('Could not resolve selection: ' + (e.message || e))
     } finally {
@@ -301,7 +331,7 @@ export default function Volunteers({ onToast }) {
 
   const setF = (k) => (e) => setFil((f) => ({ ...f, [k]: e.target.value }))
   const clearFil = () => {
-    setFil({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', group: '', tag: '', atype: '' })
+    setFil({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', group: '', tag: '', atype: '', nurt: '' })
     setSearch(''); setDateFrom(''); setDateTo('')
   }
   const filterActive = !!(debounced || Object.values(fil).some(Boolean) || dateFrom || dateTo)
@@ -326,6 +356,7 @@ export default function Volunteers({ onToast }) {
     { k: 'ie', all: 'Any IE year', opts: opts.ieYears },
     { k: 'bsp', all: 'BSP · any', opts: [{ v: 'done', label: 'BSP completed' }, { v: 'no', label: 'No BSP yet' }] },
     { k: 'last', all: 'Active · any time', opts: [{ v: '30', label: 'Active · 30 days' }, { v: '90', label: 'Active · 90 days' }, { v: 'quiet', label: 'Quiet · 90+ days' }] },
+    { k: 'nurt', all: 'Nurturer · any', opts: [{ v: 'needs', label: 'Needs a nurturer' }] },
   ]
   const grid = '34px 2.3fr 1.1fr 1fr 1.3fr 0.9fr'
 
@@ -372,7 +403,7 @@ export default function Volunteers({ onToast }) {
         </div>
       )}
 
-      <SelectionBar isAllMode={sel.isAllMode} count={selCount} onCreate={openCampaign} onClear={sel.clear} />
+      <SelectionBar isAllMode={sel.isAllMode} count={selCount} onCreate={openCampaign} onAssign={openAssign} onClear={sel.clear} />
 
       <div className="card" style={{ overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, background: 'var(--panel)', alignItems: 'center' }}>
@@ -422,6 +453,9 @@ export default function Volunteers({ onToast }) {
 
       {showForm && (
         <CampaignForm audience="volunteer" personIds={formIds} segmentLabel={formIds.length ? `${formIds.length} selected volunteers` : filterActive ? 'Filtered volunteers' : ''} onClose={() => setShowForm(false)} onToast={onToast} onCreated={() => sel.clear()} />
+      )}
+      {showAssign && (
+        <AssignNurturerDialog personIds={assignIds} label="volunteers" me={me} onClose={() => setShowAssign(false)} onToast={onToast} onDone={() => { setShowAssign(false); sel.clear(); loadPage() }} />
       )}
       {profileId && (
         <PersonProfile personId={profileId} onClose={() => setProfileId(null)} onToast={onToast} onChanged={() => { loadPage(); loadTagOptions() }} />
