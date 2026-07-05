@@ -83,7 +83,7 @@ function Portal({ profile, email }) {
       case 'advance':
         return <Advance onToast={showToast} />
       case 'nurturing':
-        return <Nurturing onToast={showToast} />
+        return <Nurturing me={profile} isCoordinator={isCoordinator} onToast={showToast} />
       case 'events':
         return <Events me={profile} isCoordinator={isCoordinator} onToast={showToast} />
       case 'planning':
