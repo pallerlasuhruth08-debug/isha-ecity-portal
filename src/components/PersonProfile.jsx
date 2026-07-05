@@ -27,7 +27,6 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
   const [derived, setDerived] = useState([])
   const [manual, setManual] = useState([])
   const [events, setEvents] = useState([])
-  const [satsangs, setSatsangs] = useState([])
   const [calls, setCalls] = useState([])
   const [err, setErr] = useState(null)
   const [newTag, setNewTag] = useState('')
@@ -39,14 +38,13 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
 
   const load = useCallback(async () => {
     try {
-      const [pr, vpr, ctr, nur, mt, att, sat, jn] = await Promise.all([
+      const [pr, vpr, ctr, nur, mt, att, jn] = await Promise.all([
         supabase.from('people').select('*').eq('id', personId).single(),
         supabase.from('volunteer_profiles').select('*').eq('person_id', personId).maybeSingle(),
         supabase.from('people').select('center:centers!people_center_id_fkey(name)').eq('id', personId).maybeSingle(),
         supabase.from('nurturer_assignments').select('nurturer:nurturers!nurturer_assignments_nurturer_id_fkey(full_name)').eq('meditator_id', personId).limit(1),
         supabase.from('manual_tags').select('id, tag').eq('person_id', personId).order('created_at', { ascending: false }),
-        supabase.from('attendance').select('time_in, activity_type_id, activities!attendance_activity_id_fkey(name, activity_date), atype:activity_types(label)').eq('person_id', personId),
-        supabase.from('satsang_attendance').select('satsang_name, language, medium, satsang_date').eq('person_id', personId).order('satsang_date', { ascending: false }),
+        supabase.from('attendance').select('time_in, activity_type_id, activities!attendance_activity_id_fkey(name, activity_date), atype:activity_types(label, kind)').eq('person_id', personId),
         supabase.from('journeys').select('type, calls(reachability, sadhana_status, remarks, completed_at)').eq('person_id', personId),
       ])
       if (pr.error) throw pr.error
@@ -56,13 +54,12 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
       setNurturer(nur.data?.[0]?.nurturer?.full_name || null)
       setManual(mt.data || [])
       const evs = (att.data || [])
-        .map((a) => ({ name: a.activities?.name, type: a.atype?.label || null, date: a.activities?.activity_date || a.time_in }))
+        .map((a) => ({ name: a.activities?.name, type: a.atype?.label || null, kind: a.atype?.kind || null, date: a.activities?.activity_date || a.time_in }))
         .sort((x, y) => new Date(y.date || 0) - new Date(x.date || 0))
       setEvents(evs)
       const types = new Set()
       for (const a of att.data || []) { const t = a.atype?.label; if (t) types.add(t) }
       setDerived([...types])
-      setSatsangs(sat.data || [])
       const cs = []
       for (const j of jn.data || []) for (const c of j.calls || []) if (c.completed_at || c.remarks || c.reachability) cs.push(c)
       cs.sort((a, b) => new Date(b.completed_at || 0) - new Date(a.completed_at || 0))
@@ -219,29 +216,15 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
             </div>
           </Section>
 
-          {/* Satsangs Attended */}
-          <Section title="Satsangs Attended" count={satsangs.length}>
-            {satsangs.length === 0
-              ? <Empty label="No satsang attendance synced yet." />
-              : (
-                <div className="card" style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                    <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Satsang</th><th style={th}>Language</th><th style={th}>Medium</th><th style={th}>Date</th></tr></thead>
-                    <tbody>{satsangs.map((s, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{s.satsang_name || '—'}</td><td style={td}>{s.language || '—'}</td><td style={td}>{s.medium || '—'}</td><td style={td}>{fmt(s.satsang_date) || '—'}</td></tr>))}</tbody>
-                  </table>
-                </div>
-              )}
-          </Section>
-
-          {/* Event Attendance */}
-          <Section title="Event Attendance" count={events.length}>
+          {/* Attendance — one typed timeline (event, satsang, meditator & volunteer) */}
+          <Section title="Attendance" count={events.length}>
             {events.length === 0
-              ? <Empty label="No event attendance recorded yet." />
+              ? <Empty label="No attendance recorded yet." />
               : (
                 <div className="card" style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                    <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Event</th><th style={th}>Type</th><th style={th}>Date</th></tr></thead>
-                    <tbody>{events.map((e, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{e.name || '—'}</td><td style={td}>{e.type || '—'}</td><td style={td}>{fmt(e.date) || '—'}</td></tr>))}</tbody>
+                    <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Event</th><th style={th}>Type</th><th style={th}>Kind</th><th style={th}>Date</th></tr></thead>
+                    <tbody>{events.map((e, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{e.name || '—'}</td><td style={td}>{e.type || '—'}</td><td style={td}>{e.kind || '—'}</td><td style={td}>{fmt(e.date) || '—'}</td></tr>))}</tbody>
                   </table>
                 </div>
               )}

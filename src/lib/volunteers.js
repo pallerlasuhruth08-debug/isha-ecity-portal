@@ -15,3 +15,18 @@ export async function ensureVolunteer(personId, { source = 'event_attendance' } 
     .upsert({ person_id: personId, status: 'active', interest_source: source }, { onConflict: 'person_id', ignoreDuplicates: true })
   if (prof.error) throw prof.error
 }
+
+// Meditator membership is just the flag (hybrid model: flag OR typed attendance).
+export async function ensureMeditator(personId) {
+  if (!personId) return
+  const { error } = await supabase.from('people').update({ is_meditator: true }).eq('id', personId)
+  if (error) throw error
+}
+
+// Grant the participation that matches the attendance TYPE's kind: a meditator-kind
+// attendance makes the person a meditator; a volunteer-kind attendance makes them a
+// volunteer. This keeps the flag-driven screens in sync with typed attendance.
+export async function ensureParticipation(personId, kind, { source = 'event_attendance' } = {}) {
+  if (kind === 'meditator') return ensureMeditator(personId)
+  return ensureVolunteer(personId, { source })
+}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { initials } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
-import { ensureVolunteer } from '../lib/volunteers'
+import { ensureParticipation } from '../lib/volunteers'
 
 const last10 = (p) => String(p || '').replace(/\D/g, '').slice(-10)
 const fmtWhen = (iso) => {
@@ -27,7 +27,7 @@ export default function Unresolved({ me, isCoordinator = false, onToast }) {
     try {
       const { data, error } = await supabase
         .from('attendance')
-        .select('id, activity_id, captured_name, captured_phone, captured_email, captured_phone2, captured_email2, time_in, capture_source, activity:activities!attendance_activity_id_fkey(name, activity_date, center_id)')
+        .select('id, activity_id, activity_type_id, captured_name, captured_phone, captured_email, captured_phone2, captured_email2, time_in, capture_source, activity:activities!attendance_activity_id_fkey(name, activity_date, center_id), atype:activity_types(kind, label)')
         .is('person_id', null)
         .order('time_in', { ascending: false })
         .limit(500)
@@ -228,9 +228,10 @@ function ResolveDialog({ entry, me, onClose, onResolved, onToast }) {
       }
       const { error } = await supabase.from('attendance').update({ person_id: personId }).eq('id', entry.id)
       if (error) throw error
-      // Auto-promote: resolved event attendance confirms volunteer status.
-      await ensureVolunteer(personId, { source: 'event_attendance' })
-      onToast?.(`Attendance linked to ${personName} — confirmed as volunteer.`)
+      // Grant the participation matching the attendance TYPE's kind.
+      const kind = entry.atype?.kind || 'volunteer'
+      await ensureParticipation(personId, kind, { source: 'event_attendance' })
+      onToast?.(`Attendance linked to ${personName} — confirmed as ${kind}.`)
       onResolved?.()
     } catch (e) {
       onToast?.('Could not link: ' + (e.message || e))
@@ -249,7 +250,6 @@ function ResolveDialog({ entry, me, onClose, onResolved, onToast }) {
           phone: last10(entry.captured_phone) || null,
           email: entry.captured_email || null,
           center_id: entry.activity?.center_id || 'unassigned',
-          is_volunteer: true,
           source: 'event_walkin',
         })
         .select('id, full_name')
@@ -257,9 +257,10 @@ function ResolveDialog({ entry, me, onClose, onResolved, onToast }) {
       if (e1) throw e1
       const { error: e2 } = await supabase.from('attendance').update({ person_id: person.id }).eq('id', entry.id)
       if (e2) throw e2
-      // Grant volunteer status (create the volunteer_profiles row that the list needs).
-      await ensureVolunteer(person.id, { source: 'event_walkin' })
-      onToast?.(`Created provisional volunteer ${person.full_name} and linked the attendance.`)
+      // Grant the participation matching the attendance TYPE's kind (meditator or volunteer).
+      const kind = entry.atype?.kind || 'volunteer'
+      await ensureParticipation(person.id, kind, { source: 'event_walkin' })
+      onToast?.(`Created provisional ${kind} ${person.full_name} and linked the attendance.`)
       onResolved?.()
     } catch (e) {
       onToast?.('Could not promote: ' + (e.message || e))

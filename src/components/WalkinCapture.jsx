@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { initials } from '../lib/ui'
-import { ensureVolunteer } from '../lib/volunteers'
+import { ensureParticipation } from '../lib/volunteers'
+import { fetchActivityTypes } from '../lib/activityTypes'
 
 const last10 = (p) => String(p || '').replace(/\D/g, '').slice(-10)
 
@@ -22,6 +23,16 @@ export default function WalkinCapture({ activity, me, onClose, onToast, onChange
   const [busy, setBusy] = useState(false)
   const [recent, setRecent] = useState([]) // {name, kind} captured this session
   const phoneRef = useRef(null)
+
+  // Selectable attendance type (defaults to the event's type). Capture a walk-in as a
+  // volunteer OR meditator type regardless of the event default.
+  const [types, setTypes] = useState([])
+  const [typeId, setTypeId] = useState(activity.activity_type_id || '')
+  useEffect(() => {
+    fetchActivityTypes().then((t) => setTypes(t)).catch(() => setTypes([]))
+  }, [])
+  const selectedType = types.find((t) => t.id === typeId) || null
+  const selectedKind = selectedType?.kind || 'volunteer'
 
   const p10 = last10(phone)
   const p10b = last10(phone2)
@@ -70,8 +81,8 @@ export default function WalkinCapture({ activity, me, onClose, onToast, onChange
     captured_email2: emb || null,
     captured_by: me?.id || null,
     capture_source: 'walk_in',
-    // Inherit the event's type BY ID (never re-typed / stored as text).
-    activity_type_id: activity.activity_type_id || null,
+    // Attendance TYPE by id (defaults to the event's type; coordinator can override).
+    activity_type_id: typeId || null,
   })
 
   async function markPresent(person) {
@@ -86,9 +97,9 @@ export default function WalkinCapture({ activity, me, onClose, onToast, onChange
       }
       const { error } = await supabase.from('attendance').insert({ activity_id: activity.id, person_id: person.id, ...capturedFields() })
       if (error) throw error
-      // Auto-promote: resolved event attendance confirms volunteer status.
-      await ensureVolunteer(person.id, { source: 'event_attendance' })
-      onToast?.(`${person.full_name} marked present — confirmed as volunteer.`)
+      // Auto-promote by the attendance TYPE's kind (meditator -> meditator, else volunteer).
+      await ensureParticipation(person.id, selectedKind, { source: 'event_attendance' })
+      onToast?.(`${person.full_name} marked present — confirmed as ${selectedKind}.`)
       setRecent((r) => [{ name: person.full_name, kind: 'matched' }, ...r].slice(0, 6))
       onChanged?.()
       resetForm()
@@ -158,6 +169,17 @@ export default function WalkinCapture({ activity, me, onClose, onToast, onChange
         <input value={email} onChange={(e) => { setEmail(e.target.value); setSearched(false) }} onKeyDown={(e) => e.key === 'Enter' && runSearch()} type="email" inputMode="email" placeholder="name@email.com" style={{ ...inputStyle, marginBottom: 12 }} />
         <label style={label}>Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" style={{ ...inputStyle, marginBottom: 12 }} />
+
+        <label style={label}>Attendance type</label>
+        <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={{ ...inputStyle, marginBottom: 12, background: '#fff' }}>
+          <option value="">— none —</option>
+          <optgroup label="Volunteer">
+            {types.filter((t) => t.kind === 'volunteer').map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </optgroup>
+          <optgroup label="Meditator">
+            {types.filter((t) => t.kind === 'meditator').map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </optgroup>
+        </select>
 
         {!showSecondary ? (
           <button onClick={() => setShowSecondary(true)} className="btn btn-ghost" style={{ fontSize: 12.5, padding: '6px 0', color: 'var(--orange)' }}>+ Add secondary phone / email</button>
