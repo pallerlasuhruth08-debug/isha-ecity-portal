@@ -3,6 +3,11 @@ import { supabase } from '../lib/supabase'
 import { pill } from '../lib/ui'
 import { Pad, ErrorCard, Loading } from '../components/View'
 
+// BOUNDARY (do not blur): Planning CONSUMES events read-only — it reads activities
+// and edits ONLY their stage (event_stages). It does NOT create/delete events and
+// must NOT own event creation. Event creation/management lives permanently on the
+// EVENTS screen (see src/views/Events.jsx). "View-only" is about THIS consumer, not
+// the Events screen — never let it strip the Create-event action there.
 const STAGES = ['Thinking', 'Planning', 'Executing', 'Reminder', 'Done']
 const STAGE_DOT = { Thinking: '#B7A88E', Planning: '#C28A2A', Executing: '#C2691F', Reminder: '#2F6E5E', Done: '#4E7C3F' }
 

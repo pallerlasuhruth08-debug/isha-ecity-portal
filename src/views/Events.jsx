@@ -7,6 +7,16 @@ import WalkinCapture from '../components/WalkinCapture'
 import { ensureParticipation } from '../lib/volunteers'
 import { fetchActivityTypes } from '../lib/activityTypes'
 
+// ────────────────────────────────────────────────────────────────────────────
+// BOUNDARY (do not remove): Event CREATION and MANAGEMENT live HERE, on the
+// Events screen, permanently. Coordinators create/run/type events from this
+// screen. The "view-only" rule from the Planning work applies ONLY to how
+// Planning CONSUMES events (Planning reads events + edits stage, read-only) — it
+// must NEVER make this Events screen read-only or strip the Create-event action.
+// If you're tempted to remove "Create event", you're re-introducing a recurring
+// regression. Keep it.
+// ────────────────────────────────────────────────────────────────────────────
+
 const STAGES = ['Thinking', 'Planning', 'Executing', 'Reminder', 'Done']
 const STAGE_PILL = {
   Thinking: pill('#F1EADD', '#8C7E6B'),
@@ -26,21 +36,25 @@ export default function Events({ me, isCoordinator = false, onToast }) {
   const [acts, setActs] = useState(null)
   const [stages, setStages] = useState({})
   const [types, setTypes] = useState([])
+  const [centers, setCenters] = useState([])
+  const [creating, setCreating] = useState(false)
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
 
   async function load() {
     try {
-      const [a, s, t] = await Promise.all([
+      const [a, s, t, c] = await Promise.all([
         supabase.from('activities').select('id, name, center_id, activity_date, activity_type, activity_type_id, is_open, description').order('activity_date', { ascending: false }).limit(200),
         supabase.from('event_stages').select('activity_id, stage'),
         fetchActivityTypes().catch(() => []),
+        supabase.from('centers').select('id, name').order('name'),
       ])
       if (a.error) throw a.error
       if (s.error) throw s.error
       setActs(a.data || [])
       setStages(Object.fromEntries((s.data || []).map((r) => [r.activity_id, r.stage])))
       setTypes(t || [])
+      setCenters(c.data || [])
     } catch (e) {
       setErr(e.message || String(e))
     }
@@ -65,9 +79,16 @@ export default function Events({ me, isCoordinator = false, onToast }) {
 
   return (
     <Pad>
-      <p style={{ margin: '0 0 16px', fontSize: 13.5, color: 'var(--muted)', maxWidth: 520 }}>
-        Offline &amp; online events — take attendance, add walk-ins on the day, and track each event's stage &amp; to-dos.
-      </p>
+      {/* Header: intro + the PERMANENT Create-event action (coordinators). See the
+          BOUNDARY note at the top of this file — do not remove this. */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 520 }}>
+          Offline &amp; online events — create events, take attendance, add walk-ins on the day, and track each event's stage &amp; to-dos.
+        </p>
+        {isCoordinator && (
+          <button className="btn btn-primary" style={{ fontSize: 13, padding: '9px 15px' }} onClick={() => setCreating(true)}>+ Create event</button>
+        )}
+      </div>
       {err && <ErrorCard>Couldn't load events: {err}</ErrorCard>}
       {loading && <Loading label="Loading events…" />}
       {!loading && (acts || []).length === 0 && <Empty label="No events yet." />}
@@ -95,7 +116,99 @@ export default function Events({ me, isCoordinator = false, onToast }) {
           )
         })}
       </div>
+
+      {creating && (
+        <CreateEventForm
+          me={me}
+          types={types}
+          centers={centers}
+          onClose={() => setCreating(false)}
+          onCreated={(id) => { setCreating(false); load().then(() => id && setOpenId(id)) }}
+          onToast={onToast}
+        />
+      )}
     </Pad>
+  )
+}
+
+// The permanent Create-event form (see BOUNDARY note at top of file). Inserts an
+// activities row; RLS (act_all) allows coordinators / center coordinators.
+function CreateEventForm({ me, types = [], centers = [], onClose, onCreated, onToast }) {
+  const [name, setName] = useState('')
+  const [date, setDate] = useState('')
+  const [centerId, setCenterId] = useState(me?.center_id && me.center_id !== 'all' ? me.center_id : '')
+  const [typeId, setTypeId] = useState('')
+  const [description, setDescription] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function create() {
+    if (!name.trim()) return onToast('Give the event a name.')
+    setBusy(true)
+    try {
+      const { data, error } = await supabase
+        .from('activities')
+        .insert({
+          name: name.trim(),
+          activity_date: date || new Date().toISOString().slice(0, 10),
+          center_id: centerId || me?.center_id || 'unassigned',
+          activity_type_id: typeId || null,
+          description: description.trim() || null,
+          is_open: true,
+          created_by: me?.id || null,
+        })
+        .select('id')
+        .single()
+      if (error) throw error
+      onToast(`Event “${name.trim()}” created.`)
+      onCreated?.(data.id)
+    } catch (e) {
+      onToast('Could not create event: ' + (e.message || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const inputStyle = { width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 12px', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', background: '#fff', color: 'var(--ink)' }
+  const label = { display: 'block', fontSize: 12, fontWeight: 600, color: '#5C5142', marginBottom: 5, marginTop: 12 }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
+      <div className="card" style={{ width: 460, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)', maxHeight: '88vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 2px' }}>Create event</h3>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Attendance, walk-ins, to-dos and stage are managed on the event afterwards.</div>
+
+        <label style={{ ...label, marginTop: 16 }}>Name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pournami Devi seva" style={inputStyle} autoFocus />
+
+        <label style={label}>Date</label>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+
+        <label style={label}>Centre</label>
+        <select value={centerId} onChange={(e) => setCenterId(e.target.value)} style={inputStyle}>
+          <option value="">— select —</option>
+          {centers.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
+        </select>
+
+        <label style={label}>Activity type</label>
+        <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={inputStyle}>
+          <option value="">— none —</option>
+          <optgroup label="Volunteer">
+            {types.filter((t) => t.kind === 'volunteer').map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </optgroup>
+          <optgroup label="Meditator">
+            {types.filter((t) => t.kind === 'meditator').map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </optgroup>
+        </select>
+
+        <label style={label}>Description (optional)</label>
+        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} />
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={create}>{busy ? 'Creating…' : 'Create event'}</button>
+        </div>
+      </div>
+    </div>
   )
 }
 
