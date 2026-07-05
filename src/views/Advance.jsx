@@ -4,6 +4,7 @@ import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty, Chip, Checkbox, PagerBar, SelectionBar } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
+import { useBreakpoint } from '../lib/useBreakpoint'
 import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
 
@@ -35,6 +36,7 @@ function ago(d) {
 }
 
 export default function Advance({ onToast }) {
+  const { isPhone } = useBreakpoint()
   const [prog, setProg] = useState('bsp')
   const [summary, setSummary] = useState([]) // {program, status} for all rows (small table)
   const [rows, setRows] = useState(null)
@@ -171,7 +173,7 @@ export default function Advance({ onToast }) {
         {PROGRAMS.map((p) => (<Chip key={p.key} on={prog === p.key} label={p.label} count={progTotals[p.key] || 0} onClick={() => setProg(p.key)} />))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }} className="dash-grid">
+      <div className={isPhone ? undefined : 'dash-grid'} style={{ display: 'grid', gridTemplateColumns: isPhone ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
         {FUNNEL.map((f) => (
           <div key={f.key} className="card" style={{ padding: 18 }}>
             <div style={{ fontFamily: "'Newsreader',serif", fontSize: 28, fontWeight: 600, lineHeight: 1, color: cur.tone }}>{counts[f.key] || 0}</div>
@@ -184,17 +186,48 @@ export default function Advance({ onToast }) {
       <SelectionBar isAllMode={sel.isAllMode} count={selCount} onCreate={openCampaign} onClear={sel.clear} />
 
       <div className="card" style={{ overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, alignItems: 'center' }}>
-          <Checkbox state={sel.headerState(total)} onClick={() => (selCount > 0 ? sel.clear() : sel.selectAllMatching())} />
-          <span>Person</span>
-          <span>Phone</span>
-          <span>Added</span>
-          <span>Status</span>
-          <span>Action</span>
-        </div>
+        {isPhone ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
+            <Checkbox state={sel.headerState(total)} onClick={() => (selCount > 0 ? sel.clear() : sel.selectAllMatching())} />
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select all'}</span>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, alignItems: 'center' }}>
+            <Checkbox state={sel.headerState(total)} onClick={() => (selCount > 0 ? sel.clear() : sel.selectAllMatching())} />
+            <span>Person</span>
+            <span>Phone</span>
+            <span>Added</span>
+            <span>Status</span>
+            <span>Action</span>
+          </div>
+        )}
         {loading && <Loading label="Loading…" />}
         {!loading && rows.length === 0 && <Empty label="No interest recorded for this programme yet." />}
-        {!loading &&
+
+        {!loading && isPhone &&
+          rows.map((r, i) => (
+            <div key={r.id} className="rowhover" onClick={() => r.person_id && setProfileId(r.person_id)} style={{ display: 'flex', gap: 12, padding: 14, borderBottom: '1px solid #F1E9DB', alignItems: 'flex-start', cursor: 'pointer', background: profileId === r.person_id ? '#FBF1E6' : undefined }}>
+              <div style={{ minHeight: 44, display: 'flex', alignItems: 'center' }}>
+                <Checkbox state={sel.isSelected(r.person_id)} onClick={(e) => { e.stopPropagation(); sel.toggle(r.person_id) }} />
+              </div>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(r.person?.full_name || '?')}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person?.full_name || 'Unknown'}</div>
+                  <span className="pill" style={STATUS_PILL[r.status] || STATUS_PILL.new}>{r.status}</span>
+                </div>
+                <div style={{ fontSize: 12.5, color: r.person?.phone ? 'var(--muted)' : '#B5532F', marginTop: 2 }}>{r.person?.phone || 'No phone'}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Added {ago(r.interest_date)}</div>
+                {r.status === 'new' && (
+                  <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 8 }}>
+                    <button className="btn btn-ghost" disabled={busy === r.id} style={{ padding: '9px 14px', fontSize: 12.5, minHeight: 40 }} onClick={() => markContacted(r)}>{busy === r.id ? '…' : 'Mark contacted'}</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+        {!loading && !isPhone &&
           rows.map((r, i) => (
             <div key={r.id} className="rowhover" onClick={() => r.person_id && setProfileId(r.person_id)} style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '13px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', cursor: 'pointer', background: profileId === r.person_id ? '#FBF1E6' : undefined }}>
               <Checkbox state={sel.isSelected(r.person_id)} onClick={(e) => { e.stopPropagation(); sel.toggle(r.person_id) }} />

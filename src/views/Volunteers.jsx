@@ -4,6 +4,7 @@ import { Icon } from '../lib/icons'
 import { STAGE_PILL, initials, avatarFor, pill } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerBar, SelectionBar } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
+import { useBreakpoint } from '../lib/useBreakpoint'
 import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
 import AssignNurturerDialog from '../components/AssignNurturerDialog'
@@ -26,6 +27,7 @@ const uniq = (a) => [...new Set(a.filter(Boolean))]
 const NIL = '00000000-0000-0000-0000-000000000000'
 
 export default function Volunteers({ me, onToast }) {
+  const { isPhone } = useBreakpoint()
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -345,7 +347,7 @@ export default function Volunteers({ me, onToast }) {
     else { setDateFrom(''); setDateTo('') }
   }
 
-  const selStyle = { padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }
+  const selStyle = { padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 4px)' : undefined }
   const selectDefs = [
     { k: 'stage', all: 'All stages', opts: ['New', 'Reached out', 'Oriented', 'Active', 'Core Group'] },
     { k: 'atype', all: 'Any activity type', opts: opts.atypes },
@@ -372,7 +374,7 @@ export default function Volunteers({ me, onToast }) {
       {err && <ErrorCard>Couldn't load volunteers: {err}</ErrorCard>}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10, alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: '8px 12px', minWidth: 190 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: isPhone ? '11px 12px' : '8px 12px', minWidth: 190, flexBasis: isPhone ? '100%' : undefined }}>
           {Icon.search(15)}
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or pincode…" style={{ border: 'none', outline: 'none', fontSize: 13, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
@@ -406,19 +408,58 @@ export default function Volunteers({ me, onToast }) {
       <SelectionBar isAllMode={sel.isAllMode} count={selCount} onCreate={openCampaign} onAssign={openAssign} onClear={sel.clear} />
 
       <div className="card" style={{ overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, background: 'var(--panel)', alignItems: 'center' }}>
-          <Checkbox state={sel.headerState(total)} onClick={(e) => { e.stopPropagation(); selCount > 0 ? sel.clear() : sel.selectAllMatching() }} />
-          <span>Volunteer</span>
-          <span>Stage</span>
-          <span>Programmes</span>
-          <span>Where</span>
-          <span>Attended</span>
-        </div>
+        {/* Header: grid column labels on desktop/tablet; a compact select-all
+            bar on phone (there are no columns to label in card mode). */}
+        {isPhone ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
+            <Checkbox state={sel.headerState(total)} onClick={(e) => { e.stopPropagation(); selCount > 0 ? sel.clear() : sel.selectAllMatching() }} />
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select all'}</span>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, background: 'var(--panel)', alignItems: 'center' }}>
+            <Checkbox state={sel.headerState(total)} onClick={(e) => { e.stopPropagation(); selCount > 0 ? sel.clear() : sel.selectAllMatching() }} />
+            <span>Volunteer</span>
+            <span>Stage</span>
+            <span>Programmes</span>
+            <span>Where</span>
+            <span>Attended</span>
+          </div>
+        )}
 
         {loading && <Loading label="Loading volunteers…" />}
         {!loading && rows.length === 0 && <Empty label="No volunteers match these filters." />}
 
-        {!loading &&
+        {!loading && isPhone &&
+          rows.map((v, i) => (
+            <div key={v.id} className="rowhover" onClick={() => setProfileId(v.id)} style={{ display: 'flex', gap: 12, padding: 14, borderBottom: '1px solid #F1E9DB', alignItems: 'flex-start', cursor: 'pointer', background: profileId === v.id ? '#FBF1E6' : undefined }}>
+              <div style={{ paddingTop: 2, minHeight: 44, display: 'flex', alignItems: 'center' }}>
+                <Checkbox state={sel.isSelected(v.id)} onClick={(e) => { e.stopPropagation(); sel.toggle(v.id) }} />
+              </div>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 600, flexShrink: 0 }}>{initials(v.name)}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</div>
+                  <span className="pill" style={STAGE_PILL[v.stage] || pill('#F1EADD', '#8C7E6B')}>{v.stage}</span>
+                </div>
+                <div style={{ fontSize: 12.5, color: v.phone ? 'var(--muted)' : '#B5532F', marginTop: 2 }}>{v.phone || 'No phone on record'}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4 }}>{v.programs} · {v.where}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                  {v.attended > 0 ? <span style={{ color: '#4E7C3F', fontWeight: 600 }}>{v.attended} attended</span> : 'No attendance'} · {v.last}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                  {v.manualTags.map((t) => (<span key={'m' + t} style={{ fontSize: 10.5, fontWeight: 600, color: '#fff', background: '#9C4A14', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
+                  {v.derivedTags.filter((d) => !v.manualTags.includes(d)).map((t) => (<span key={'d' + t} style={{ fontSize: 10.5, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
+                  {tagRow === v.id ? (
+                    <input autoFocus value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addRowTag(v.id); if (e.key === 'Escape') setTagRow(null) }} onBlur={() => addRowTag(v.id)} placeholder="tag…" style={{ width: 90, fontSize: 11, border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', outline: 'none' }} />
+                  ) : (
+                    <span onClick={() => { setTagRow(v.id); setTagInput('') }} title="Add tag" style={{ fontSize: 11, fontWeight: 700, color: '#B85C1E', cursor: 'pointer', border: '1px dashed #E2C9A8', borderRadius: 6, padding: '3px 8px' }}>＋ tag</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+
+        {!loading && !isPhone &&
           rows.map((v, i) => (
             <div key={v.id} className="rowhover" onClick={() => setProfileId(v.id)} style={{ display: 'grid', gridTemplateColumns: grid, gap: 14, padding: '13px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', cursor: 'pointer', background: profileId === v.id ? '#FBF1E6' : undefined }}>
               <Checkbox state={sel.isSelected(v.id)} onClick={(e) => { e.stopPropagation(); sel.toggle(v.id) }} />

@@ -4,6 +4,7 @@ import { Icon } from '../lib/icons'
 import { initials, avatarFor } from '../lib/ui'
 import { STATUS_ORDER, OUTCOME_TO_STATUS, pillFor } from '../lib/calllog'
 import { fillTemplate } from '../lib/phone'
+import { useBreakpoint } from '../lib/useBreakpoint'
 import ReachButtons from '../components/ReachButtons'
 import CallLogDialog from '../components/CallLogDialog'
 import CampaignScriptPanel from '../components/CampaignScriptPanel'
@@ -280,7 +281,19 @@ function Pad({ children }) {
   return <div className="main-pad" style={{ padding: '26px 32px 60px', overflowY: 'auto' }}>{children}</div>
 }
 
+// Compact labelled stat used in the phone caller cards (the desktop table shows
+// these as columns instead).
+function CallerStat({ v, label, color }) {
+  return (
+    <div>
+      <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1, color: color || '#3A3024' }}>{v}</div>
+      <div style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 2 }}>{label}</div>
+    </div>
+  )
+}
+
 function Detail({ c, me, isCoordinator, logsByJourney, actorNames, reload, onBack, callFilter, setCallFilter, onToast }) {
+  const { isPhone } = useBreakpoint()
   const [logFor, setLogFor] = useState(null) // {journeyId, personId, name, phone}
   const [showRemoved, setShowRemoved] = useState(false)
   const [busyId, setBusyId] = useState(null)
@@ -376,6 +389,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, reload, onBac
   }
 
   const gridCols = isCoordinator ? '1.5fr 1.1fr 1.2fr 0.8fr 0.9fr 300px' : '1.7fr 1.2fr 1.3fr 0.9fr 1fr'
+  const callerCols = isCoordinator ? '1.6fr 0.8fr 0.8fr 0.8fr 0.8fr 0.7fr' : '1.7fr 0.9fr 0.9fr 0.9fr 0.9fr'
   const unassignedCount = c.contacts.filter((x) => !x.callerKey).length
 
   return (
@@ -436,16 +450,57 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, reload, onBac
         })}
       </div>
       <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12, padding: '13px 22px', background: '#FAF4EA', borderBottom: '1px solid var(--border-soft)', fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>
-          <span>Contact</span>
-          <span>Phone</span>
-          <span>Assigned to</span>
-          <span>Last touch</span>
-          <span>Status</span>
-          {isCoordinator && <span>Actions</span>}
-        </div>
+        {!isPhone && (
+          <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12, padding: '13px 22px', background: '#FAF4EA', borderBottom: '1px solid var(--border-soft)', fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>
+            <span>Contact</span>
+            <span>Phone</span>
+            <span>Assigned to</span>
+            <span>Last touch</span>
+            <span>Status</span>
+            {isCoordinator && <span>Actions</span>}
+          </div>
+        )}
         {shown.length === 0 && <div style={{ padding: 26, textAlign: 'center', fontSize: 13, color: 'var(--muted-2)' }}>No contacts in this status.</div>}
-        {shown.map((p, i) => (
+
+        {isPhone && shown.map((p, i) => (
+          <div key={p.journeyId} className="rowhover" style={{ padding: 14, borderBottom: '1px solid #F4EEE2' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11 }}>
+              <div style={{ width: 38, height: 38, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(p.name)}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                  <span className="pill" style={pillFor(p.status)}>{p.status}</span>
+                </div>
+                <div style={{ fontSize: 12.5, color: p.phone ? 'var(--muted)' : 'var(--muted-2)', marginTop: 2 }}>{p.phone || 'no phone on record'}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Last touch: {p.last}{isCoordinator && p.logs[0] ? ` · by ${actorNames[p.logs[0].logged_by] || '—'}` : ''}</div>
+              </div>
+            </div>
+            <div style={{ marginTop: 8 }}>
+              {isCoordinator ? (
+                <select
+                  value={p.callerKey || ''}
+                  disabled={busyId === p.journeyId}
+                  onChange={(e) => reassign(p, c.callerPool.find((x) => x.key === e.target.value) || null)}
+                  style={{ width: '100%', minHeight: 40, fontSize: 12.5, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: p.callerKey ? '#3A3024' : '#B5532F' }}
+                >
+                  <option value="">— unassigned —</option>
+                  {c.callerPool.map((cp) => <option key={cp.key} value={cp.key}>{cp.name}{cp.source === 'nurturing_team' ? ' · Team' : ' · Volunteer'}</option>)}
+                </select>
+              ) : (
+                <div style={{ fontSize: 12.5, color: '#3A3024' }}>Assigned to: {p.assigned}</div>
+              )}
+            </div>
+            {isCoordinator && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                <ReachButtons phone={p.phone} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
+                <button className="btn btn-ghost" style={{ padding: '9px 14px', fontSize: 12.5, minHeight: 40 }} onClick={() => setLogFor(p)}>Log</button>
+                <button title="Remove from campaign" disabled={busyId === p.journeyId} onClick={() => removeRecipient(p)} style={{ padding: '9px 12px', fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer', marginLeft: 'auto', minHeight: 40 }}>✕ Remove</button>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {!isPhone && shown.map((p, i) => (
           <div key={p.journeyId} className="rowhover" style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12, padding: '13px 22px', borderBottom: '1px solid #F4EEE2', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
               <div style={{ width: 32, height: 32, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>{initials(p.name)}</div>
@@ -511,17 +566,36 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, reload, onBac
         )}
       </div>
       <div className="card" style={{ overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: isCoordinator ? '1.6fr 0.8fr 0.8fr 0.8fr 0.8fr 0.7fr' : '1.7fr 0.9fr 0.9fr 0.9fr 0.9fr', gap: 12, padding: '13px 22px', background: '#FAF4EA', borderBottom: '1px solid var(--border-soft)', fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>
-          <span>Caller</span>
-          <span>Assigned</span>
-          <span>Contacted</span>
-          <span>Responded</span>
-          <span>Reply rate</span>
-          {isCoordinator && <span></span>}
-        </div>
+        {!isPhone && (
+          <div style={{ display: 'grid', gridTemplateColumns: callerCols, gap: 12, padding: '13px 22px', background: '#FAF4EA', borderBottom: '1px solid var(--border-soft)', fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>
+            <span>Caller</span>
+            <span>Assigned</span>
+            <span>Contacted</span>
+            <span>Responded</span>
+            <span>Reply rate</span>
+            {isCoordinator && <span></span>}
+          </div>
+        )}
         {c.callerList.length === 0 && <div style={{ padding: 26, textAlign: 'center', fontSize: 13, color: 'var(--muted-2)' }}>No callers assigned yet.</div>}
-        {c.callerList.map((k, i) => (
-          <div key={k.name} className="rowhover" style={{ display: 'grid', gridTemplateColumns: isCoordinator ? '1.6fr 0.8fr 0.8fr 0.8fr 0.8fr 0.7fr' : '1.7fr 0.9fr 0.9fr 0.9fr 0.9fr', gap: 12, padding: '14px 22px', borderBottom: '1px solid #F4EEE2', alignItems: 'center' }}>
+
+        {isPhone && c.callerList.map((k, i) => (
+          <div key={k.name} className="rowhover" style={{ padding: 14, borderBottom: '1px solid #F4EEE2' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+              <div style={{ width: 36, height: 36, borderRadius: '50%', background: avatarFor(i + 2), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 600, flexShrink: 0 }}>{initials(k.name)}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.name}</div>
+              {isCoordinator && k.key && <button title="Remove caller (recipients become unassigned)" disabled={busyId === 'caller:' + k.key} onClick={() => removeCaller(c.callerPool.find((x) => x.key === k.key) || { key: k.key, name: k.name })} style={{ padding: '8px 12px', fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer', minHeight: 40 }}>Remove</button>}
+            </div>
+            <div style={{ display: 'flex', gap: 18, marginTop: 10, flexWrap: 'wrap' }}>
+              <CallerStat v={k.assigned} label="assigned" color="#9C4A14" />
+              <CallerStat v={k.contacted} label="contacted" />
+              <CallerStat v={k.responded} label="responded" />
+              <CallerStat v={k.rate} label="reply rate" />
+            </div>
+          </div>
+        ))}
+
+        {!isPhone && c.callerList.map((k, i) => (
+          <div key={k.name} className="rowhover" style={{ display: 'grid', gridTemplateColumns: callerCols, gap: 12, padding: '14px 22px', borderBottom: '1px solid #F4EEE2', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
               <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i + 2), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(k.name)}</div>
               <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.name}</div>

@@ -4,6 +4,7 @@ import { initials, avatarFor, pill } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import PersonProfile from '../components/PersonProfile'
 import { telHref, waHref } from '../lib/phone'
+import { useBreakpoint } from '../lib/useBreakpoint'
 
 // DISPLAY-ONLY drill-down over three separate tables (teams + team_members +
 // nurturing_assignments over one people table): Teams → team roster → nurturer's held
@@ -98,6 +99,7 @@ export default function Nurturing({ me, isCoordinator = false, onToast }) {
 
 // ---- Level 2: team roster (name, gender, contact) + POC management ----
 function TeamDetail({ team, isCoordinator, onBack, onOpenNurturer, onToast, onOpenProfile, onRosterChanged }) {
+  const { isPhone } = useBreakpoint()
   const [members, setMembers] = useState(null)
   const [busy, setBusy] = useState(false)
   const [q, setQ] = useState('')
@@ -164,27 +166,48 @@ function TeamDetail({ team, isCoordinator, onBack, onOpenNurturer, onToast, onOp
 
       {!members ? <Loading label="Loading roster…" /> : (
         <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.8fr 1.4fr auto', gap: 12, padding: '12px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
-            <span>Nurturer</span><span>Gender</span><span>Contact</span><span></span>
-          </div>
-          {members.map((m) => (
-            <div key={m.id} className="rowhover" style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.8fr 1.4fr auto', gap: 12, padding: '12px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center' }}>
-              <div onClick={() => onOpenNurturer(m.person?.id)} style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0, cursor: 'pointer' }}>
-                <div style={{ width: 34, height: 34, borderRadius: '50%', background: '#3D6E60', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(m.person?.full_name || '?')}</div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.person?.full_name || 'Unknown'}{m.is_poc && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), marginLeft: 8 }}>POC</span>}</div>
-                  <div style={{ fontSize: 11, color: 'var(--orange)' }}>view held people →</div>
-                </div>
-              </div>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{genderOf(m.person?.gender)}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{m.person?.phone || 'no phone'}{m.person?.pincode ? ` · ${m.person.pincode}` : ''}</div>
-              {isCoordinator ? (
-                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                  <button disabled={busy} onClick={() => togglePoc(m)} className="btn btn-ghost" style={{ fontSize: 11.5, padding: '5px 10px' }}>{m.is_poc ? 'Unset POC' : 'Make POC'}</button>
-                  <button disabled={busy} onClick={() => markLeft(m)} style={{ fontSize: 11.5, padding: '5px 10px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Remove</button>
-                </div>
-              ) : <span />}
+          {!isPhone && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.8fr 1.4fr auto', gap: 12, padding: '12px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
+              <span>Nurturer</span><span>Gender</span><span>Contact</span><span></span>
             </div>
+          )}
+          {members.map((m) => (
+            isPhone ? (
+              <div key={m.id} className="rowhover" style={{ padding: 14, borderBottom: '1px solid #F1E9DB' }}>
+                <div onClick={() => onOpenNurturer(m.person?.id)} style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0, cursor: 'pointer' }}>
+                  <div style={{ width: 38, height: 38, borderRadius: '50%', background: '#3D6E60', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(m.person?.full_name || '?')}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 14.5, fontWeight: 600 }}>{m.person?.full_name || 'Unknown'}{m.is_poc && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), marginLeft: 8 }}>POC</span>}</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>{genderOf(m.person?.gender)} · {m.person?.phone || 'no phone'}{m.person?.pincode ? ` · ${m.person.pincode}` : ''}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--orange)', marginTop: 2 }}>view held people →</div>
+                  </div>
+                </div>
+                {isCoordinator && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button disabled={busy} onClick={() => togglePoc(m)} className="btn btn-ghost" style={{ fontSize: 12.5, padding: '9px 12px', minHeight: 40 }}>{m.is_poc ? 'Unset POC' : 'Make POC'}</button>
+                    <button disabled={busy} onClick={() => markLeft(m)} style={{ fontSize: 12.5, padding: '9px 12px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer', minHeight: 40 }}>Remove</button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div key={m.id} className="rowhover" style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.8fr 1.4fr auto', gap: 12, padding: '12px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center' }}>
+                <div onClick={() => onOpenNurturer(m.person?.id)} style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0, cursor: 'pointer' }}>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: '#3D6E60', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(m.person?.full_name || '?')}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.person?.full_name || 'Unknown'}{m.is_poc && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), marginLeft: 8 }}>POC</span>}</div>
+                    <div style={{ fontSize: 11, color: 'var(--orange)' }}>view held people →</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{genderOf(m.person?.gender)}</div>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{m.person?.phone || 'no phone'}{m.person?.pincode ? ` · ${m.person.pincode}` : ''}</div>
+                {isCoordinator ? (
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button disabled={busy} onClick={() => togglePoc(m)} className="btn btn-ghost" style={{ fontSize: 11.5, padding: '5px 10px' }}>{m.is_poc ? 'Unset POC' : 'Make POC'}</button>
+                    <button disabled={busy} onClick={() => markLeft(m)} style={{ fontSize: 11.5, padding: '5px 10px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Remove</button>
+                  </div>
+                ) : <span />}
+              </div>
+            )
           ))}
           {members.length === 0 && <div style={{ padding: 22 }}><Empty label="No nurturers on this team yet." /></div>}
         </div>
@@ -210,6 +233,7 @@ function TeamDetail({ team, isCoordinator, onBack, onOpenNurturer, onToast, onOp
 
 // ---- Level 3: a nurturer's held people (+ single-add to THIS nurturer, no picker) ----
 function NurturerDetail({ nurturerPersonId, me, onBack, onToast, onOpenProfile }) {
+  const { isPhone } = useBreakpoint()
   const [nurturer, setNurturer] = useState(null)
   const [held, setHeld] = useState(null)
   const [lastContact, setLastContact] = useState({})
@@ -292,6 +316,22 @@ function NurturerDetail({ nurturerPersonId, me, onBack, onToast, onOpenProfile }
           {held.length === 0 && <div style={{ padding: 22 }}><Empty label="No one assigned yet — add below, or bulk-assign from Volunteers/Meditators." /></div>}
           {held.map((a) => {
             const overdue = (daysSince(lastContact[a.cared_person_id]) ?? 9999) >= OVERDUE_DAYS
+            if (isPhone) {
+              return (
+                <div key={a.id} className="rowhover" style={{ padding: 14, borderBottom: '1px solid #F1E9DB' }}>
+                  <div onClick={() => onOpenProfile(a.cared?.id)} style={{ minWidth: 0, cursor: 'pointer' }}>
+                    <div style={{ fontSize: 14.5, fontWeight: 600 }}>{a.cared?.full_name || 'Unknown'}</div>
+                    <div style={{ fontSize: 12, color: overdue ? '#B5532F' : 'var(--muted)', marginTop: 1 }}>{lastContactLabel(lastContact[a.cared_person_id])}{overdue ? ' · overdue' : ''}</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 2 }}>{genderOf(a.cared?.gender)} · {a.cared?.phone || 'no phone'}{a.cared?.pincode ? ` · ${a.cared.pincode}` : ''}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+                    {reach(a.cared?.phone)}
+                    <button className="btn btn-primary" style={{ padding: '9px 16px', fontSize: 12.5, minHeight: 40 }} onClick={() => setLogFor(a)}>Log</button>
+                    <button title="End care" onClick={() => endCare(a)} disabled={busy} style={{ padding: '9px 12px', fontSize: 12.5, borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer', marginLeft: 'auto', minHeight: 40 }}>✕ End</button>
+                  </div>
+                </div>
+              )
+            }
             return (
               <div key={a.id} className="rowhover" style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.8fr 1.4fr auto', gap: 12, padding: '12px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center' }}>
                 <div onClick={() => onOpenProfile(a.cared?.id)} style={{ minWidth: 0, cursor: 'pointer' }}>

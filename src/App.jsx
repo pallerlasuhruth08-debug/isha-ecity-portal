@@ -16,6 +16,7 @@ import Placeholder from './views/Placeholder'
 import Login from './views/Login'
 import { ROLES, TAB_TITLES, TAB_LABELS } from './lib/roles'
 import { useSession } from './lib/useSession'
+import { useBreakpoint } from './lib/useBreakpoint'
 import { supabase } from './lib/supabase'
 
 export default function App() {
@@ -37,7 +38,9 @@ function Portal({ profile, email }) {
   const [role, setRole] = useState('centre')
   const [view, setView] = useState('dashboard')
   const [toast, setToast] = useState(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const toastTimer = useRef(null)
+  const { isPhone } = useBreakpoint()
 
   // AUTHORITATIVE permission gate — derived from the real logged-in profile.role,
   // NOT the (cosmetic, demo) persona switcher. Coordinator-capable roles get can_all()
@@ -97,7 +100,13 @@ function Portal({ profile, email }) {
 
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden', background: 'var(--bg)' }}>
-      <Sidebar role={role} view={activeView} tabs={tabs} onNavigate={setView} />
+      {/* Below the phone breakpoint the sidebar becomes an off-canvas drawer
+          (opened by the Topbar hamburger); at tablet/desktop it stays in-flow. */}
+      {isPhone ? (
+        <Sidebar role={role} view={activeView} tabs={tabs} onNavigate={setView} variant="drawer" open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      ) : (
+        <Sidebar role={role} view={activeView} tabs={tabs} onNavigate={setView} />
+      )}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <Topbar
           role={role}
@@ -106,6 +115,7 @@ function Portal({ profile, email }) {
           onPickRole={pickRole}
           user={profile?.full_name || email}
           onSignOut={() => supabase.auth.signOut()}
+          onMenu={isPhone ? () => setDrawerOpen(true) : undefined}
         />
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
       </main>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
+import { useBreakpoint } from '../lib/useBreakpoint'
 import { statusOf, pillFor, fmtWhen, DEFAULT_OUTCOME } from '../lib/calllog'
 import { fillTemplate } from '../lib/phone'
 import ReachButtons from '../components/ReachButtons'
@@ -9,6 +10,7 @@ import CallLogDialog from '../components/CallLogDialog'
 import CampaignScriptPanel from '../components/CampaignScriptPanel'
 
 export default function CallerWorkspace({ me, onToast }) {
+  const { isPhone } = useBreakpoint()
   const myId = me?.id
   const myName = me?.full_name || ''
   const [journeys, setJourneys] = useState(null)
@@ -134,18 +136,48 @@ export default function CallerWorkspace({ me, onToast }) {
         <CampaignScriptPanel campaign={c} />
 
         <div className="card" style={{ overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 260px 90px', gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
-            <span>Contact</span>
-            <span>Status</span>
-            <span>Reach out</span>
-            <span>Log</span>
-          </div>
+          {!isPhone && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 260px 90px', gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
+              <span>Contact</span>
+              <span>Status</span>
+              <span>Reach out</span>
+              <span>Log</span>
+            </div>
+          )}
           {c.journeys.map((j, i) => {
             const logs = logsByJ[j.id] || []
             const status = statusOf(logs)
             const phone = j.person?.phone
             const last = logs[0]
             const name = j.person?.full_name || 'Unknown'
+            if (isPhone) {
+              // Card: contact + status on top, then reach-out actions and Log
+              // stacked full-width so the fixed 260px/90px columns can't overflow.
+              return (
+                <div key={j.id} className="rowhover" style={{ padding: 14, borderBottom: '1px solid #F1E9DB' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11 }}>
+                    <div style={{ width: 38, height: 38, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(name)}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ fontSize: 14.5, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
+                        <span className="pill" style={pillFor(status)}>{status}</span>
+                      </div>
+                      <div style={{ fontSize: 12.5, color: phone ? 'var(--muted)' : 'var(--muted-2)', marginTop: 2 }}>{phone || 'no phone on record'}</div>
+                      {last && <div style={{ fontSize: 11, color: 'var(--muted-2)', marginTop: 3 }}>{logs.length} log{logs.length > 1 ? 's' : ''} · {fmtWhen(last.logged_at)} · by {actorNames[last.logged_by] || '—'}</div>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10, alignItems: 'center' }}>
+                    <ReachButtons
+                      phone={phone}
+                      smsText={fillTemplate(c.sms_template, { name, myName })}
+                      waText={fillTemplate(c.whatsapp_template, { name, myName })}
+                      onArm={() => { setArmed(j); wentHiddenRef.current = false }}
+                    />
+                    <button className="btn btn-ghost" style={{ padding: '9px 16px', fontSize: 13, minHeight: 40, marginLeft: 'auto' }} onClick={() => setLogFor(j)}>Log</button>
+                  </div>
+                </div>
+              )
+            }
             return (
               <div key={j.id} className="rowhover" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 260px 90px', gap: 12, padding: '13px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>

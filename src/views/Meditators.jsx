@@ -4,6 +4,7 @@ import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerBar, SelectionBar } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
+import { useBreakpoint } from '../lib/useBreakpoint'
 import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
 import AssignNurturerDialog from '../components/AssignNurturerDialog'
@@ -36,6 +37,7 @@ function lastActive(d) {
 }
 
 export default function Meditators({ me, onToast }) {
+  const { isPhone } = useBreakpoint()
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -172,7 +174,7 @@ export default function Meditators({ me, onToast }) {
   const loadingOpts = !rows && !err
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const selCount = sel.count(total)
-  const selStyle = { padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }
+  const selStyle = { padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 5px)' : undefined }
   const grid = '34px 2fr 1.6fr 1.2fr 1.1fr'
 
   return (
@@ -188,7 +190,7 @@ export default function Meditators({ me, onToast }) {
       {err && <ErrorCard>Couldn't load meditators: {err}</ErrorCard>}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: '8px 12px', minWidth: 200 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: isPhone ? '11px 12px' : '8px 12px', minWidth: 200, flexBasis: isPhone ? '100%' : undefined }}>
           {Icon.search(15)}
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or pincode…" style={{ border: 'none', outline: 'none', fontSize: 13, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
@@ -207,16 +209,44 @@ export default function Meditators({ me, onToast }) {
       <SelectionBar isAllMode={sel.isAllMode} count={selCount} onCreate={openCampaign} onAssign={openAssign} onClear={sel.clear} />
 
       <div className="card" style={{ overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, alignItems: 'center' }}>
-          <Checkbox state={sel.headerState(total)} onClick={() => (selCount > 0 ? sel.clear() : sel.selectAllMatching())} />
-          <span>Meditator</span>
-          <span>Programmes</span>
-          <span>Where</span>
-          <span>Last active</span>
-        </div>
+        {isPhone ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
+            <Checkbox state={sel.headerState(total)} onClick={() => (selCount > 0 ? sel.clear() : sel.selectAllMatching())} />
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select all'}</span>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, alignItems: 'center' }}>
+            <Checkbox state={sel.headerState(total)} onClick={() => (selCount > 0 ? sel.clear() : sel.selectAllMatching())} />
+            <span>Meditator</span>
+            <span>Programmes</span>
+            <span>Where</span>
+            <span>Last active</span>
+          </div>
+        )}
         {loading && <Loading label="Loading meditators…" />}
         {!loading && rows.length === 0 && <Empty label="No meditators match these filters." />}
-        {!loading &&
+
+        {!loading && isPhone &&
+          rows.map((p, i) => (
+            <div key={p.id} className="rowhover" onClick={() => setProfileId(p.id)} style={{ display: 'flex', gap: 12, padding: 14, borderBottom: '1px solid #F1E9DB', alignItems: 'flex-start', cursor: 'pointer', background: profileId === p.id ? '#FBF1E6' : undefined }}>
+              <div style={{ minHeight: 44, display: 'flex', alignItems: 'center' }}>
+                <Checkbox state={sel.isSelected(p.id)} onClick={(e) => { e.stopPropagation(); sel.toggle(p.id) }} />
+              </div>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name)}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.full_name}</div>
+                <div style={{ fontSize: 12.5, color: p.phone ? 'var(--muted)' : '#B5532F', marginTop: 2 }}>{p.phone || 'No phone on record'}</div>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
+                  {progList(p).length === 0 && <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>No programmes</span>}
+                  {progList(p).map((t) => (<span key={t} className="pill" style={pill('#F3E3D2', '#9C4A14')}>{t}</span>))}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 6 }}>{[p.area, p.pincode].filter(Boolean).join(' · ') || p.center_id || '—'}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{lastActive(p.last_active_date)}</div>
+              </div>
+            </div>
+          ))}
+
+        {!loading && !isPhone &&
           rows.map((p, i) => (
             <div key={p.id} className="rowhover" onClick={() => setProfileId(p.id)} style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '13px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', cursor: 'pointer', background: profileId === p.id ? '#FBF1E6' : undefined }}>
               <Checkbox state={sel.isSelected(p.id)} onClick={(e) => { e.stopPropagation(); sel.toggle(p.id) }} />

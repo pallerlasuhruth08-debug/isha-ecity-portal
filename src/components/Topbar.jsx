@@ -2,13 +2,16 @@ import { useState } from 'react'
 import { Icon } from '../lib/icons'
 import { ROLES, ROLE_ORDER } from '../lib/roles'
 import { initials } from '../lib/ui'
+import { useBreakpoint } from '../lib/useBreakpoint'
 
-export default function Topbar({ role, title, subtitle, onPickRole, user, onSignOut }) {
+export default function Topbar({ role, title, subtitle, onPickRole, user, onSignOut, onMenu }) {
   const [menu, setMenu] = useState(false)
+  const { isPhone } = useBreakpoint()
   const roleDef = ROLES[role]
 
   return (
     <header
+      className="topbar"
       style={{
         height: 70,
         flexShrink: 0,
@@ -16,10 +19,24 @@ export default function Topbar({ role, title, subtitle, onPickRole, user, onSign
         background: 'var(--panel)',
         display: 'flex',
         alignItems: 'center',
-        gap: 18,
-        padding: '0 32px',
+        gap: 14,
+        padding: '0 clamp(14px, 4vw, 32px)',
       }}
     >
+      {onMenu && (
+        // Hamburger — only rendered below the phone breakpoint (App passes
+        // onMenu only then). Opens the off-canvas nav drawer.
+        <button
+          className="topbar-burger"
+          onClick={onMenu}
+          aria-label="Open menu"
+          style={{ flexShrink: 0, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', border: '1px solid var(--border)', borderRadius: 11, cursor: 'pointer', color: 'var(--ink)' }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+            <path d="M3 6h18M3 12h18M3 18h18" />
+          </svg>
+        </button>
+      )}
       <div style={{ minWidth: 0 }}>
         <h1
           style={{
@@ -35,7 +52,9 @@ export default function Topbar({ role, title, subtitle, onPickRole, user, onSign
         >
           {title}
         </h1>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 1 }}>{subtitle}</div>
+        {/* Subtitle costs a second line on phone and pushes the header taller —
+            hide it there; it stays on tablet/desktop. */}
+        {!isPhone && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 1 }}>{subtitle}</div>}
       </div>
 
       <div
@@ -56,7 +75,7 @@ export default function Topbar({ role, title, subtitle, onPickRole, user, onSign
         <span style={{ fontSize: 13, color: 'var(--muted-2)' }}>Search volunteers…</span>
       </div>
 
-      <div style={{ position: 'relative', flexShrink: 0 }}>
+      <div style={{ position: 'relative', flexShrink: 0, marginLeft: isPhone ? 'auto' : undefined }}>
         <button
           onClick={() => setMenu((m) => !m)}
           style={{
@@ -66,8 +85,8 @@ export default function Topbar({ role, title, subtitle, onPickRole, user, onSign
             background: '#fff',
             border: '1px solid var(--border)',
             borderRadius: 11,
-            padding: '0 11px',
-            height: 42,
+            padding: isPhone ? '0 8px' : '0 11px',
+            height: isPhone ? 44 : 42,
             cursor: 'pointer',
           }}
         >
@@ -88,12 +107,16 @@ export default function Topbar({ role, title, subtitle, onPickRole, user, onSign
           >
             {initials(roleDef.who)}
           </div>
-          <div style={{ textAlign: 'left', lineHeight: 1.15 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap' }}>
-              {roleDef.label}
+          {/* The role label/scope is demo chrome; on phone show only the
+              avatar + chevron to give the page title room. */}
+          {!isPhone && (
+            <div style={{ textAlign: 'left', lineHeight: 1.15 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap' }}>
+                {roleDef.label}
+              </div>
+              <div style={{ fontSize: 10.5, color: '#9A8568', whiteSpace: 'nowrap' }}>{roleDef.scope}</div>
             </div>
-            <div style={{ fontSize: 10.5, color: '#9A8568', whiteSpace: 'nowrap' }}>{roleDef.scope}</div>
-          </div>
+          )}
           {Icon.chevron(14)}
         </button>
 

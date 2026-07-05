@@ -174,16 +174,19 @@ button {
     grid-template-columns: 1fr !important;
   }
 }
+/* Tablet: collapse the pinned sidebar to an icon rail. Scoped to .app-sidebar
+   so the phone drawer (.app-drawer, rendered below 640px) keeps full width and
+   its labels. */
 @media (max-width: 860px) {
   .app-sidebar {
     width: 72px !important;
     padding-left: 10px !important;
     padding-right: 10px !important;
   }
-  .sidebar-label,
-  .sidebar-brand-text,
-  .sidebar-foot-text,
-  .sidebar-section-h {
+  .app-sidebar .sidebar-label,
+  .app-sidebar .sidebar-brand-text,
+  .app-sidebar .sidebar-foot-text,
+  .app-sidebar .sidebar-section-h {
     display: none !important;
   }
   .topbar-search {
@@ -192,5 +195,13 @@ button {
   .main-pad {
     padding-left: 18px !important;
     padding-right: 18px !important;
+  }
+}
+/* Phone: tighten content padding further. */
+@media (max-width: 640px) {
+  .main-pad {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+    padding-top: 16px !important;
   }
 }

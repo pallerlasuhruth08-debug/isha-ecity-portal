@@ -15,12 +15,33 @@ const NAV = [
   { key: 'unresolved', icon: 'unresolved' },
 ]
 
-export default function Sidebar({ role, view, tabs, onNavigate }) {
+// variant 'rail' (default): the pinned in-flow sidebar (desktop full width,
+// tablet icon rail via the .app-sidebar media rule).
+// variant 'drawer': off-canvas overlay used below the phone breakpoint —
+// slides in from the left, backdrop closes, navigating closes it.
+export default function Sidebar({ role, view, tabs, onNavigate, variant = 'rail', open = false, onClose }) {
   const roleDef = ROLES[role]
-  return (
-    <aside
-      className="app-sidebar scrollarea"
-      style={{
+  const isDrawer = variant === 'drawer'
+
+  const asideStyle = isDrawer
+    ? {
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        bottom: 0,
+        width: 256,
+        maxWidth: '82%',
+        background: 'var(--sb-bg)',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '20px 16px',
+        overflowY: 'auto',
+        zIndex: 131,
+        transform: open ? 'translateX(0)' : 'translateX(-100%)',
+        transition: 'transform 0.24s ease',
+        boxShadow: open ? '0 0 40px rgba(0,0,0,0.4)' : 'none',
+      }
+    : {
         width: 252,
         flexShrink: 0,
         background: 'var(--sb-bg)',
@@ -28,8 +49,15 @@ export default function Sidebar({ role, view, tabs, onNavigate }) {
         flexDirection: 'column',
         padding: '20px 16px',
         overflowY: 'auto',
-      }}
-    >
+      }
+
+  const go = (key) => {
+    onNavigate(key)
+    if (isDrawer && onClose) onClose()
+  }
+
+  const aside = (
+    <aside className={(isDrawer ? 'app-drawer' : 'app-sidebar') + ' scrollarea'} style={asideStyle}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 6px 22px' }}>
         <div
           style={{
@@ -91,7 +119,7 @@ export default function Sidebar({ role, view, tabs, onNavigate }) {
         <button
           key={n.key}
           className={'navitem' + (view === n.key ? ' active' : '')}
-          onClick={() => onNavigate(n.key)}
+          onClick={() => go(n.key)}
         >
           {Icon[n.icon](18)}
           <span className="sidebar-label">{TAB_LABELS[n.key]}</span>
@@ -144,5 +172,25 @@ export default function Sidebar({ role, view, tabs, onNavigate }) {
         </div>
       </div>
     </aside>
+  )
+
+  if (!isDrawer) return aside
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(20,12,6,0.5)',
+          zIndex: 130,
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? 'auto' : 'none',
+          transition: 'opacity 0.24s ease',
+        }}
+      />
+      {aside}
+    </>
   )
 }
