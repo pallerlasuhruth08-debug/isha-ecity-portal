@@ -38,13 +38,14 @@ export default function Events({ me, isCoordinator = false, onToast }) {
   const [types, setTypes] = useState([])
   const [centers, setCenters] = useState([])
   const [creating, setCreating] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
 
   async function load() {
     try {
       const [a, s, t, c] = await Promise.all([
-        supabase.from('activities').select('id, name, center_id, activity_date, activity_type, activity_type_id, is_open, description').order('activity_date', { ascending: false }).limit(200),
+        supabase.from('activities').select('id, name, center_id, activity_date, activity_type, activity_type_id, is_open, description, archived_at').order('activity_date', { ascending: false }).limit(200),
         supabase.from('event_stages').select('activity_id, stage'),
         fetchActivityTypes().catch(() => []),
         supabase.from('centers').select('id, name').order('name'),
@@ -74,6 +75,9 @@ export default function Events({ me, isCoordinator = false, onToast }) {
 
   const loading = !acts && !err
   const open = openId ? (acts || []).find((a) => a.id === openId) : null
+  // Archived events are hidden from the active list (attendance stays queryable).
+  const archivedCount = (acts || []).filter((a) => a.archived_at).length
+  const visibleActs = (acts || []).filter((a) => (showArchived ? a.archived_at : !a.archived_at))
 
   if (open) return <Detail activity={open} stage={stages[open.id] || 'Planning'} onStage={(st) => setStage(open.id, st)} onBack={() => setOpenId(null)} me={me} isCoordinator={isCoordinator} types={types} onActivityChanged={load} onToast={onToast} />
 
@@ -85,16 +89,23 @@ export default function Events({ me, isCoordinator = false, onToast }) {
         <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 520 }}>
           Offline &amp; online events — create events, take attendance, add walk-ins on the day, and track each event's stage &amp; to-dos.
         </p>
-        {isCoordinator && (
-          <button className="btn btn-primary" style={{ fontSize: 13, padding: '9px 15px' }} onClick={() => setCreating(true)}>+ Create event</button>
-        )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {archivedCount > 0 && (
+            <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: '8px 12px' }} onClick={() => setShowArchived((s) => !s)}>
+              {showArchived ? 'Hide archived' : `Show archived (${archivedCount})`}
+            </button>
+          )}
+          {isCoordinator && (
+            <button className="btn btn-primary" style={{ fontSize: 13, padding: '9px 15px' }} onClick={() => setCreating(true)}>+ Create event</button>
+          )}
+        </div>
       </div>
       {err && <ErrorCard>Couldn't load events: {err}</ErrorCard>}
       {loading && <Loading label="Loading events…" />}
-      {!loading && (acts || []).length === 0 && <Empty label="No events yet." />}
+      {!loading && visibleActs.length === 0 && <Empty label={showArchived ? 'No archived events.' : 'No events yet.'} />}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 16 }}>
-        {(acts || []).map((a) => {
+        {visibleActs.map((a) => {
           const st = stages[a.id] || 'Planning'
           return (
             <div key={a.id} className="rowhover card" style={{ padding: 20, cursor: 'pointer' }} onClick={() => setOpenId(a.id)}>
@@ -221,6 +232,9 @@ function Detail({ activity, stage, onStage, onBack, me, isCoordinator, types = [
   const [todoLabel, setTodoLabel] = useState('')
   const [busy, setBusy] = useState(false)
   const [capturing, setCapturing] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [typeChange, setTypeChange] = useState(null) // { newId } — keep-vs-propagate prompt
+  const [busyAction, setBusyAction] = useState(false)
 
   async function load() {
     try {
@@ -287,6 +301,57 @@ function Detail({ activity, stage, onStage, onBack, me, isCoordinator, types = [
   const resolved = (attendees || []).filter((r) => r.person_id)
   const unresolvedCount = (attendees || []).filter((r) => !r.person_id).length
   const attCount = resolved.length
+  const totalAtt = attendees?.length ?? 0 // resolved + unresolved — the delete gate
+
+  const nowISO = () => new Date().toISOString()
+  const typeLabel = (id) => types.find((t) => t.id === id)?.label || '— none —'
+
+  // Type edit with attendance present -> ask keep vs propagate (never auto-pick).
+  function onTypeSelect(newId) {
+    const id = newId || null
+    if (id === (activity.activity_type_id || null)) return
+    if (totalAtt > 0) { setTypeChange({ newId: id }); return }
+    applyTypeChange(id, false)
+  }
+  async function applyTypeChange(newId, propagate) {
+    setBusyAction(true)
+    try {
+      const { error } = await supabase.from('activities').update({ activity_type_id: newId, edited_at: nowISO(), edited_by: me?.id || null }).eq('id', activity.id)
+      if (error) throw error
+      if (propagate) {
+        // Bulk-overwrite the stamped attendance for THIS event (coordinator chose this).
+        const { error: e2 } = await supabase.from('attendance').update({ activity_type_id: newId }).eq('activity_id', activity.id)
+        if (e2) throw e2
+      }
+      onToast(propagate ? `Type changed and applied to ${totalAtt} attendance record(s).` : 'Event type changed (existing attendance kept its captured type).')
+      setTypeChange(null)
+      onActivityChanged?.()
+    } catch (e) { onToast('Could not change type: ' + (e.message || e)) } finally { setBusyAction(false) }
+  }
+
+  async function setArchived(on) {
+    setBusyAction(true)
+    try {
+      const { error } = await supabase.from('activities').update({ archived_at: on ? nowISO() : null, archived_by: on ? me?.id || null : null }).eq('id', activity.id)
+      if (error) throw error
+      onToast(on ? 'Event archived (attendance preserved).' : 'Event unarchived.')
+      onActivityChanged?.()
+      if (on) onBack?.()
+    } catch (e) { onToast('Could not archive: ' + (e.message || e)) } finally { setBusyAction(false) }
+  }
+
+  async function hardDelete() {
+    if (totalAtt > 0) { onToast(`This event has ${totalAtt} attendance record(s) — archive instead of delete.`); return }
+    if (!window.confirm(`Permanently delete “${activity.name}”? It has no attendance. Its stage & to-dos go with it. This cannot be undone.`)) return
+    setBusyAction(true)
+    try {
+      const { error } = await supabase.from('activities').delete().eq('id', activity.id)
+      if (error) throw error // RESTRICT FK also blocks if attendance somehow exists
+      onToast('Event deleted.')
+      onActivityChanged?.()
+      onBack?.()
+    } catch (e) { onToast('Could not delete: ' + (e.message || e)) } finally { setBusyAction(false) }
+  }
 
   return (
     <Pad>
@@ -296,22 +361,37 @@ function Detail({ activity, stage, onStage, onBack, me, isCoordinator, types = [
       </div>
 
       <div className="card" style={{ padding: 24, marginBottom: 20 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>{activity.name}</h2>
-        <div style={{ fontSize: 13, color: 'var(--muted)' }}>{fmtDate(activity.activity_date)} · {activity.center_id}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>{activity.name}{activity.archived_at && <span className="pill" style={{ ...pill('#F1EADD', '#8C7E6B'), marginLeft: 10, verticalAlign: 'middle' }}>archived</span>}</h2>
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>{fmtDate(activity.activity_date)} · {activity.center_id}</div>
+          </div>
+          {isCoordinator && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-ghost" disabled={busyAction} style={{ fontSize: 12.5, padding: '7px 12px' }} onClick={() => setEditing(true)}>Edit</button>
+              {activity.archived_at
+                ? <button className="btn btn-ghost" disabled={busyAction} style={{ fontSize: 12.5, padding: '7px 12px' }} onClick={() => setArchived(false)}>Unarchive</button>
+                : <button className="btn btn-ghost" disabled={busyAction} style={{ fontSize: 12.5, padding: '7px 12px' }} onClick={() => setArchived(true)}>Archive</button>}
+              <button
+                title={totalAtt > 0 ? `Has ${totalAtt} attendance record(s) — archive instead` : 'Delete (no attendance)'}
+                disabled={busyAction}
+                onClick={hardDelete}
+                style={{ fontSize: 12.5, padding: '7px 12px', fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: totalAtt > 0 ? 'var(--muted-2)' : '#B5532F', cursor: busyAction ? 'default' : 'pointer' }}
+              >
+                Delete
+              </button>
+            </div>
+          )}
+        </div>
 
-        {/* activity type — the shared vocabulary; attendees inherit this id */}
+        {/* activity type — the shared vocabulary; attendees inherit this id.
+            Changing it while attendance exists prompts keep-vs-propagate. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
           <span style={{ fontSize: 12, fontWeight: 600, color: '#5C5142' }}>Activity type</span>
           <select
             value={activity.activity_type_id || ''}
-            disabled={!isCoordinator}
-            onChange={async (e) => {
-              const id = e.target.value || null
-              const { error } = await supabase.from('activities').update({ activity_type_id: id }).eq('id', activity.id)
-              if (error) return onToast('Could not set type: ' + error.message)
-              onToast('Event type updated.')
-              onActivityChanged?.()
-            }}
+            disabled={!isCoordinator || busyAction}
+            onChange={(e) => onTypeSelect(e.target.value)}
             style={{ fontSize: 13, padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)' }}
           >
             <option value="">— none —</option>
@@ -422,6 +502,90 @@ function Detail({ activity, stage, onStage, onBack, me, isCoordinator, types = [
           onToast={onToast}
         />
       )}
+
+      {/* Type-change keep-vs-propagate prompt (attendance present). */}
+      {typeChange && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={() => setTypeChange(null)}>
+          <div className="card" style={{ width: 440, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 8px' }}>Change event type?</h3>
+            <div style={{ fontSize: 13.5, color: 'var(--ink-soft)', lineHeight: 1.55, marginBottom: 16 }}>
+              This event has <strong>{totalAtt}</strong> attendance record(s) captured under <strong>{typeLabel(activity.activity_type_id)}</strong>. Changing the event to <strong>{typeLabel(typeChange.newId)}</strong> — what should happen to those already-captured records?
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button className="btn btn-primary" disabled={busyAction} onClick={() => applyTypeChange(typeChange.newId, false)} style={{ padding: '11px', fontSize: 13.5 }}>Keep their captured type (recommended)</button>
+              <button className="btn btn-ghost" disabled={busyAction} onClick={() => applyTypeChange(typeChange.newId, true)} style={{ padding: '11px', fontSize: 13.5, color: '#B5532F' }}>Update all {totalAtt} to “{typeLabel(typeChange.newId)}” (overwrites history)</button>
+              <button className="btn btn-ghost" disabled={busyAction} onClick={() => setTypeChange(null)} style={{ padding: '8px', fontSize: 12.5, color: 'var(--muted)' }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editing && (
+        <EditEventForm
+          activity={activity}
+          me={me}
+          centers={[]}
+          onClose={() => setEditing(false)}
+          onSaved={() => { setEditing(false); onActivityChanged?.() }}
+          onToast={onToast}
+        />
+      )}
     </Pad>
+  )
+}
+
+// Edit an event's safe fields (name, date, centre, description). Type is edited via
+// the header selector (which runs the keep-vs-propagate prompt when attendance exists).
+function EditEventForm({ activity, me, onClose, onSaved, onToast }) {
+  const [name, setName] = useState(activity.name || '')
+  const [date, setDate] = useState(activity.activity_date || '')
+  const [centerId, setCenterId] = useState(activity.center_id || '')
+  const [description, setDescription] = useState(activity.description || '')
+  const [centers, setCenters] = useState([])
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { supabase.from('centers').select('id, name').order('name').then(({ data }) => setCenters(data || [])) }, [])
+
+  async function save() {
+    if (!name.trim()) return onToast('Name cannot be empty.')
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('activities').update({
+        name: name.trim(),
+        activity_date: date || null,
+        center_id: centerId || activity.center_id,
+        description: description.trim() || null,
+        edited_at: new Date().toISOString(),
+        edited_by: me?.id || null,
+      }).eq('id', activity.id)
+      if (error) throw error
+      onToast('Event updated.')
+      onSaved?.()
+    } catch (e) { onToast('Could not save: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  const inputStyle = { width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 12px', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', background: '#fff', color: 'var(--ink)' }
+  const label = { display: 'block', fontSize: 12, fontWeight: 600, color: '#5C5142', marginBottom: 5, marginTop: 12 }
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
+      <div className="card" style={{ width: 460, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)', maxHeight: '88vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 2px' }}>Edit event</h3>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>To change the type, use the Activity type selector on the event (it handles captured attendance).</div>
+        <label style={{ ...label, marginTop: 16 }}>Name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} autoFocus />
+        <label style={label}>Date</label>
+        <input type="date" value={date || ''} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+        <label style={label}>Centre</label>
+        <select value={centerId} onChange={(e) => setCenterId(e.target.value)} style={inputStyle}>
+          <option value="">— select —</option>
+          {centers.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
+        </select>
+        <label style={label}>Description</label>
+        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} />
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={save}>{busy ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      </div>
+    </div>
   )
 }

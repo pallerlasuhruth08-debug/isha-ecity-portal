@@ -25,7 +25,7 @@ export default function Planning({ onToast }) {
   async function load() {
     try {
       const [a, s, t] = await Promise.all([
-        supabase.from('activities').select('id, name, center_id, activity_date, activity_type').order('activity_date', { ascending: false }).limit(200),
+        supabase.from('activities').select('id, name, center_id, activity_date, activity_type').is('archived_at', null).order('activity_date', { ascending: false }).limit(200),
         supabase.from('event_stages').select('activity_id, stage'),
         supabase.from('event_todos').select('activity_id, done'),
       ])
