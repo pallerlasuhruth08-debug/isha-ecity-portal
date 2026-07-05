@@ -40,6 +40,7 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
   const [manualMap, setManualMap] = useState({}) // personId -> caller key
   const [bulkCaller, setBulkCaller] = useState('')
 
+  const [isTest, setIsTest] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
@@ -129,6 +130,7 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
           message: message.trim() || null,
           audience,
           status: 'active',
+          is_test: isTest,
           segment: { from: audience === 'meditator' ? 'meditators' : 'volunteers', schedule: schedule || null, size: personIds.length, distribution, callers: selCallers.map((c) => ({ source: c.source, id: c.id })) },
         })
         .select('id, name')
@@ -199,6 +201,12 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
             <label style={label}>Campaign name *</label>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Shoonya — August cohort" style={field} />
           </div>
+          {/* Real vs test — a deliberate choice at creation. Test campaigns + all their
+              logs/statuses are excluded from real signals and are freely deletable. */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 13, cursor: 'pointer', color: isTest ? '#B5532F' : 'var(--ink-soft)' }}>
+            <input type="checkbox" checked={isTest} onChange={(e) => setIsTest(e.target.checked)} />
+            <span><strong>Test campaign</strong> — excluded from call-history, last-active &amp; stats; freely deletable</span>
+          </label>
           <div>
             <label style={label}>Target segment</label>
             <input value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="Who this reaches" style={field} />

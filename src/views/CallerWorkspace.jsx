@@ -46,7 +46,7 @@ export default function CallerWorkspace({ me, onToast }) {
     try {
       const { data: js, error } = await supabase
         .from('journeys')
-        .select('id, person_id, campaign_id, status, person:people!journeys_person_id_fkey(full_name, phone), campaign:campaigns!journeys_campaign_id_fkey(id, name, audience, goal, script, whatsapp_template, sms_template)')
+        .select('id, person_id, campaign_id, status, person:people!journeys_person_id_fkey(full_name, phone), campaign:campaigns!journeys_campaign_id_fkey(id, name, audience, goal, script, whatsapp_template, sms_template, is_test)')
         .eq('assigned_to', myId)
         .not('campaign_id', 'is', null)
         .neq('status', 'dropped')
@@ -88,7 +88,7 @@ export default function CallerWorkspace({ me, onToast }) {
     const map = {}
     for (const j of journeys || []) {
       const c = j.campaign
-      if (!c) continue
+      if (!c || c.is_test) continue // test campaigns never appear in a caller's real worklist
       const g = (map[c.id] ||= { ...c, audience: c.audience || c.goal || '', journeys: [], assigned: 0, toCall: 0, logged: 0 })
       const logs = logsByJ[j.id] || []
       g.journeys.push(j)

@@ -45,7 +45,7 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
         supabase.from('nurturer_assignments').select('nurturer:nurturers!nurturer_assignments_nurturer_id_fkey(full_name)').eq('meditator_id', personId).limit(1),
         supabase.from('manual_tags').select('id, tag').eq('person_id', personId).order('created_at', { ascending: false }),
         supabase.from('attendance').select('time_in, activity_type_id, activities!attendance_activity_id_fkey(name, activity_date), atype:activity_types(label, kind)').eq('person_id', personId),
-        supabase.from('journeys').select('type, calls(reachability, sadhana_status, remarks, completed_at)').eq('person_id', personId),
+        supabase.from('journeys').select('type, campaign:campaigns(is_test), calls(reachability, sadhana_status, remarks, completed_at)').eq('person_id', personId),
       ])
       if (pr.error) throw pr.error
       setP(pr.data)
@@ -61,7 +61,8 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
       for (const a of att.data || []) { const t = a.atype?.label; if (t) types.add(t) }
       setDerived([...types])
       const cs = []
-      for (const j of jn.data || []) for (const c of j.calls || []) if (c.completed_at || c.remarks || c.reachability) cs.push(c)
+      // Skip test-campaign calls — test contact never reads as real contact.
+      for (const j of jn.data || []) { if (j.campaign?.is_test) continue; for (const c of j.calls || []) if (c.completed_at || c.remarks || c.reachability) cs.push(c) }
       cs.sort((a, b) => new Date(b.completed_at || 0) - new Date(a.completed_at || 0))
       setCalls(cs)
     } catch (e) { setErr(e.message || String(e)) }

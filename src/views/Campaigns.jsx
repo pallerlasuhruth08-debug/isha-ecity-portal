@@ -42,12 +42,13 @@ export default function Campaigns({ me, isCoordinator = false, onToast }) {
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
   const [callFilter, setCallFilter] = useState('all')
+  const [showTest, setShowTest] = useState(false)
 
   const load = useCallback(async () => {
     try {
       const { data: camps, error: e1 } = await supabase
         .from('campaigns')
-        .select('id, name, goal, script, message, whatsapp_template, sms_template, segment, audience, status, center_id, created_at')
+        .select('id, name, goal, script, message, whatsapp_template, sms_template, segment, audience, status, center_id, created_at, is_test')
         .order('created_at', { ascending: false })
       if (e1) throw e1
 
@@ -212,27 +213,42 @@ export default function Campaigns({ me, isCoordinator = false, onToast }) {
       />
     )
 
+  const allCamps = campaigns || []
+  const testCount = allCamps.filter((c) => c.is_test).length
+  // Test campaigns are hidden from the real list (and their stats never count) by default.
+  const visibleCamps = allCamps.filter((c) => (showTest ? c.is_test : !c.is_test))
+
   return (
     <Pad>
-      <p style={{ margin: '0 0 18px', fontSize: 13.5, color: 'var(--muted)', maxWidth: 560 }}>
-        Pinpointed campaigns for volunteers and meditators — matched to insights so the right programme reaches the right cohort at the right time.
-      </p>
-      {(campaigns || []).length === 0 && (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 560 }}>
+          Pinpointed campaigns for volunteers and meditators — matched to insights so the right programme reaches the right cohort at the right time.
+        </p>
+        {testCount > 0 && (
+          <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: '8px 12px' }} onClick={() => setShowTest((s) => !s)}>
+            {showTest ? 'Hide test' : `Show test (${testCount})`}
+          </button>
+        )}
+      </div>
+      {visibleCamps.length === 0 && (
         <div className="card" style={{ padding: 28, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
-          No campaigns yet. Create one from the Dashboard insights or the Volunteers list.
+          {showTest ? 'No test campaigns.' : 'No campaigns yet. Create one from the Dashboard insights or the Volunteers list.'}
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(330px,1fr))', gap: 16 }}>
-        {(campaigns || []).map((c) => {
+        {visibleCamps.map((c) => {
           const e = enriched[c.id]
           return (
-            <div key={c.id} className="rowhover card" style={{ padding: 21, display: 'flex', flexDirection: 'column', cursor: 'pointer' }} onClick={() => setOpenId(c.id)}>
+            <div key={c.id} className="rowhover card" style={{ padding: 21, display: 'flex', flexDirection: 'column', cursor: 'pointer', ...(c.is_test ? { borderColor: '#E7C9B8', background: '#FDF7EF' } : {}) }} onClick={() => setOpenId(c.id)}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 13 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.25 }}>{c.name}</div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>{c.audience || c.goal || '—'}</div>
                 </div>
-                <span className="pill" style={CAMP_STATUS_PILL[c.status] || CAMP_STATUS_PILL.active}>{c.status}</span>
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                  {c.is_test && <span className="pill" style={{ background: '#F6E0CE', color: '#B5532F' }}>test</span>}
+                  <span className="pill" style={CAMP_STATUS_PILL[c.status] || CAMP_STATUS_PILL.active}>{c.status}</span>
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 22, padding: '13px 0', borderTop: '1px solid #F2EBDD', borderBottom: '1px solid #F2EBDD', marginBottom: 13 }}>
                 <Metric v={e.reach} label="reached" />
@@ -270,8 +286,27 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, reload, onBac
   const [busyId, setBusyId] = useState(null)
   const [addRecipients, setAddRecipients] = useState(false)
   const [addCaller, setAddCaller] = useState(false)
+  const [busyDel, setBusyDel] = useState(false)
   const myId = me?.id
   const myName = me?.full_name || ''
+
+  // Test campaigns are hard-deletable regardless of activity (their activity was never
+  // real). Delete the journeys first (SET NULL would orphan them) — that CASCADES their
+  // calls/call_logs — then the campaign. Never offered for real campaigns.
+  async function deleteTestCampaign() {
+    if (!c.is_test) return
+    if (!window.confirm(`Permanently delete the TEST campaign “${c.name}” and all its recipients, calls and logs? This cannot be undone.`)) return
+    setBusyDel(true)
+    try {
+      const { error: ej } = await supabase.from('journeys').delete().eq('campaign_id', c.id)
+      if (ej) throw ej
+      const { error: ec } = await supabase.from('campaigns').delete().eq('id', c.id)
+      if (ec) throw ec
+      onToast('Test campaign deleted.')
+      await reload()
+      onBack()
+    } catch (e) { onToast('Could not delete: ' + (e.message || e)) } finally { setBusyDel(false) }
+  }
 
   // Every person already in the campaign (active or removed) — so Add can't duplicate.
   const existingPersonIds = useMemo(
@@ -357,7 +392,13 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, reload, onBac
             <h2 style={{ fontSize: 23, fontWeight: 600, margin: '0 0 4px' }}>{c.name}</h2>
             <div style={{ fontSize: 13, color: 'var(--muted)' }}>{c.audience || c.goal || '—'}</div>
           </div>
-          <span className="pill" style={CAMP_STATUS_PILL[c.status] || CAMP_STATUS_PILL.active}>{c.status}</span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {c.is_test && <span className="pill" style={{ background: '#F6E0CE', color: '#B5532F' }}>test</span>}
+            <span className="pill" style={CAMP_STATUS_PILL[c.status] || CAMP_STATUS_PILL.active}>{c.status}</span>
+            {isCoordinator && c.is_test && (
+              <button disabled={busyDel} onClick={deleteTestCampaign} style={{ fontSize: 12.5, padding: '7px 12px', fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: busyDel ? 'default' : 'pointer' }}>Delete test campaign</button>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 26, marginTop: 18, paddingTop: 18, borderTop: '1px solid #F2EBDD', flexWrap: 'wrap' }}>
           <Metric v={c.reach} label="reached" />
