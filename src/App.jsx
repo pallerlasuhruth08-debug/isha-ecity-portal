@@ -12,6 +12,7 @@ import Nurturing from './views/Nurturing'
 import Events from './views/Events'
 import Planning from './views/Planning'
 import Unresolved from './views/Unresolved'
+import Admin from './views/Admin'
 import Placeholder from './views/Placeholder'
 import Login from './views/Login'
 import { ROLES, TAB_TITLES, TAB_LABELS } from './lib/roles'
@@ -46,9 +47,13 @@ function Portal({ profile, email }) {
   // NOT the (cosmetic, demo) persona switcher. Coordinator-capable roles get can_all()
   // server-side (RLS is the true backstop); this only decides which controls to render.
   const isCoordinator = ['admin', 'sector_nurturer', 'center_coordinator'].includes(profile?.role)
+  // Administration is gated on the REAL profile.role — NOT the cosmetic persona
+  // switcher — and RLS (admin-only policies) is the true backstop. The nav item
+  // is appended independently of the persona's tab list.
+  const isAdmin = profile?.role === 'admin'
 
   const roleDef = ROLES[role]
-  const tabs = roleDef.tabs
+  const tabs = isAdmin ? [...roleDef.tabs, 'admin'] : roleDef.tabs
   // If the current view isn't allowed for this role, fall back to the first tab.
   const activeView = tabs.includes(view) ? view : tabs[0]
 
@@ -93,6 +98,10 @@ function Portal({ profile, email }) {
         return <Planning onToast={showToast} />
       case 'unresolved':
         return <Unresolved me={profile} isCoordinator={isCoordinator} onToast={showToast} />
+      case 'admin':
+        // Hard gate: even if the view is somehow selected, non-admins get nothing
+        // (RLS also blocks every write these pages make).
+        return isAdmin ? <Admin me={profile} onToast={showToast} /> : <Placeholder view="admin" title="Administration" />
       default:
         return <Placeholder view={activeView} title={TAB_LABELS[activeView]} />
     }

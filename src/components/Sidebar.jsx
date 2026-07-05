@@ -13,6 +13,7 @@ const NAV = [
   { key: 'interest', icon: 'interest' },
   { key: 'campaigns', icon: 'campaigns' },
   { key: 'unresolved', icon: 'unresolved' },
+  { key: 'admin', icon: 'admin' },
 ]
 
 // variant 'rail' (default): the pinned in-flow sidebar (desktop full width,

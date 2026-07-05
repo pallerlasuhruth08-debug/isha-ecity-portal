@@ -111,4 +111,10 @@ export const Icon = {
       <path d="M12 7v3.2M12 12.4h.01" />
     </svg>
   ),
+  admin: (s) => (
+    <svg {...base(s)}>
+      <path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" />
+      <path d="M9.5 12l1.8 1.8L15 10" />
+    </svg>
+  ),
 }

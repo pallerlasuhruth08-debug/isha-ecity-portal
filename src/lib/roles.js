@@ -89,6 +89,7 @@ export const TAB_TITLES = {
   interest: ['Interest Inbox', 'Post-programme & verbal interest — triage and route'],
   campaigns: ['Campaigns', 'Insight-led outreach for volunteers & meditators'],
   unresolved: ['Unresolved', 'Walk-in attendance awaiting a match'],
+  admin: ['Administration', 'Users & roles, centres, and the pincode map'],
 }
 
 export const TAB_LABELS = {
@@ -102,4 +103,5 @@ export const TAB_LABELS = {
   interest: 'Interest Inbox',
   campaigns: 'Campaigns',
   unresolved: 'Unresolved',
+  admin: 'Administration',
 }
