@@ -1,6 +1,5 @@
 import { Icon } from '../lib/icons'
-import { ROLES, TAB_LABELS } from '../lib/roles'
-import { initials } from '../lib/ui'
+import { TAB_LABELS } from '../lib/roles'
 
 const NAV = [
   { key: 'dashboard', icon: 'dashboard' },
@@ -20,8 +19,7 @@ const NAV = [
 // tablet icon rail via the .app-sidebar media rule).
 // variant 'drawer': off-canvas overlay used below the phone breakpoint —
 // slides in from the left, backdrop closes, navigating closes it.
-export default function Sidebar({ role, view, tabs, onNavigate, variant = 'rail', open = false, onClose }) {
-  const roleDef = ROLES[role]
+export default function Sidebar({ me, view, tabs, onNavigate, variant = 'rail', open = false, onClose }) {
   const isDrawer = variant === 'drawer'
 
   const asideStyle = isDrawer
@@ -86,7 +84,7 @@ export default function Sidebar({ role, view, tabs, onNavigate, variant = 'rail'
               lineHeight: 1.05,
             }}
           >
-            ECT Center
+            Electronic City
           </div>
           <div
             style={{
@@ -127,51 +125,6 @@ export default function Sidebar({ role, view, tabs, onNavigate, variant = 'rail'
         </button>
       ))}
 
-      <div style={{ marginTop: 'auto', paddingTop: 18 }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 11,
-            padding: 10,
-            borderRadius: 13,
-            background: 'rgba(255,255,255,0.05)',
-          }}
-        >
-          <div
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: '50%',
-              background: 'linear-gradient(145deg,#3D6E60,#244A40)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 13,
-              fontWeight: 600,
-              color: '#EAF3EF',
-              flexShrink: 0,
-            }}
-          >
-            {initials(roleDef.who)}
-          </div>
-          <div className="sidebar-foot-text" style={{ minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: '#F0E6D6',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-            >
-              {roleDef.who}
-            </div>
-            <div style={{ fontSize: 11, color: '#9A8568' }}>{roleDef.label}</div>
-          </div>
-        </div>
-      </div>
     </aside>
   )
 

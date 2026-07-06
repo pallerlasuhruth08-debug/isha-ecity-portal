@@ -68,6 +68,16 @@ export const ROLES = {
   },
 }
 
+// Human labels for the REAL profiles.role values (distinct from the cosmetic
+// persona ROLES above). Used to show the actual signed-in user's role.
+export const REAL_ROLE_LABEL = {
+  admin: 'RCO / Admin',
+  sector_nurturer: 'Sector Nurturer',
+  center_coordinator: 'Centre Coordinator',
+  nurturer: 'Nurturer',
+  volunteer: 'Volunteer',
+}
+
 export const ROLE_ORDER = [
   'centre',
   'sector',
@@ -82,7 +92,7 @@ export const TAB_TITLES = {
   dashboard: ['Dashboard', 'Volunteer & meditator care at a glance'],
   volunteers: ['Volunteers', 'Organised by journey stage'],
   planning: ['Planning', 'Calendar & the things that need to get done'],
-  events: ['Events', 'Run the day — attendance, walk-ins & to-dos'],
+  events: ['Attendance', 'Mark show / no-show and capture walk-ins'],
   nurturing: ['Nurturing & Care', 'Volunteer core groups & nurturers'],
   meditators: ['Meditators', 'Nurturing those who have completed programmes'],
   advance: ['Advance Programmes', 'Bhava Spandana, Shoonya, Samyama & Guru Puja'],
@@ -96,7 +106,7 @@ export const TAB_LABELS = {
   dashboard: 'Dashboard',
   volunteers: 'Volunteers',
   planning: 'Planning',
-  events: 'Events',
+  events: 'Attendance',
   nurturing: 'Nurturing & Care',
   meditators: 'Meditators',
   advance: 'Advance Programmes',

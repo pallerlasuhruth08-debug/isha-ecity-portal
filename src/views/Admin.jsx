@@ -38,7 +38,6 @@ export default function Admin({ me, onToast }) {
   return (
     <Pad>
       <div style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 3px' }}>Administration</h2>
         <div style={{ fontSize: 13, color: 'var(--muted)' }}>
           Access is derived from role + the pincode map — set a person's role (and, for a coordinator, their centre); the database does the filtering.
         </div>

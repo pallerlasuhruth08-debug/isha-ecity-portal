@@ -72,7 +72,12 @@ const TRACK_TABS = [
   { key: 'volunteer', label: 'Volunteer nurturing' },
 ]
 
-export default function Dashboard({ onToast, onNavigate }) {
+export default function Dashboard({ me, onToast, onNavigate }) {
+  // Greeting name = the REAL logged-in profile (never a hardcoded/persona name).
+  // Falls back to the email local-part, then a bare greeting.
+  const rawName = (me?.full_name || '').trim() || (me?.email ? me.email.split('@')[0] : '')
+  const firstName = rawName.split(/\s+/)[0]
+
   const [kpis, setKpis] = useState(null)
   const [err, setErr] = useState(null)
   const [track, setTrack] = useState('all')
@@ -105,7 +110,7 @@ export default function Dashboard({ onToast, onNavigate }) {
 
   return (
     <div className="main-pad" style={{ padding: '26px 32px 60px', overflowY: 'auto' }}>
-      <h2 style={{ fontSize: 25, fontWeight: 600, margin: '0 0 4px' }}>Good morning, Meera</h2>
+      <h2 style={{ fontSize: 25, fontWeight: 600, margin: '0 0 4px' }}>Namaskaram{firstName ? `, ${firstName}` : ''}</h2>
       <div style={{ fontSize: 13.5, color: 'var(--muted)', marginBottom: 22 }}>
         Here's what's moving across the center today.
       </div>

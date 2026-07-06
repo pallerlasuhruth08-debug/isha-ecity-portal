@@ -46,11 +46,13 @@ export const Icon = {
       <path d="M16 11l-2 2-1.5-1.5" />
     </svg>
   ),
+  // Seated / meditating figure (head, torso, hands resting on folded legs).
   meditators: (s) => (
     <svg {...base(s)}>
-      <circle cx="12" cy="5" r="2.3" />
-      <path d="M12 8.5c-1.4 1.6-3.7 2.6-6 2.9M12 8.5c1.4 1.6 3.7 2.6 6 2.9M12 8.5v6" />
-      <path d="M5 19c1.8-2.5 4.2-3.5 7-3.5s5.2 1 7 3.5" />
+      <circle cx="12" cy="4.6" r="2.2" />
+      <path d="M12 8.2v3" />
+      <path d="M8.3 13c1 .9 2.3 1.4 3.7 1.4s2.7-.5 3.7-1.4" />
+      <path d="M4.8 18.8c.8-2.8 3.6-4.8 7.2-4.8s6.4 2 7.2 4.8z" />
     </svg>
   ),
   advance: (s) => (

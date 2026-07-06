@@ -1,120 +1,43 @@
 import { useState } from 'react'
 import { Icon } from '../lib/icons'
-import { ROLES, ROLE_ORDER } from '../lib/roles'
+import { REAL_ROLE_LABEL } from '../lib/roles'
 import { initials } from '../lib/ui'
 import { useBreakpoint } from '../lib/useBreakpoint'
 
-export default function Topbar({ role, title, subtitle, onPickRole, user, onSignOut, onMenu }) {
+// The user button shows the REAL signed-in profile (name + role) — never the
+// cosmetic persona. The persona role-switcher and the placeholder search box
+// have been removed; the menu is just identity + sign out.
+export default function Topbar({ title, subtitle, me, email, onSignOut, onMenu }) {
   const [menu, setMenu] = useState(false)
   const { isPhone } = useBreakpoint()
-  const roleDef = ROLES[role]
+  const name = me?.full_name?.trim() || me?.email || email || 'You'
+  const roleLabel = REAL_ROLE_LABEL[me?.role] || me?.role || ''
 
   return (
     <header
       className="topbar"
-      style={{
-        height: 70,
-        flexShrink: 0,
-        borderBottom: '1px solid var(--border)',
-        background: 'var(--panel)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        padding: '0 clamp(14px, 4vw, 32px)',
-      }}
+      style={{ height: 70, flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--panel)', display: 'flex', alignItems: 'center', gap: 14, padding: '0 clamp(14px, 4vw, 32px)' }}
     >
       {onMenu && (
-        // Hamburger — only rendered below the phone breakpoint (App passes
-        // onMenu only then). Opens the off-canvas nav drawer.
-        <button
-          className="topbar-burger"
-          onClick={onMenu}
-          aria-label="Open menu"
-          style={{ flexShrink: 0, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', border: '1px solid var(--border)', borderRadius: 11, cursor: 'pointer', color: 'var(--ink)' }}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-            <path d="M3 6h18M3 12h18M3 18h18" />
-          </svg>
+        <button className="topbar-burger" onClick={onMenu} aria-label="Open menu" style={{ flexShrink: 0, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', border: '1px solid var(--border)', borderRadius: 11, cursor: 'pointer', color: 'var(--ink)' }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M3 6h18M3 12h18M3 18h18" /></svg>
         </button>
       )}
       <div style={{ minWidth: 0 }}>
-        <h1
-          style={{
-            fontSize: 21,
-            fontWeight: 600,
-            margin: 0,
-            lineHeight: 1.1,
-            color: 'var(--ink)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {title}
-        </h1>
-        {/* Subtitle costs a second line on phone and pushes the header taller —
-            hide it there; it stays on tablet/desktop. */}
+        <h1 style={{ fontSize: 21, fontWeight: 600, margin: 0, lineHeight: 1.1, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</h1>
         {!isPhone && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 1 }}>{subtitle}</div>}
       </div>
 
-      <div
-        className="topbar-search"
-        style={{
-          marginLeft: 'auto',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 9,
-          background: '#fff',
-          border: '1px solid var(--border)',
-          borderRadius: 11,
-          padding: '9px 13px',
-          width: 240,
-        }}
-      >
-        {Icon.search(16)}
-        <span style={{ fontSize: 13, color: 'var(--muted-2)' }}>Search volunteers…</span>
-      </div>
-
-      <div style={{ position: 'relative', flexShrink: 0, marginLeft: isPhone ? 'auto' : undefined }}>
+      <div style={{ position: 'relative', flexShrink: 0, marginLeft: 'auto' }}>
         <button
           onClick={() => setMenu((m) => !m)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            background: '#fff',
-            border: '1px solid var(--border)',
-            borderRadius: 11,
-            padding: isPhone ? '0 8px' : '0 11px',
-            height: isPhone ? 44 : 42,
-            cursor: 'pointer',
-          }}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: '1px solid var(--border)', borderRadius: 11, padding: isPhone ? '0 8px' : '0 11px', height: isPhone ? 44 : 42, cursor: 'pointer' }}
         >
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: '50%',
-              background: 'linear-gradient(145deg,#DE8038,#B85C1E)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 11,
-              fontWeight: 700,
-              color: '#fff',
-              flexShrink: 0,
-            }}
-          >
-            {initials(roleDef.who)}
-          </div>
-          {/* The role label/scope is demo chrome; on phone show only the
-              avatar + chevron to give the page title room. */}
+          <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(145deg,#DE8038,#B85C1E)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#fff', flexShrink: 0 }}>{initials(name)}</div>
           {!isPhone && (
             <div style={{ textAlign: 'left', lineHeight: 1.15 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap' }}>
-                {roleDef.label}
-              </div>
-              <div style={{ fontSize: 10.5, color: '#9A8568', whiteSpace: 'nowrap' }}>{roleDef.scope}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap' }}>{name}</div>
+              {roleLabel && <div style={{ fontSize: 10.5, color: '#9A8568', whiteSpace: 'nowrap' }}>{roleLabel}</div>}
             </div>
           )}
           {Icon.chevron(14)}
@@ -123,99 +46,18 @@ export default function Topbar({ role, title, subtitle, onPickRole, user, onSign
         {menu && (
           <>
             <div style={{ position: 'fixed', inset: 0, zIndex: 50 }} onClick={() => setMenu(false)} />
-            <div
-              style={{
-                position: 'absolute',
-                top: 50,
-                right: 0,
-                width: 292,
-                background: '#fff',
-                border: '1px solid var(--border)',
-                borderRadius: 15,
-                boxShadow: 'var(--shadow-lg)',
-                padding: 8,
-                zIndex: 60,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 10.5,
-                  letterSpacing: '.1em',
-                  textTransform: 'uppercase',
-                  color: 'var(--muted-2)',
-                  fontWeight: 700,
-                  padding: '8px 11px 6px',
-                }}
-              >
-                Switch role · view access
+            <div style={{ position: 'absolute', top: 50, right: 0, width: 250, background: '#fff', border: '1px solid var(--border)', borderRadius: 15, boxShadow: 'var(--shadow-lg)', padding: 8, zIndex: 60 }}>
+              <div style={{ padding: '8px 11px 10px' }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{name}</div>
+                {roleLabel && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{roleLabel}</div>}
               </div>
-              {ROLE_ORDER.map((rk) => {
-                const r = ROLES[rk]
-                const cur = rk === role
-                return (
-                  <div
-                    key={rk}
-                    className="rowhover"
-                    onClick={() => {
-                      onPickRole(rk)
-                      setMenu(false)
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 11,
-                      padding: '9px 11px',
-                      borderRadius: 11,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: '50%',
-                        background: cur ? 'linear-gradient(145deg,#DE8038,#B85C1E)' : '#EFE6D6',
-                        color: cur ? '#fff' : '#7A6A52',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 12,
-                        fontWeight: 700,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {initials(r.who)}
-                    </div>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{r.label}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.scope}</div>
-                    </div>
-                    {cur && (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C2691F" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M20 6 9 17l-5-5" />
-                      </svg>
-                    )}
-                  </div>
-                )
-              })}
-              <div style={{ borderTop: '1px solid var(--border)', margin: '6px 4px 0', paddingTop: 6 }}>
-                {user && (
-                  <div style={{ fontSize: 11.5, color: 'var(--muted)', padding: '4px 11px' }}>
-                    Signed in as <strong style={{ color: 'var(--ink-soft)' }}>{user}</strong>
-                  </div>
-                )}
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6 }}>
                 <div
                   className="rowhover"
-                  onClick={() => {
-                    setMenu(false)
-                    onSignOut && onSignOut()
-                  }}
+                  onClick={() => { setMenu(false); onSignOut && onSignOut() }}
                   style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 11, cursor: 'pointer', color: '#B5532F', fontSize: 13, fontWeight: 600 }}
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                    <path d="m16 17 5-5-5-5M21 12H9" />
-                  </svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5M21 12H9" /></svg>
                   Sign out
                 </div>
               </div>

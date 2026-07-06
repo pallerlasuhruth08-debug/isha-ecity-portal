@@ -80,7 +80,6 @@ export default function Nurturing({ me, isCoordinator = false, onToast }) {
   return (
     <Pad>
       <div style={{ marginBottom: 18 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 3px' }}>Nurturing & Care</h2>
         <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)' }}>Nurturing teams. Assignment happens on the Volunteers &amp; Meditators screens — this view is for oversight.</p>
       </div>
       {teams.length === 0 && <Empty label="No teams yet." />}

@@ -226,7 +226,6 @@ export default function CallerWorkspace({ me, onToast }) {
     <Pad>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap', marginBottom: 18 }}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>My campaigns</h2>
           <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)' }}>The campaigns you're calling for, and how many calls are assigned to you.</p>
         </div>
         <div style={{ display: 'flex', gap: 24 }}>

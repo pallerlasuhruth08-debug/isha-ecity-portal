@@ -365,7 +365,6 @@ export default function Volunteers({ me, onToast }) {
   return (
     <Pad>
       <div style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 3px' }}>Volunteers</h2>
         <div style={{ fontSize: 13, color: 'var(--muted)' }}>
           {loading ? 'Loading…' : `${total} total · click a row to open the profile; use checkboxes to build a campaign.`}
         </div>

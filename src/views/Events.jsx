@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
@@ -6,6 +6,9 @@ import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import WalkinCapture from '../components/WalkinCapture'
 import { ensureParticipation } from '../lib/volunteers'
 import { fetchActivityTypes } from '../lib/activityTypes'
+import { fmtDay, effectiveStage, generateOccurrences } from '../lib/planning'
+import EventList, { EventCalendarPanel } from '../components/EventList'
+import RecurrenceFields, { toRule } from '../components/RecurrenceFields'
 
 // ────────────────────────────────────────────────────────────────────────────
 // BOUNDARY (do not remove): Event CREATION and MANAGEMENT live HERE, on the
@@ -17,43 +20,42 @@ import { fetchActivityTypes } from '../lib/activityTypes'
 // regression. Keep it.
 // ────────────────────────────────────────────────────────────────────────────
 
-const STAGES = ['Thinking', 'Planning', 'Executing', 'Reminder', 'Done']
+// Three-stage lifecycle (matches the event_stages CHECK + the Planning page).
+const STAGES = ['Planning', 'Ongoing', 'Done']
 const STAGE_PILL = {
-  Thinking: pill('#F1EADD', '#8C7E6B'),
   Planning: pill('#FBEAD9', '#C28A2A'),
-  Executing: pill('#F6E8D8', '#C2691F'),
-  Reminder: pill('#E9F0EF', '#2F6E5E'),
+  Ongoing: pill('#F6E8D8', '#C2691F'),
   Done: pill('#EAF2E5', '#4E7C3F'),
 }
-const STAGE_DOT = { Thinking: '#B7A88E', Planning: '#C28A2A', Executing: '#C2691F', Reminder: '#2F6E5E', Done: '#4E7C3F' }
+const STAGE_DOT = { Planning: '#C28A2A', Ongoing: '#C2691F', Done: '#4E7C3F' }
 
 function fmtDate(d) {
   if (!d) return 'TBD'
   return new Date(d).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
-export default function Events({ me, isCoordinator = false, onToast }) {
+export default function Events({ me, isCoordinator = false, onToast, openEventId = null, onEventConsumed }) {
   const [acts, setActs] = useState(null)
-  const [stages, setStages] = useState({})
+  const [stageRows, setStageRows] = useState({}) // activity_id -> {stage, manual}
   const [types, setTypes] = useState([])
   const [centers, setCenters] = useState([])
-  const [creating, setCreating] = useState(false)
-  const [showArchived, setShowArchived] = useState(false)
+  const [creating, setCreating] = useState(null) // preset date | true
+  const [showCal, setShowCal] = useState(false)
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
 
   async function load() {
     try {
       const [a, s, t, c] = await Promise.all([
-        supabase.from('activities').select('id, name, center_id, activity_date, activity_type, activity_type_id, is_open, description, archived_at').order('activity_date', { ascending: false }).limit(200),
-        supabase.from('event_stages').select('activity_id, stage'),
+        supabase.from('activities').select('id, name, center_id, activity_date, start_date, end_date, activity_type, activity_type_id, is_open, description, archived_at, series_id').is('archived_at', null).order('start_date', { ascending: true }).limit(300),
+        supabase.from('event_stages').select('activity_id, stage, manual'),
         fetchActivityTypes().catch(() => []),
         supabase.from('centers').select('id, name').order('name'),
       ])
       if (a.error) throw a.error
       if (s.error) throw s.error
       setActs(a.data || [])
-      setStages(Object.fromEntries((s.data || []).map((r) => [r.activity_id, r.stage])))
+      setStageRows(Object.fromEntries((s.data || []).map((r) => [r.activity_id, r])))
       setTypes(t || [])
       setCenters(c.data || [])
     } catch (e) {
@@ -64,9 +66,17 @@ export default function Events({ me, isCoordinator = false, onToast }) {
     load()
   }, [])
 
+  // Open a specific event when routed here (e.g. from the utility-drawer calendar).
+  useEffect(() => {
+    if (!openEventId || acts === null) return
+    if (acts.some((a) => a.id === openEventId)) setOpenId(openEventId)
+    onEventConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openEventId, acts])
+
   async function setStage(activityId, stage) {
-    setStages((p) => ({ ...p, [activityId]: stage }))
-    const { error } = await supabase.from('event_stages').upsert({ activity_id: activityId, stage, updated_at: new Date().toISOString() }, { onConflict: 'activity_id' })
+    setStageRows((p) => ({ ...p, [activityId]: { ...(p[activityId] || {}), stage, manual: true } }))
+    const { error } = await supabase.from('event_stages').upsert({ activity_id: activityId, stage, manual: true, updated_at: new Date().toISOString() }, { onConflict: 'activity_id' })
     if (error) {
       onToast('Could not save stage: ' + error.message)
       load()
@@ -75,66 +85,39 @@ export default function Events({ me, isCoordinator = false, onToast }) {
 
   const loading = !acts && !err
   const open = openId ? (acts || []).find((a) => a.id === openId) : null
-  // Archived events are hidden from the active list (attendance stays queryable).
-  const archivedCount = (acts || []).filter((a) => a.archived_at).length
-  const visibleActs = (acts || []).filter((a) => (showArchived ? a.archived_at : !a.archived_at))
 
-  if (open) return <Detail activity={open} stage={stages[open.id] || 'Planning'} onStage={(st) => setStage(open.id, st)} onBack={() => setOpenId(null)} me={me} isCoordinator={isCoordinator} types={types} onActivityChanged={load} onToast={onToast} />
+  if (open) return <Detail activity={open} stage={effectiveStage(open, stageRows[open.id])} onStage={(st) => setStage(open.id, st)} onBack={() => setOpenId(null)} me={me} isCoordinator={isCoordinator} types={types} onActivityChanged={load} onToast={onToast} />
 
   return (
     <Pad>
       {/* Header: intro + the PERMANENT Create-event action (coordinators). See the
           BOUNDARY note at the top of this file — do not remove this. */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
-        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 520 }}>
-          Offline &amp; online events — create events, take attendance, add walk-ins on the day, and track each event's stage &amp; to-dos.
-        </p>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {archivedCount > 0 && (
-            <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: '8px 12px' }} onClick={() => setShowArchived((s) => !s)}>
-              {showArchived ? 'Hide archived' : `Show archived (${archivedCount})`}
-            </button>
-          )}
-          {isCoordinator && (
-            <button className="btn btn-primary" style={{ fontSize: 13, padding: '9px 15px' }} onClick={() => setCreating(true)}>+ Create event</button>
-          )}
-        </div>
-      </div>
+      <p style={{ margin: '0 0 14px', fontSize: 13.5, color: 'var(--muted)' }}>Mark show / no-show for planned volunteers and capture walk-ins on the day.</p>
       {err && <ErrorCard>Couldn't load events: {err}</ErrorCard>}
-      {loading && <Loading label="Loading events…" />}
-      {!loading && visibleActs.length === 0 && <Empty label={showArchived ? 'No archived events.' : 'No events yet.'} />}
+      {loading ? <Loading label="Loading events…" /> : (
+        <EventList events={acts} stageRows={stageRows} onOpen={setOpenId} right={isCoordinator && (
+          <>
+            <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: '8px 13px' }} onClick={() => setShowCal(true)}>📅 Calendar</button>
+            <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setCreating(true)}>＋ Create event</button>
+          </>
+        )} />
+      )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 16 }}>
-        {visibleActs.map((a) => {
-          const st = stages[a.id] || 'Planning'
-          return (
-            <div key={a.id} className="rowhover card" style={{ padding: 20, cursor: 'pointer' }} onClick={() => setOpenId(a.id)}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.25 }}>{a.name}</div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>{fmtDate(a.activity_date)} · {a.center_id}</div>
-                </div>
-                <span className="pill" style={STAGE_PILL[st]}>{st}</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 12, borderTop: '1px solid #F2EBDD', color: 'var(--orange)', fontSize: 13, fontWeight: 600 }}>
-                <span style={{ color: a.is_open ? '#4E7C3F' : '#8C7E6B', fontSize: 12 }}>{a.is_open ? '● open' : '○ closed'}</span>
-                <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                  Open
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
-                </span>
-              </div>
-            </div>
-          )
-        })}
-      </div>
+      {showCal && (
+        <EventCalendarPanel events={acts || []} stageRows={stageRows}
+          onOpen={(id) => { setShowCal(false); setOpenId(id) }}
+          onCreateDay={isCoordinator ? (d) => { setShowCal(false); setCreating(d) } : undefined}
+          onClose={() => setShowCal(false)} />
+      )}
 
       {creating && (
         <CreateEventForm
           me={me}
           types={types}
           centers={centers}
-          onClose={() => setCreating(false)}
-          onCreated={(id) => { setCreating(false); load().then(() => id && setOpenId(id)) }}
+          preset={creating === true ? '' : creating}
+          onClose={() => setCreating(null)}
+          onCreated={(id) => { setCreating(null); load().then(() => id && setOpenId(id)) }}
           onToast={onToast}
         />
       )}
@@ -144,34 +127,45 @@ export default function Events({ me, isCoordinator = false, onToast }) {
 
 // The permanent Create-event form (see BOUNDARY note at top of file). Inserts an
 // activities row; RLS (act_all) allows coordinators / center coordinators.
-function CreateEventForm({ me, types = [], centers = [], onClose, onCreated, onToast }) {
+function CreateEventForm({ me, types = [], centers = [], preset = '', onClose, onCreated, onToast }) {
   const [name, setName] = useState('')
-  const [date, setDate] = useState('')
+  const [date, setDate] = useState(preset || '')
   const [centerId, setCenterId] = useState(me?.center_id && me.center_id !== 'all' ? me.center_id : '')
   const [typeId, setTypeId] = useState('')
   const [description, setDescription] = useState('')
+  const [recur, setRecur] = useState({ freq: 'none' })
   const [busy, setBusy] = useState(false)
 
   async function create() {
     if (!name.trim()) return onToast('Give the event a name.')
     setBusy(true)
     try {
-      const { data, error } = await supabase
-        .from('activities')
-        .insert({
-          name: name.trim(),
-          activity_date: date || new Date().toISOString().slice(0, 10),
-          center_id: centerId || me?.center_id || 'unassigned',
-          activity_type_id: typeId || null,
-          description: description.trim() || null,
-          is_open: true,
-          created_by: me?.id || null,
-        })
-        .select('id')
-        .single()
-      if (error) throw error
-      onToast(`Event “${name.trim()}” created.`)
-      onCreated?.(data.id)
+      const d0 = date || new Date().toISOString().slice(0, 10)
+      const base = {
+        name: name.trim(),
+        center_id: centerId || me?.center_id || 'unassigned',
+        activity_type_id: typeId || null,
+        description: description.trim() || null,
+        is_open: true,
+        created_by: me?.id || null,
+      }
+      const rule = toRule(recur)
+      if (rule.freq === 'none') {
+        const { data, error } = await supabase.from('activities')
+          .insert({ ...base, activity_date: d0, start_date: d0, end_date: d0 }).select('id').single()
+        if (error) throw error
+        onToast(`Event “${name.trim()}” created.`)
+        onCreated?.(data.id)
+      } else {
+        // One INDEPENDENT activities row per occurrence, grouped by series_id.
+        const seriesId = crypto.randomUUID()
+        const ruleStr = JSON.stringify(rule)
+        const rows = generateOccurrences(d0, rule).map((s) => ({ ...base, activity_date: s, start_date: s, end_date: s, series_id: seriesId, recurrence_rule: ruleStr }))
+        const { data, error } = await supabase.from('activities').insert(rows).select('id')
+        if (error) throw error
+        onToast(`Created ${rows.length} occurrences of “${name.trim()}”.`)
+        onCreated?.(data?.[0]?.id)
+      }
     } catch (e) {
       onToast('Could not create event: ' + (e.message || e))
     } finally {
@@ -214,9 +208,12 @@ function CreateEventForm({ me, types = [], centers = [], onClose, onCreated, onT
         <label style={label}>Description (optional)</label>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} />
 
+        <label style={label}>Repeats</label>
+        <RecurrenceFields value={recur} onChange={setRecur} />
+
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={create}>{busy ? 'Creating…' : 'Create event'}</button>
+          <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={create}>{busy ? 'Creating…' : toRule(recur).freq === 'none' ? 'Create event' : 'Create series'}</button>
         </div>
       </div>
     </div>
@@ -493,6 +490,10 @@ function Detail({ activity, stage, onStage, onBack, me, isCoordinator, types = [
         </div>
       </div>
 
+      {/* Attendance for planned volunteers — marked HERE (show/no-show). The
+          staffing/vacate/backfill logic lives on Planning, which reflects these marks. */}
+      <PlannedVolunteers activityId={activity.id} isCoordinator={isCoordinator} me={me} onToast={onToast} />
+
       {capturing && (
         <WalkinCapture
           activity={activity}
@@ -586,6 +587,74 @@ function EditEventForm({ activity, me, onClose, onSaved, onToast }) {
           <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={save}>{busy ? 'Saving…' : 'Save changes'}</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Planned-volunteer ATTENDANCE — marked here (show / no-show). The staffing +
+// vacate/backfill logic lives on Planning and reflects these marks. Renders
+// nothing if the event has no activity blocks.
+function PlannedVolunteers({ activityId, isCoordinator, me, onToast }) {
+  const [data, setData] = useState(undefined)
+  const load = useCallback(async () => {
+    const { data: blocks } = await supabase.from('activity_blocks').select('id, heading').eq('activity_id', activityId).order('created_at')
+    const ids = (blocks || []).map((b) => b.id)
+    let asg = []
+    let people = {}
+    if (ids.length) {
+      const r = await supabase.from('block_assignments').select('id, block_id, person_id, day_date, status').in('block_id', ids)
+      asg = r.data || []
+      const pids = [...new Set(asg.map((a) => a.person_id))]
+      if (pids.length) {
+        const pp = await supabase.from('people').select('id, full_name').in('id', pids)
+        people = Object.fromEntries((pp.data || []).map((p) => [p.id, p]))
+      }
+    }
+    setData({ blocks: blocks || [], asg, people })
+  }, [activityId])
+  useEffect(() => { load() }, [load])
+
+  async function mark(a, status) {
+    // Toggle off if the same status is tapped again → back to 'assigned' (re-fills the slot).
+    const next = a.status === status ? 'assigned' : status
+    const { error } = await supabase.from('block_assignments').update({ status: next, marked_by: me?.id || null, marked_at: new Date().toISOString() }).eq('id', a.id)
+    if (error) return onToast('Could not mark: ' + error.message)
+    onToast(`Marked ${next === 'assigned' ? 'cleared' : next.replace('_', '-')}.`)
+    load()
+  }
+
+  if (data === undefined || data.blocks.length === 0) return null
+  const STATUS = { assigned: { t: '—', c: 'var(--muted-2)' }, show: { t: 'showed', c: '#4E7C3F' }, no_show: { t: 'no-show', c: '#B5532F' }, dropped: { t: 'dropped', c: '#9C4A14' } }
+
+  return (
+    <div className="card" style={{ padding: 20, marginTop: 16 }}>
+      <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 4px' }}>Planned volunteers · attendance</h3>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 14 }}>Mark who showed. A no-show reopens the slot on Planning for backfill.</div>
+      {data.blocks.map((b) => {
+        const rows = data.asg.filter((a) => a.block_id === b.id)
+        return (
+          <div key={b.id} style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>{b.heading}</div>
+            {rows.length === 0 ? <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>No one assigned.</div> : rows.map((a) => {
+              const s = STATUS[a.status] || STATUS.assigned
+              return (
+                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid #F4EEE2' }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 500, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{data.people[a.person_id]?.full_name || 'Unknown'}</div>
+                  <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{fmtDay(a.day_date)}</span>
+                  {isCoordinator ? (
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button onClick={() => mark(a, 'show')} title="Showed" style={{ padding: '4px 9px', fontSize: 11, fontWeight: 600, borderRadius: 6, border: '1px solid #CDE3C6', background: a.status === 'show' ? '#EAF2E5' : '#fff', color: '#4E7C3F', cursor: 'pointer' }}>Show</button>
+                      <button onClick={() => mark(a, 'no_show')} title="No-show (reopens the slot)" style={{ padding: '4px 9px', fontSize: 11, fontWeight: 600, borderRadius: 6, border: '1px solid #E7C9B8', background: a.status === 'no_show' ? '#FBE6E0' : '#fff', color: '#B5532F', cursor: 'pointer' }}>No-show</button>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: 11, fontWeight: 600, color: s.c, minWidth: 56, textAlign: 'right' }}>{s.t}</span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })}
     </div>
   )
 }

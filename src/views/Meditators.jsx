@@ -181,7 +181,6 @@ export default function Meditators({ me, onToast }) {
     <Pad>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 3px' }}>Meditators</h2>
           <div style={{ fontSize: 13, color: 'var(--muted)' }}>{loading ? 'Loading…' : `${total} in care · filter by programme and recent activity.`}</div>
         </div>
         <button className="btn" disabled={resolving} onClick={openCampaign}>{Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}</button>

@@ -82,7 +82,7 @@ export default function Login() {
           </div>
           <div>
             <div style={{ fontFamily: "'Newsreader',serif", fontSize: 19, fontWeight: 600, color: 'var(--ink)' }}>
-              ECT Center
+              Electronic City
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted-2)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
               Volunteer Care
@@ -91,7 +91,7 @@ export default function Login() {
         </div>
 
         <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 4px' }}>
-          {mode === 'signin' ? 'Welcome back' : 'Create your account'}
+          {mode === 'signin' ? 'Namaskaram' : 'Create your account'}
         </h2>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 20 }}>
           {mode === 'signin'
