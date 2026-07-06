@@ -116,6 +116,23 @@ function UserRow({ u, idx, centres, onToast, onSaved }) {
     }
   }
 
+  // Deactivating flips profiles.active → is_active() false → RLS denies ALL data
+  // access for that user, regardless of role. The right lever for test / departed
+  // accounts (keeps the record + role type; just removes live scope).
+  async function toggleActive() {
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('profiles').update({ active: !u.active }).eq('id', u.id)
+      if (error) throw error
+      onToast(`${u.full_name || u.email} ${u.active ? 'deactivated — no data access' : 'reactivated'}.`)
+      onSaved()
+    } catch (e) {
+      onToast('Could not update: ' + (e.message || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="rowhover" style={{ display: 'flex', gap: 12, padding: '14px 18px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', flexWrap: 'wrap' }}>
       <div style={{ width: 38, height: 38, borderRadius: '50%', background: avatarFor(idx), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(u.full_name || u.email || '?')}</div>
@@ -133,6 +150,9 @@ function UserRow({ u, idx, centres, onToast, onSaved }) {
       </select>
       <button className="btn btn-primary" disabled={!dirty || busy} onClick={save} style={{ padding: '9px 15px', fontSize: 12.5, opacity: dirty ? 1 : 0.5 }}>
         {busy ? 'Saving…' : 'Save'}
+      </button>
+      <button className="btn btn-ghost" disabled={busy} onClick={toggleActive} title={u.active ? 'Remove all data access (keeps the record)' : 'Restore access'} style={{ padding: '9px 12px', fontSize: 12.5, color: u.active ? '#B5532F' : '#4E7C3F' }}>
+        {u.active ? 'Deactivate' : 'Activate'}
       </button>
     </div>
   )

@@ -4,8 +4,8 @@ import { TAB_LABELS } from '../lib/roles'
 const NAV = [
   { key: 'dashboard', icon: 'dashboard' },
   { key: 'volunteers', icon: 'volunteers' },
-  { key: 'planning', icon: 'planning' },
   { key: 'events', icon: 'events' },
+  { key: 'hub', icon: 'hub' },
   { key: 'nurturing', icon: 'nurturing' },
   { key: 'meditators', icon: 'meditators' },
   { key: 'advance', icon: 'advance' },

@@ -33,13 +33,14 @@ function lastTouch(logs) {
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
 
-export default function Campaigns({ me, isCoordinator = false, onToast }) {
+export default function Campaigns({ me, isCoordinator = false, onToast, openCampaignId = null, onCampaignConsumed }) {
   const [campaigns, setCampaigns] = useState(null)
   const [journeys, setJourneys] = useState([])
   const [logsByJourney, setLogsByJourney] = useState({})
   const [callerNames, setCallerNames] = useState({}) // `${source}:${id}` -> name
   const [callerPools, setCallerPools] = useState({}) // campaign_id -> [{key,source,id,name,profileId}]
   const [actorNames, setActorNames] = useState({}) // profile.id -> full_name (call_logs actor)
+  const [eventNames, setEventNames] = useState({}) // activity.id -> {name, activity_date} for linked events
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
   const [callFilter, setCallFilter] = useState('all')
@@ -49,9 +50,18 @@ export default function Campaigns({ me, isCoordinator = false, onToast }) {
     try {
       const { data: camps, error: e1 } = await supabase
         .from('campaigns')
-        .select('id, name, goal, script, message, whatsapp_template, sms_template, segment, audience, status, center_id, created_at, is_test')
+        .select('id, name, goal, script, message, whatsapp_template, sms_template, segment, audience, status, center_id, created_at, is_test, event_id')
         .order('created_at', { ascending: false })
       if (e1) throw e1
+
+      // Resolve linked-event names (optional link; most campaigns have none).
+      const evIds = [...new Set((camps || []).map((c) => c.event_id).filter(Boolean))]
+      const evNames = {}
+      if (evIds.length) {
+        const { data: evs } = await supabase.from('activities').select('id, name, activity_date').in('id', evIds)
+        for (const e of evs || []) evNames[e.id] = e
+      }
+      setEventNames(evNames)
 
       const { data: js, error: e2 } = await supabase
         .from('journeys')
@@ -138,6 +148,14 @@ export default function Campaigns({ me, isCoordinator = false, onToast }) {
     return () => { alive = false }
   }, [load])
 
+  // Open a specific campaign when routed here (e.g. from an event-hub row).
+  useEffect(() => {
+    if (!openCampaignId || !campaigns) return
+    if (campaigns.some((c) => c.id === openCampaignId)) setOpenId(openCampaignId)
+    onCampaignConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openCampaignId, campaigns])
+
   // Build per-campaign contact rows + aggregates.
   const enriched = useMemo(() => {
     const map = {}
@@ -206,6 +224,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast }) {
         isCoordinator={isCoordinator}
         logsByJourney={logsByJourney}
         actorNames={actorNames}
+        eventNames={eventNames}
         reload={load}
         onBack={() => setOpenId(null)}
         callFilter={callFilter}
@@ -246,8 +265,9 @@ export default function Campaigns({ me, isCoordinator = false, onToast }) {
                   <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.25 }}>{c.name}</div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>{c.audience || c.goal || '—'}</div>
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   {c.is_test && <span className="pill" style={{ background: '#F6E0CE', color: '#B5532F' }}>test</span>}
+                  {c.event_id && <span className="pill" title={eventNames[c.event_id]?.name || 'Linked event'} style={{ background: '#F6E8D8', color: '#C2691F' }}>↻ event</span>}
                   <span className="pill" style={CAMP_STATUS_PILL[c.status] || CAMP_STATUS_PILL.active}>{c.status}</span>
                 </div>
               </div>
@@ -265,6 +285,57 @@ export default function Campaigns({ me, isCoordinator = false, onToast }) {
         })}
       </div>
     </Pad>
+  )
+}
+
+// Optional event link (both jobs via one field): PRESENT → recruiting campaign
+// (acceptances flow to the event's interest pool via DB trigger, and it groups
+// under the event in the hub). ABSENT → standalone campaign, unchanged. Linking
+// is a write here; the hub only reads it.
+function EventLinkControl({ campaign, eventName, isCoordinator, reload, onToast }) {
+  const [editing, setEditing] = useState(false)
+  const [events, setEvents] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  async function openPicker() {
+    setEditing(true)
+    if (events) return
+    const { data } = await supabase.from('activities').select('id, name, activity_date').is('archived_at', null).order('start_date', { ascending: false }).limit(200)
+    setEvents(data || [])
+  }
+  async function setEvent(eventId) {
+    setBusy(true)
+    const { error } = await supabase.from('campaigns').update({ event_id: eventId }).eq('id', campaign.id)
+    setBusy(false)
+    setEditing(false)
+    if (error) return onToast('Could not update link: ' + error.message)
+    onToast(eventId ? 'Campaign linked to event — acceptances now flow to its pool.' : 'Campaign unlinked (now standalone).')
+    reload()
+  }
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #F2EBDD', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Event link:</span>
+      {campaign.event_id ? (
+        <span className="pill" style={{ background: '#F6E8D8', color: '#C2691F' }}>↻ {eventName || 'linked event'}</span>
+      ) : (
+        <span style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>None — standalone campaign</span>
+      )}
+      {isCoordinator && (
+        editing ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select disabled={busy} defaultValue={campaign.event_id || ''} onChange={(e) => setEvent(e.target.value || null)}
+              style={{ fontSize: 12.5, padding: '6px 9px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: 'var(--ink)', cursor: 'pointer' }}>
+              <option value="">— No event (standalone) —</option>
+              {(events || []).map((e) => <option key={e.id} value={e.id}>{e.name}{e.activity_date ? ` · ${e.activity_date}` : ''}</option>)}
+            </select>
+            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => setEditing(false)}>Cancel</button>
+          </div>
+        ) : (
+          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={openPicker}>{campaign.event_id ? 'Change / unlink' : 'Link to event'}</button>
+        )
+      )}
+    </div>
   )
 }
 
@@ -292,7 +363,7 @@ function CallerStat({ v, label, color }) {
   )
 }
 
-function Detail({ c, me, isCoordinator, logsByJourney, actorNames, reload, onBack, callFilter, setCallFilter, onToast }) {
+function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = {}, reload, onBack, callFilter, setCallFilter, onToast }) {
   const { isPhone } = useBreakpoint()
   const [logFor, setLogFor] = useState(null) // {journeyId, personId, name, phone}
   const [showRemoved, setShowRemoved] = useState(false)
@@ -420,6 +491,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, reload, onBac
           <Metric v={c.enrolled} label="enrolled" />
           <Metric v={c.callerList.length} label="callers" />
         </div>
+        <EventLinkControl campaign={c} eventName={eventNames[c.event_id]?.name} isCoordinator={isCoordinator} reload={reload} onToast={onToast} />
       </div>
 
       {/* script + templates (coordinator can edit; callers see the same) */}

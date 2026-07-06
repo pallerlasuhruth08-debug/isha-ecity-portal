@@ -10,27 +10,32 @@ import Advance from './views/Advance'
 import Nurturing from './views/Nurturing'
 import Events from './views/Events'
 import Planning from './views/Planning'
+import Hub from './views/Hub'
 import Unresolved from './views/Unresolved'
 import Admin from './views/Admin'
 import Placeholder from './views/Placeholder'
 import Login from './views/Login'
 import PublicAccept from './views/PublicAccept'
+import PublicInterest from './views/PublicInterest'
 import UtilityDrawer from './components/UtilityDrawer'
+import CreateEventModal from './components/CreateEventModal'
 import { ALL_TABS, TAB_TITLES, TAB_LABELS } from './lib/roles'
 import { useSession } from './lib/useSession'
 import { useBreakpoint } from './lib/useBreakpoint'
 import { supabase } from './lib/supabase'
 
 // Public volunteer tap-to-accept lands here (no login) via #accept=<blockId>.
-function readAcceptId() {
-  const m = (typeof window !== 'undefined' ? window.location.hash || '' : '').match(/accept=([0-9a-f-]{36})/i)
+function readHashId(key) {
+  const m = (typeof window !== 'undefined' ? window.location.hash || '' : '').match(new RegExp(`${key}=([0-9a-f-]{36})`, 'i'))
   return m ? m[1] : null
 }
 
 export default function App() {
-  // Checked BEFORE any hook so the public page bypasses the auth gate entirely.
-  const acceptId = readAcceptId()
+  // Checked BEFORE any hook so the public pages bypass the auth gate entirely.
+  const acceptId = readHashId('accept')
   if (acceptId) return <PublicAccept blockId={acceptId} />
+  const interestId = readHashId('interest')
+  if (interestId) return <PublicInterest eventId={interestId} />
 
   const { session, profile } = useSession()
 
@@ -52,6 +57,11 @@ function Portal({ profile, email }) {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
   const [pendingEventId, setPendingEventId] = useState(null)
+  const [createReq, setCreateReq] = useState(null) // { presetDate, dest } | null
+  const [pendingInterestEventId, setPendingInterestEventId] = useState(null)
+  const [pendingCampaignId, setPendingCampaignId] = useState(null)
+  const [pendingHubEventId, setPendingHubEventId] = useState(null) // open this event IN the hub
+  const [campaignDraft, setCampaignDraft] = useState(null) // { eventId, eventName } — call-list build in progress
   const toastTimer = useRef(null)
   const { isPhone } = useBreakpoint()
 
@@ -74,12 +84,38 @@ function Portal({ profile, email }) {
   // Everyone sees the full tab set (Admin appended only for real admins). Data scope
   // is enforced by RLS per the real role, not by hiding tabs.
   const tabs = isAdmin ? [...ALL_TABS, 'admin'] : ALL_TABS
-  const activeView = tabs.includes(view) ? view : tabs[0]
+  // 'planning' is routable per-event (from the hub) but no longer a sidebar tab.
+  const routable = [...tabs, 'planning']
+  const activeView = routable.includes(view) ? view : tabs[0]
 
   const showToast = useCallback((msg) => {
     if (toastTimer.current) clearTimeout(toastTimer.current)
     setToast(msg)
     toastTimer.current = setTimeout(() => setToast(null), 3200)
+  }, [])
+
+  // Shared create-event trigger for the three in-context entry points (Planning,
+  // Attendance, calendar). `dest` is the view to open the new event on afterwards.
+  // Coordinator-gated here; RLS (act_insert) is the real backstop.
+  const requestCreate = useCallback((presetDate = null, dest = 'events') => {
+    if (!isCoordinator) return
+    setCreateReq({ presetDate, dest })
+  }, [isCoordinator])
+
+  // Open an event inside the hub (calendar click, new event, returning sub-flow).
+  const openEventHub = useCallback((eventId) => { setPendingHubEventId(eventId); setView('hub') }, [])
+  const openCampaign = useCallback((campaignId) => { setPendingCampaignId(campaignId); setView('campaigns') }, [])
+
+  // Call-list build: from the hub, pick an audience, go select recipients on that
+  // list (event context held), then Create Campaign attaches them + the event_id.
+  const startCampaignForEvent = useCallback((eventId, eventName, audience) => {
+    if (!isCoordinator) return
+    setCampaignDraft({ eventId, eventName })
+    setView(audience === 'meditator' ? 'meditators' : 'volunteers')
+  }, [isCoordinator])
+  // Cancelling / finishing a call-list build returns to the event's hub.
+  const endCampaignDraft = useCallback(() => {
+    setCampaignDraft((d) => { if (d) { setPendingHubEventId(d.eventId); setView('hub') } return null })
   }, [])
 
   const [title, subtitle] = TAB_TITLES[activeView] || [TAB_LABELS[activeView], '']
@@ -89,21 +125,23 @@ function Portal({ profile, email }) {
       case 'dashboard':
         return <Dashboard me={profile} onToast={showToast} onNavigate={setView} />
       case 'volunteers':
-        return <Volunteers me={profile} onToast={showToast} onNavigate={setView} />
+        return <Volunteers me={profile} onToast={showToast} onNavigate={setView} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} />
       case 'campaigns':
-        return <Campaigns me={profile} isCoordinator={isCoordinator} onToast={showToast} onNavigate={setView} />
+        return <Campaigns me={profile} isCoordinator={isCoordinator} onToast={showToast} onNavigate={setView} openCampaignId={pendingCampaignId} onCampaignConsumed={() => setPendingCampaignId(null)} />
       case 'meditators':
-        return <Meditators me={profile} onToast={showToast} />
+        return <Meditators me={profile} onToast={showToast} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} />
       case 'interest':
-        return <Interest onToast={showToast} />
+        return <Interest onToast={showToast} eventScopeId={pendingInterestEventId} onScopeConsumed={() => setPendingInterestEventId(null)} />
       case 'advance':
-        return <Advance onToast={showToast} />
+        return <Advance me={profile} onToast={showToast} />
       case 'nurturing':
         return <Nurturing me={profile} isCoordinator={isCoordinator} onToast={showToast} />
       case 'events':
         return <Events me={profile} isCoordinator={isCoordinator} onToast={showToast} openEventId={pendingEventId} onEventConsumed={() => setPendingEventId(null)} />
       case 'planning':
-        return <Planning me={profile} isCoordinator={isCoordinator} onToast={showToast} />
+        return <Planning me={profile} isCoordinator={isCoordinator} onToast={showToast} openEventId={pendingEventId} onEventConsumed={() => setPendingEventId(null)} />
+      case 'hub':
+        return <Hub me={profile} isCoordinator={isCoordinator} onToast={showToast} openEventId={pendingHubEventId} onEventConsumed={() => setPendingHubEventId(null)} onOpenCampaign={openCampaign} onStartCampaign={startCampaignForEvent} onOpenInterestInbox={(id) => { setPendingInterestEventId(id); setView('interest') }} onCreateEvent={isCoordinator ? () => requestCreate(null, 'hub') : undefined} />
       case 'unresolved':
         return <Unresolved me={profile} isCoordinator={isCoordinator} onToast={showToast} />
       case 'admin':
@@ -113,7 +151,7 @@ function Portal({ profile, email }) {
       default:
         return <Placeholder view={activeView} title={TAB_LABELS[activeView]} />
     }
-  }, [activeView, showToast, isCoordinator, isAdmin, profile, pendingEventId])
+  }, [activeView, showToast, isCoordinator, isAdmin, profile, pendingEventId, requestCreate, openEventHub, openCampaign, startCampaignForEvent, endCampaignDraft, campaignDraft, pendingInterestEventId, pendingCampaignId, pendingHubEventId])
 
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden', background: 'var(--bg)' }}>
@@ -151,8 +189,19 @@ function Portal({ profile, email }) {
         open={toolsOpen}
         onClose={() => setToolsOpen(false)}
         me={profile}
-        onOpenEvent={(id) => { setToolsOpen(false); setPendingEventId(id); setView('events') }}
+        onOpenEvent={(id) => { setToolsOpen(false); openEventHub(id) }}
+        onCreateEvent={isCoordinator ? (date) => { setToolsOpen(false); requestCreate(date, 'events') } : undefined}
       />
+
+      {createReq && isCoordinator && (
+        <CreateEventModal
+          me={profile}
+          presetDate={createReq.presetDate}
+          onClose={() => setCreateReq(null)}
+          onToast={showToast}
+          onCreated={(id) => { setCreateReq(null); if (id) openEventHub(id) }}
+        />
+      )}
 
       {toast && <div className="toast">{toast}</div>}
     </div>

@@ -4,6 +4,7 @@ import { Icon } from '../lib/icons'
 import { initials, avatarFor, pill } from '../lib/ui'
 import { Loading, Empty } from './View'
 import CampaignForm from './CampaignForm'
+import AssignNurturerDialog from './AssignNurturerDialog'
 import SidePanel, { PanelHeader } from './SidePanel'
 
 const REACH = [
@@ -19,7 +20,7 @@ const boolOf = (v) => (v == null ? null : v ? 'Yes' : 'No')
 
 // Rich person detail (mirrors the AppSheet profile). All values from named
 // queries; fields not yet synced from AppSheet render an explicit empty state.
-export default function PersonProfile({ personId, onClose, onToast, onChanged }) {
+export default function PersonProfile({ personId, me, onClose, onToast, onChanged }) {
   const [p, setP] = useState(null)
   const [vp, setVp] = useState(null)
   const [center, setCenter] = useState(null)
@@ -31,6 +32,7 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
   const [err, setErr] = useState(null)
   const [newTag, setNewTag] = useState('')
   const [showCampaign, setShowCampaign] = useState(false)
+  const [showAssignNurt, setShowAssignNurt] = useState(false)
   const [logOpen, setLogOpen] = useState(false)
   const [outcome, setOutcome] = useState('answered')
   const [remarks, setRemarks] = useState('')
@@ -42,7 +44,7 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
         supabase.from('people').select('*').eq('id', personId).single(),
         supabase.from('volunteer_profiles').select('*').eq('person_id', personId).maybeSingle(),
         supabase.from('people').select('center:centers!people_center_id_fkey(name)').eq('id', personId).maybeSingle(),
-        supabase.from('nurturer_assignments').select('nurturer:nurturers!nurturer_assignments_nurturer_id_fkey(full_name)').eq('meditator_id', personId).limit(1),
+        supabase.from('nurturing_assignments').select('nurturer:people!nurturing_assignments_nurturer_person_id_fkey(full_name)').eq('cared_person_id', personId).eq('active', true),
         supabase.from('manual_tags').select('id, tag').eq('person_id', personId).order('created_at', { ascending: false }),
         supabase.from('attendance').select('time_in, activity_type_id, activities!attendance_activity_id_fkey(name, activity_date), atype:activity_types(label, kind)').eq('person_id', personId),
         supabase.from('journeys').select('type, campaign:campaigns(is_test), calls(reachability, sadhana_status, remarks, completed_at)').eq('person_id', personId),
@@ -51,7 +53,7 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
       setP(pr.data)
       setVp(vpr.data || null)
       setCenter(ctr.data?.center?.name || null)
-      setNurturer(nur.data?.[0]?.nurturer?.full_name || null)
+      setNurturer((nur.data || []).map((r) => r.nurturer?.full_name).filter(Boolean).join(', ') || null)
       setManual(mt.data || [])
       const evs = (att.data || [])
         .map((a) => ({ name: a.activities?.name, type: a.atype?.label || null, kind: a.atype?.kind || null, date: a.activities?.activity_date || a.time_in }))
@@ -157,6 +159,7 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
             <button className="btn btn-ghost" onClick={() => setShowCampaign(true)}>Add to campaign</button>
             {!p.is_volunteer && <button className="btn btn-ghost" disabled={busy} onClick={addAsVolunteer}>Add as volunteer</button>}
             {!p.is_meditator && <button className="btn btn-ghost" disabled={busy} onClick={addAsMeditator}>Add as meditator</button>}
+            <button className="btn btn-ghost" onClick={() => setShowAssignNurt(true)}>Add to nurturer</button>
           </div>
 
           <Section title="Personal Details">
@@ -258,6 +261,11 @@ export default function PersonProfile({ personId, onClose, onToast, onChanged })
         </div>
       )}
       {showCampaign && <CampaignForm audience={p?.is_meditator ? 'meditator' : 'volunteer'} personIds={[personId]} segmentLabel={p?.full_name || ''} onClose={() => setShowCampaign(false)} onToast={onToast} />}
+      {showAssignNurt && (
+        <AssignNurturerDialog personIds={[personId]} label={p?.full_name || ''} me={me}
+          onClose={() => setShowAssignNurt(false)} onToast={onToast}
+          onDone={() => { setShowAssignNurt(false); load(); onChanged?.() }} />
+      )}
     </SidePanel>
   )
 }

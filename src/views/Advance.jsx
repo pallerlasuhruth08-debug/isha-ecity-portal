@@ -35,7 +35,7 @@ function ago(d) {
   return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
 
-export default function Advance({ onToast }) {
+export default function Advance({ me, onToast }) {
   const { isPhone } = useBreakpoint()
   const [prog, setProg] = useState('bsp')
   const [summary, setSummary] = useState([]) // {program, status} for all rows (small table)
@@ -262,7 +262,7 @@ export default function Advance({ onToast }) {
           onCreated={() => sel.clear()}
         />
       )}
-      {profileId && <PersonProfile personId={profileId} onClose={() => setProfileId(null)} onToast={onToast} onChanged={loadPage} />}
+      {profileId && <PersonProfile personId={profileId} me={me} onClose={() => setProfileId(null)} onToast={onToast} onChanged={loadPage} />}
     </Pad>
   )
 }

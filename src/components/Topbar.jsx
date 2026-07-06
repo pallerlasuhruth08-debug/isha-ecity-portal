@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Icon } from '../lib/icons'
 import { REAL_ROLE_LABEL } from '../lib/roles'
 import { initials } from '../lib/ui'
 import { useBreakpoint } from '../lib/useBreakpoint'
+import { pushBlockedReason, currentSubscription, enablePush, disablePush } from '../lib/push'
 
 // The user button shows the REAL signed-in profile (name + role) — never the
 // cosmetic persona. The persona role-switcher and the placeholder search box
@@ -52,6 +53,7 @@ export default function Topbar({ title, subtitle, me, email, onSignOut, onMenu }
                 {roleLabel && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{roleLabel}</div>}
               </div>
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                <NotifyMenuItem />
                 <div
                   className="rowhover"
                   onClick={() => { setMenu(false); onSignOut && onSignOut() }}
@@ -66,5 +68,58 @@ export default function Topbar({ title, subtitle, me, email, onSignOut, onMenu }
         )}
       </div>
     </header>
+  )
+}
+
+// Push toggle in the user menu. iOS (not installed) shows an install hint instead
+// of a button, since Apple only delivers web push to a home-screen-installed PWA.
+function NotifyMenuItem() {
+  const [state, setState] = useState('loading') // loading | on | off | busy | ios-install | unsupported | denied
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const reason = pushBlockedReason()
+      if (reason) { if (alive) setState(reason === 'ios-install' ? 'ios-install' : reason) ; return }
+      const sub = await currentSubscription()
+      if (alive) setState(sub ? 'on' : 'off')
+    })()
+    return () => { alive = false }
+  }, [])
+
+  async function toggle() {
+    setState('busy'); setMsg('')
+    try {
+      if (await currentSubscription()) { await disablePush(); setState('off') }
+      else { await enablePush(); setState('on') }
+    } catch (e) {
+      setMsg(e.message || String(e))
+      setState(pushBlockedReason() || 'off')
+    }
+  }
+
+  const bell = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
+
+  if (state === 'ios-install') {
+    return <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '9px 11px', fontSize: 12, color: 'var(--muted)' }}>{bell}<span>Add to Home Screen to get alerts on iPhone.</span></div>
+  }
+  if (state === 'unsupported') {
+    return <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', fontSize: 12, color: 'var(--muted-2)' }}>{bell}<span>Notifications not supported here.</span></div>
+  }
+  if (state === 'denied') {
+    return <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '9px 11px', fontSize: 12, color: 'var(--muted)' }}>{bell}<span>Notifications blocked — enable them in browser settings.</span></div>
+  }
+  const label = state === 'on' ? 'Notifications on' : state === 'busy' ? 'Working…' : state === 'loading' ? 'Notifications' : 'Enable notifications'
+  return (
+    <div>
+      <div className="rowhover" onClick={state === 'busy' || state === 'loading' ? undefined : toggle}
+        style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 11, cursor: state === 'busy' ? 'default' : 'pointer', color: 'var(--ink)', fontSize: 13, fontWeight: 600 }}>
+        {bell}
+        <span>{label}</span>
+        {state === 'on' && <span style={{ marginLeft: 'auto', width: 8, height: 8, borderRadius: '50%', background: '#4E7C3F' }} />}
+      </div>
+      {msg && <div style={{ fontSize: 11, color: '#B5532F', padding: '0 11px 6px' }}>{msg}</div>}
+    </div>
   )
 }

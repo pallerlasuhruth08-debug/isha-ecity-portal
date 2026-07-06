@@ -63,7 +63,7 @@ export default function Nurturing({ me, isCoordinator = false, onToast }) {
     return (
       <>
         <NurturerDetail teamId={teamId} nurturerPersonId={nurturerId} me={me} onBack={() => setNurturerId(null)} onToast={onToast} onOpenProfile={setProfileId} />
-        {profileId && <PersonProfile personId={profileId} onClose={() => setProfileId(null)} onToast={onToast} />}
+        {profileId && <PersonProfile personId={profileId} me={me} onClose={() => setProfileId(null)} onToast={onToast} />}
       </>
     )
   }
@@ -72,7 +72,7 @@ export default function Nurturing({ me, isCoordinator = false, onToast }) {
     return (
       <>
         <TeamDetail team={teams.find((t) => t.id === teamId)} isCoordinator={isCoordinator} onBack={() => setTeamId(null)} onOpenNurturer={setNurturerId} onToast={onToast} onOpenProfile={setProfileId} onRosterChanged={loadTeams} />
-        {profileId && <PersonProfile personId={profileId} onClose={() => setProfileId(null)} onToast={onToast} />}
+        {profileId && <PersonProfile personId={profileId} me={me} onClose={() => setProfileId(null)} onToast={onToast} />}
       </>
     )
   }

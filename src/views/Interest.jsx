@@ -22,6 +22,7 @@ const TABS = [
   { key: 'all', label: 'All' },
   { key: 'volunteering', label: 'Volunteering Interest' },
   { key: 'advanced', label: 'Advanced Program Interest' },
+  { key: 'events', label: 'Event Interests' },
 ]
 const CONVERT = { volunteer_profiles: 'active', ie_completion_volunteer: 'active', advanced_interest: 'registered' }
 const stepOf = (s) => (['new', null, undefined].includes(s) ? 0 : s === 'contacted' ? 1 : 2)
@@ -43,7 +44,7 @@ const IE_SEL = 'id, full_name, phone, ie_date, program_name, status, source, not
 const mapVp = (v) => ({ key: 'vp:' + v.person_id, kind: 'volunteering', table: 'volunteer_profiles', id: v.person_id, idCol: 'person_id', personId: v.person_id, name: v.person?.full_name || 'Unknown', phone: v.person?.phone || '', status: v.status || 'new', ieo: false, tags: [], availability: v.preferred_timing || '—', activity: (v.interests || []).join(', ') || '—', activityList: v.interests || [], notes: v.screening_notes, src: v.interest_source, date: v.interest_date, origin: { label: v.interest_source || 'Volunteering form', date: v.interest_date, verb: 'submitted' } })
 const mapIe = (r) => ({ key: 'ie:' + r.id, kind: 'volunteering', table: 'ie_completion_volunteer', id: r.id, idCol: 'id', personId: null, name: r.full_name || 'Unknown', phone: r.phone || '', status: r.status || 'new', ieo: true, tags: ['IEO'], availability: '—', activity: r.program_name || 'Inner Engineering Online', activityList: [], notes: r.notes, src: r.source, date: r.ie_date, origin: { label: r.program_name || 'Inner Engineering Online', date: r.ie_date, verb: 'completed' } })
 
-export default function Interest({ onToast }) {
+export default function Interest({ onToast, eventScopeId = null, onScopeConsumed }) {
   const [advItems, setAdvItems] = useState([]) // advanced grouped-by-person (small, bounded)
   const [vpCount, setVpCount] = useState(0)
   const [ieCount, setIeCount] = useState(0)
@@ -64,6 +65,9 @@ export default function Interest({ onToast }) {
   const [campaignPid, setCampaignPid] = useState(null)
   const [addOpen, setAddOpen] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
+
+  // Arriving from an event hub → jump to the Event Interests tab, scoped to it.
+  useEffect(() => { if (eventScopeId) setTab('events') }, [eventScopeId])
 
   const loadStatic = useCallback(async () => {
     try {
@@ -250,7 +254,7 @@ export default function Interest({ onToast }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {TABS.map((t) => (<Chip key={t.key} on={tab === t.key} label={t.label} count={counts[t.key] || 0} onClick={() => setTab(t.key)} />))}
-          {tab !== 'advanced' && (
+          {tab !== 'advanced' && tab !== 'events' && (
             <button onClick={() => setIeoOnly((v) => !v)} className="btn" style={{ padding: '6px 11px', fontSize: 12, borderRadius: 20, background: ieoOnly ? '#2F6E5E' : '#fff', color: ieoOnly ? '#fff' : 'var(--ink-soft)', border: ieoOnly ? 'none' : '1px solid var(--border)' }}>IEO only</button>
           )}
         </div>
@@ -262,6 +266,7 @@ export default function Interest({ onToast }) {
       </div>
       {err && <ErrorCard>Couldn't load interest inbox: {err}</ErrorCard>}
 
+      {tab === 'events' ? <EventInterests onToast={onToast} scopeEventId={eventScopeId} onScopeConsumed={onScopeConsumed} /> : (
       <div className="card" style={{ overflow: 'hidden' }}>
           {loading && <Loading label="Loading interest inbox…" />}
           {!loading && shown.length === 0 && <Empty label="Nothing to triage here." />}
@@ -284,6 +289,7 @@ export default function Interest({ onToast }) {
           ))}
           {!loading && total > 0 && <PagerBar page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />}
         </div>
+      )}
 
       {sel && (
         <SidePanel onClose={() => setSelItem(null)}>
@@ -411,19 +417,37 @@ async function ensurePersonId(name, phone) {
   return data.id
 }
 
-function AddImport({ onClose, onToast, onDone }) {
+export function AddImport({ onClose, onToast, onDone, lockEventId = null }) {
   const [mode, setMode] = useState('single')
-  const [segment, setSegment] = useState('volunteering')
+  const [segment, setSegment] = useState(lockEventId ? 'event' : 'volunteering')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [program, setProgram] = useState('bsp')
   const [csv, setCsv] = useState('')
+  const [events, setEvents] = useState([])
+  const [eventId, setEventId] = useState(lockEventId || '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+
+  // Load selectable events lazily when the Event target is chosen (skip when locked).
+  useEffect(() => {
+    if (lockEventId || segment !== 'event' || events.length) return
+    supabase.from('activities').select('id, name, activity_date').is('archived_at', null).order('start_date', { ascending: false }).limit(200)
+      .then(({ data }) => { setEvents(data || []); if (!eventId && data?.[0]) setEventId(data[0].id) })
+  }, [segment, events.length, eventId, lockEventId])
 
   const parsed = useMemo(() => csv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => { const [nm, ph, pg] = l.split(',').map((s) => (s || '').trim()); return { name: nm, phone: ph, program: pg } }).filter((r) => r.name), [csv])
 
   async function insertOne(row) {
+    if (segment === 'event') {
+      // Phone is the key — reject rows we can't resolve to a canonical person.
+      if (!normPhone(row.phone)) throw new Error(`"${row.name}" has no valid 10-digit phone — event interest is phone-keyed.`)
+      const pid = await ensurePersonId(row.name, row.phone)
+      const { error } = await supabase.from('event_interest').upsert(
+        { activity_id: eventId, person_id: pid, source: 'import' }, { onConflict: 'activity_id,person_id' })
+      if (error) throw error
+      return
+    }
     const pid = await ensurePersonId(row.name, row.phone) // canonical people, no unlinked rows
     if (segment === 'volunteering') {
       const { error } = await supabase.from('volunteer_profiles').upsert({ person_id: pid, status: 'new', interest_source: 'manual' }, { onConflict: 'person_id' })
@@ -436,10 +460,12 @@ function AddImport({ onClose, onToast, onDone }) {
   async function submit() {
     setBusy(true); setErr(null)
     try {
+      if (segment === 'event' && !eventId) throw new Error('Pick an event.')
       const rows = mode === 'single' ? [{ name: name.trim(), phone, program }].filter((r) => r.name) : parsed
       if (!rows.length) throw new Error('Nothing to add.')
       for (const r of rows) await insertOne(r)
-      onToast(`Added ${rows.length} to ${segment === 'volunteering' ? 'Volunteering' : 'Advanced Program'} interest.`)
+      const dest = segment === 'volunteering' ? 'Volunteering' : segment === 'advanced' ? 'Advanced Program' : `event “${events.find((e) => e.id === eventId)?.name || ''}”`
+      onToast(`Added ${rows.length} to ${dest} interest.`)
       onDone()
     } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }
   }
@@ -448,11 +474,28 @@ function AddImport({ onClose, onToast, onDone }) {
   return (
     <Modal onClose={onClose} title="Add / import interest">
       {err && <ErrBox>{err}</ErrBox>}
-      <Lbl>Target segment</Lbl>
-      <select value={segment} onChange={(e) => setSegment(e.target.value)} style={{ ...field, marginBottom: 14 }}>
-        <option value="volunteering">Volunteering Interest</option>
-        <option value="advanced">Advanced Program Interest</option>
-      </select>
+      {lockEventId ? (
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 14 }}>Adding volunteer interest to <strong>this event</strong> · phone-keyed, deduped.</div>
+      ) : (
+        <>
+          <Lbl>Target segment</Lbl>
+          <select value={segment} onChange={(e) => setSegment(e.target.value)} style={{ ...field, marginBottom: 14 }}>
+            <option value="volunteering">Volunteering Interest</option>
+            <option value="advanced">Advanced Program Interest</option>
+            <option value="event">Event Interest</option>
+          </select>
+          {segment === 'event' && (
+            <div style={{ marginBottom: 14 }}>
+              <Lbl>Event</Lbl>
+              <select value={eventId} onChange={(e) => setEventId(e.target.value)} style={field}>
+                <option value="">— select an event —</option>
+                {events.map((e) => <option key={e.id} value={e.id}>{e.name}{e.activity_date ? ` · ${e.activity_date}` : ''}</option>)}
+              </select>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>Phone-keyed to this event’s interest pool · deduped per person.</div>
+            </div>
+          )}
+        </>
+      )}
       <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
         {[{ k: 'single', l: 'Add one' }, { k: 'import', l: 'Import CSV' }].map((t) => (
           <button key={t.k} onClick={() => setMode(t.k)} className="btn" style={{ padding: '7px 12px', fontSize: 12.5, background: mode === t.k ? '#241B14' : '#fff', color: mode === t.k ? '#F6ECDC' : 'var(--ink-soft)', border: mode === t.k ? 'none' : '1px solid var(--border)' }}>{t.l}</button>
@@ -476,15 +519,23 @@ function AddImport({ onClose, onToast, onDone }) {
 }
 
 // --- #5 Scan / match form: typed input now (OCR wired later). Match by PHONE; name is confirmation only. ---
-function ScanMatch({ onClose, onToast, onDone }) {
+export function ScanMatch({ onClose, onToast, onDone, lockEventId = null }) {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
-  const [segment, setSegment] = useState('volunteering')
+  const [segment, setSegment] = useState(lockEventId ? 'event' : 'volunteering')
   const [program, setProgram] = useState('bsp')
+  const [events, setEvents] = useState([])
+  const [eventId, setEventId] = useState(lockEventId || '')
   const [result, setResult] = useState(null) // {rule, person, outcome}
   const [busy, setBusy] = useState(false)
   const [ocrBusy, setOcrBusy] = useState(false)
   const [ocrErr, setOcrErr] = useState(null)
+
+  useEffect(() => {
+    if (lockEventId || segment !== 'event' || events.length) return
+    supabase.from('activities').select('id, name, activity_date').is('archived_at', null).order('start_date', { ascending: false }).limit(200)
+      .then(({ data }) => { setEvents(data || []); if (!eventId && data?.[0]) setEventId(data[0].id) })
+  }, [segment, events.length, eventId, lockEventId])
 
   // Google Vision OCR via the ocr-form edge function (key stays server-side).
   async function onFile(e) {
@@ -532,12 +583,16 @@ function ScanMatch({ onClose, onToast, onDone }) {
     try {
       let pid = result.person?.id
       if (!pid) pid = await ensurePersonId(name, phone)
-      if (segment === 'volunteering') {
+      if (segment === 'event') {
+        if (!eventId) throw new Error('Pick an event.')
+        const { error } = await supabase.from('event_interest').upsert({ activity_id: eventId, person_id: pid, source: 'import' }, { onConflict: 'activity_id,person_id' }); if (error) throw error
+      } else if (segment === 'volunteering') {
         const { error } = await supabase.from('volunteer_profiles').upsert({ person_id: pid, status: 'new', interest_source: 'form' }, { onConflict: 'person_id' }); if (error) throw error
       } else {
         const { error } = await supabase.from('advanced_interest').upsert({ person_id: pid, program: program.toLowerCase(), status: 'new', source: 'form' }, { onConflict: 'person_id,program' }); if (error) throw error
       }
-      onToast(`${name || result.person?.full_name} added to ${segment === 'volunteering' ? 'Volunteering' : 'Advanced'} interest${forceLink ? ' (reviewed link)' : ''}.`)
+      const dest = segment === 'volunteering' ? 'Volunteering' : segment === 'advanced' ? 'Advanced' : `event “${events.find((e) => e.id === eventId)?.name || ''}”`
+      onToast(`${name || result.person?.full_name} added to ${dest} interest${forceLink ? ' (reviewed link)' : ''}.`)
       onDone()
     } catch (e) { onToast('Could not save: ' + (e.message || e)) } finally { setBusy(false) }
   }
@@ -556,11 +611,24 @@ function ScanMatch({ onClose, onToast, onDone }) {
         </label>
         {ocrErr && <div style={{ fontSize: 12, color: '#B5532F', marginTop: 6 }}>{ocrErr}</div>}
       </div>
-      <Lbl>Target segment</Lbl>
-      <select value={segment} onChange={(e) => setSegment(e.target.value)} style={{ ...field, marginBottom: 10 }}>
-        <option value="volunteering">Volunteering Interest</option>
-        <option value="advanced">Advanced Program Interest</option>
-      </select>
+      {lockEventId ? (
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>Scanning into <strong>this event’s</strong> interest pool.</div>
+      ) : (
+        <>
+          <Lbl>Target segment</Lbl>
+          <select value={segment} onChange={(e) => setSegment(e.target.value)} style={{ ...field, marginBottom: 10 }}>
+            <option value="volunteering">Volunteering Interest</option>
+            <option value="advanced">Advanced Program Interest</option>
+            <option value="event">Event Interest</option>
+          </select>
+          {segment === 'event' && (
+            <select value={eventId} onChange={(e) => setEventId(e.target.value)} style={{ ...field, marginBottom: 10 }}>
+              <option value="">— select an event —</option>
+              {events.map((e) => <option key={e.id} value={e.id}>{e.name}{e.activity_date ? ` · ${e.activity_date}` : ''}</option>)}
+            </select>
+          )}
+        </>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (from form)" style={field} />
         <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (from form)" style={field} />
@@ -601,5 +669,65 @@ function Actions({ onClose, busy, onSubmit, label }) {
       <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
       <button className="btn btn-primary" disabled={busy} onClick={onSubmit}>{busy ? 'Saving…' : label}</button>
     </div>
+  )
+}
+
+// Event Interests — form responses that carried an event_id, grouped per event
+// (occurrence) and filterable by event. A read view over event_interest; standing
+// (no-event) interest stays in the main inbox above.
+function EventInterests({ onToast, scopeEventId = null, onScopeConsumed }) {
+  const [rows, setRows] = useState(null)
+  const [evFilter, setEvFilter] = useState('all')
+  const [scopeName, setScopeName] = useState(null)
+  useEffect(() => {
+    supabase.from('event_interest')
+      .select('id, created_at, activity:activities!event_interest_activity_id_fkey(id, name, activity_date), person:people!event_interest_person_id_fkey(id, full_name, phone)')
+      .order('created_at', { ascending: false })
+      .then(({ data }) => setRows(data || []))
+  }, [])
+  // Preset the filter to the event we arrived from (from the hub).
+  useEffect(() => {
+    if (scopeEventId) {
+      setEvFilter(scopeEventId)
+      supabase.from('activities').select('name').eq('id', scopeEventId).maybeSingle().then(({ data }) => setScopeName(data?.name || null))
+      onScopeConsumed?.()
+    }
+  }, [scopeEventId, onScopeConsumed])
+
+  if (!rows) return <Loading label="Loading event interests…" />
+
+  const events = [...new Map(rows.map((r) => [r.activity?.id, r.activity])).values()].filter(Boolean)
+  const shown = evFilter === 'all' ? rows : rows.filter((r) => r.activity?.id === evFilter)
+  const byEvent = {}
+  for (const r of shown) { const id = r.activity?.id || '?'; (byEvent[id] ||= { ev: r.activity, people: [] }).people.push(r) }
+
+  return (
+    <>
+      <div style={{ marginBottom: 12 }}>
+        <select value={evFilter} onChange={(e) => setEvFilter(e.target.value)} style={{ padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 13, background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }}>
+          <option value="all">All events ({events.length})</option>
+          {events.map((e) => <option key={e.id} value={e.id}>{e.name} · {fmtDate(e.activity_date)}</option>)}
+        </select>
+      </div>
+      {shown.length === 0 && (
+        <Empty label={evFilter === 'all' ? 'No event interest yet — import interest against an event or share its interest link.' : `No interests for ${scopeName || 'this event'} yet.`} />
+      )}
+      {Object.values(byEvent).map((g) => (
+        <div key={g.ev?.id} className="card" style={{ padding: 16, marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{g.ev?.name} <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 400 }}>· {fmtDate(g.ev?.activity_date)} · {g.people.length} interested</span></div>
+          <div style={{ marginTop: 8 }}>
+            {g.people.map((r, i) => (
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid #F4EEE2' }}>
+                <div style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>{initials(r.person?.full_name || '?')}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{r.person?.full_name || 'Unknown'}</div>
+                  <div style={{ fontSize: 11.5, color: r.person?.phone ? 'var(--muted)' : '#B5532F' }}>{r.person?.phone || 'no phone'} · {ago(r.created_at)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
   )
 }

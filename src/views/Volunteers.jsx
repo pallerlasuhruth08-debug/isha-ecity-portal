@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { STAGE_PILL, initials, avatarFor, pill } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerBar, SelectionBar } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
+import { multiFieldOr, PEOPLE_SEARCH_FIELDS } from '../lib/searchFilter'
+import MobileFilterSheet from '../components/MobileFilterSheet'
 import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
 import AssignNurturerDialog from '../components/AssignNurturerDialog'
@@ -26,7 +28,7 @@ const todayISO = () => new Date().toISOString().slice(0, 10)
 const uniq = (a) => [...new Set(a.filter(Boolean))]
 const NIL = '00000000-0000-0000-0000-000000000000'
 
-export default function Volunteers({ me, onToast }) {
+export default function Volunteers({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone }) {
   const { isPhone } = useBreakpoint()
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
@@ -37,7 +39,7 @@ export default function Volunteers({ me, onToast }) {
 
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
-  const [fil, setFil] = useState({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', group: '', tag: '', atype: '', nurt: '' })
+  const [fil, setFil] = useState({ stage: '', lang: '', centre: '', ie: '', program: '', last: '', group: '', tag: '', atype: '', nurt: '' })
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [progIds, setProgIds] = useState(null) // group filter -> person ids ('loading'|array|null)
@@ -46,6 +48,7 @@ export default function Volunteers({ me, onToast }) {
   const [coveredIds, setCoveredIds] = useState(null) // 'needs nurturer' -> person ids WITH an active nurturer (to exclude)
 
   const sel = useTableSelection()
+  const reqSeq = useRef(0)
   const [showForm, setShowForm] = useState(false)
   const [showAssign, setShowAssign] = useState(false)
   const [assignIds, setAssignIds] = useState([])
@@ -100,7 +103,7 @@ export default function Volunteers({ me, onToast }) {
       for (let y = nowY; y >= minYear; y--) ieYears.push(String(y))
       setGroupMap(map)
       setRawValues(raws)
-      setOpts((o) => ({ ...o, centres: (centres.data || []).map((c) => ({ v: c.id, label: c.name || c.id })), langs, ieYears, groups, atypes: (atypes || []).map((t) => ({ v: t.id, label: t.label })) }))
+      setOpts((o) => ({ ...o, centres: (centres.data || []).filter((c) => c.name !== 'All Centers').map((c) => ({ v: c.id, label: c.name || c.id })), langs, ieYears, groups, atypes: (atypes || []).map((t) => ({ v: t.id, label: t.label })) }))
       loadTagOptions()
     })()
     return () => {
@@ -194,12 +197,15 @@ export default function Volunteers({ me, onToast }) {
       if (fil.lang) q = q.eq('languages', fil.lang)
       if (fil.centre) q = q.eq('center_id', fil.centre)
       if (fil.ie) q = q.gte('ie_date', `${fil.ie}-01-01`).lte('ie_date', `${fil.ie}-12-31`)
-      if (fil.bsp === 'done') q = q.not('bsp_date', 'is', null)
-      if (fil.bsp === 'no') q = q.is('bsp_date', null)
+      if (fil.program === 'ie') q = q.not('ie_date', 'is', null)
+      if (fil.program === 'no_ie') q = q.is('ie_date', null)
+      if (fil.program === 'bsp') q = q.not('bsp_date', 'is', null)
+      if (fil.program === 'no_bsp') q = q.is('bsp_date', null)
       if (fil.last === '30') q = q.gte('last_active_date', daysAgoISO(30))
       if (fil.last === '90') q = q.gte('last_active_date', daysAgoISO(90))
       if (fil.last === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
-      if (debounced) q = q.or(`full_name.ilike.%${debounced}%,pincode.ilike.%${debounced}%`)
+      const searchOr = multiFieldOr(debounced, PEOPLE_SEARCH_FIELDS) // name|phone|email|pincode, sanitized
+      if (searchOr) q = q.or(searchOr)
       return q
     },
     [fil, debounced, progIds, tagIds, atypeIds, coveredIds],
@@ -226,6 +232,7 @@ export default function Volunteers({ me, onToast }) {
     setLoading(true)
     setErr(null)
     if ((fil.group && !Array.isArray(progIds)) || (fil.tag && !Array.isArray(tagIds)) || (fil.atype && !Array.isArray(atypeIds)) || (fil.nurt === 'needs' && !Array.isArray(coveredIds))) return
+    const seq = ++reqSeq.current // cancel-in-flight: only the newest request applies
     try {
       let q = applyFilters(
         supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, last_active_date, tags, last_activity_at', { count: 'exact' }),
@@ -279,13 +286,15 @@ export default function Volunteers({ me, onToast }) {
         }
       }
 
+      if (seq !== reqSeq.current) return // a newer search superseded this one
       setRows(mapped)
       setTotal(count ?? 0)
     } catch (e) {
+      if (seq !== reqSeq.current) return
       setErr(e.message || String(e))
       setRows([])
     } finally {
-      setLoading(false)
+      if (seq === reqSeq.current) setLoading(false)
     }
   }, [applyFilters, page, pageSize, fil.group, fil.tag, fil.atype, fil.nurt, progIds, tagIds, atypeIds, coveredIds])
 
@@ -356,7 +365,7 @@ export default function Volunteers({ me, onToast }) {
     { k: 'lang', all: 'Any language', opts: opts.langs },
     { k: 'centre', all: 'All centres', opts: opts.centres },
     { k: 'ie', all: 'Any IE year', opts: opts.ieYears },
-    { k: 'bsp', all: 'BSP · any', opts: [{ v: 'done', label: 'BSP completed' }, { v: 'no', label: 'No BSP yet' }] },
+    { k: 'program', all: 'Program · any', opts: [{ v: 'ie', label: 'IE completed' }, { v: 'no_ie', label: 'No IE yet' }, { v: 'bsp', label: 'BSP completed' }, { v: 'no_bsp', label: 'No BSP yet' }] },
     { k: 'last', all: 'Active · any time', opts: [{ v: '30', label: 'Active · 30 days' }, { v: '90', label: 'Active · 90 days' }, { v: 'quiet', label: 'Quiet · 90+ days' }] },
     { k: 'nurt', all: 'Nurturer · any', opts: [{ v: 'needs', label: 'Needs a nurturer' }] },
   ]
@@ -364,6 +373,12 @@ export default function Volunteers({ me, onToast }) {
 
   return (
     <Pad>
+      {campaignDraft && (
+        <div className="card" style={{ padding: '12px 16px', marginBottom: 14, background: '#FBF1E4', borderColor: '#E7C9B8', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, color: '#9C4A14', fontWeight: 600 }}>Building the call list for “{campaignDraft.eventName}” — select people, then Create campaign.</div>
+          <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onClearCampaignDraft && onClearCampaignDraft()}>Cancel</button>
+        </div>
+      )}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 13, color: 'var(--muted)' }}>
           {loading ? 'Loading…' : `${total} total · click a row to open the profile; use checkboxes to build a campaign.`}
@@ -375,19 +390,21 @@ export default function Volunteers({ me, onToast }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10, alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: isPhone ? '11px 12px' : '8px 12px', minWidth: 190, flexBasis: isPhone ? '100%' : undefined }}>
           {Icon.search(15)}
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or pincode…" style={{ border: 'none', outline: 'none', fontSize: 13, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email or pincode…" style={{ border: 'none', outline: 'none', fontSize: 13, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
-        {selectDefs.map((d) => (
-          <select key={d.k} value={fil[d.k]} onChange={setF(d.k)} style={selStyle}>
-            <option value="">{d.all}</option>
-            {d.opts.map((o) => {
-              const v = typeof o === 'string' ? o : o.v
-              const label = typeof o === 'string' ? o : o.label
-              return <option key={v} value={v}>{label}</option>
-            })}
-          </select>
-        ))}
-        {filterActive && <button onClick={clearFil} style={{ background: 'none', border: 'none', color: '#B85C1E', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Clear filters</button>}
+        <MobileFilterSheet count={Object.values(fil).filter(Boolean).length + (dateFrom || dateTo ? 1 : 0)}>
+          {selectDefs.map((d) => (
+            <select key={d.k} value={fil[d.k]} onChange={setF(d.k)} style={selStyle}>
+              <option value="">{d.all}</option>
+              {d.opts.map((o) => {
+                const v = typeof o === 'string' ? o : o.v
+                const label = typeof o === 'string' ? o : o.label
+                return <option key={v} value={v}>{label}</option>
+              })}
+            </select>
+          ))}
+          {filterActive && <button onClick={clearFil} style={{ background: 'none', border: 'none', color: '#B85C1E', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Clear filters</button>}
+        </MobileFilterSheet>
       </div>
 
       {/* Date constraint — only meaningful once an activity group is chosen */}
@@ -492,13 +509,16 @@ export default function Volunteers({ me, onToast }) {
       </div>
 
       {showForm && (
-        <CampaignForm audience="volunteer" personIds={formIds} segmentLabel={formIds.length ? `${formIds.length} selected volunteers` : filterActive ? 'Filtered volunteers' : ''} onClose={() => setShowForm(false)} onToast={onToast} onCreated={() => sel.clear()} />
+        <CampaignForm audience="volunteer" personIds={formIds} eventId={campaignDraft?.eventId || null}
+          segmentLabel={campaignDraft ? `Recruiting for ${campaignDraft.eventName}` : formIds.length ? `${formIds.length} selected volunteers` : filterActive ? 'Filtered volunteers' : ''}
+          onClose={() => setShowForm(false)} onToast={onToast}
+          onCreated={() => { sel.clear(); if (campaignDraft) onDone?.() }} />
       )}
       {showAssign && (
         <AssignNurturerDialog personIds={assignIds} label="volunteers" me={me} onClose={() => setShowAssign(false)} onToast={onToast} onDone={() => { setShowAssign(false); sel.clear(); loadPage() }} />
       )}
       {profileId && (
-        <PersonProfile personId={profileId} onClose={() => setProfileId(null)} onToast={onToast} onChanged={() => { loadPage(); loadTagOptions() }} />
+        <PersonProfile personId={profileId} me={me} onClose={() => setProfileId(null)} onToast={onToast} onChanged={() => { loadPage(); loadTagOptions() }} />
       )}
     </Pad>
   )

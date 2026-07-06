@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerBar, SelectionBar } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
+import { multiFieldOr, PEOPLE_SEARCH_FIELDS } from '../lib/searchFilter'
+import MobileFilterSheet from '../components/MobileFilterSheet'
 import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
 import AssignNurturerDialog from '../components/AssignNurturerDialog'
@@ -36,7 +38,7 @@ function lastActive(d) {
   return `Quiet ${Math.round(days / 30)}mo`
 }
 
-export default function Meditators({ me, onToast }) {
+export default function Meditators({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone }) {
   const { isPhone } = useBreakpoint()
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
@@ -52,6 +54,7 @@ export default function Meditators({ me, onToast }) {
   const [needsNurt, setNeedsNurt] = useState(false)
   const [coveredIds, setCoveredIds] = useState(null) // person ids WITH an active nurturer (to exclude)
   const sel = useTableSelection()
+  const reqSeq = useRef(0)
   const [showForm, setShowForm] = useState(false)
   const [showAssign, setShowAssign] = useState(false)
   const [assignIds, setAssignIds] = useState([])
@@ -93,7 +96,8 @@ export default function Meditators({ me, onToast }) {
       if (recency === '90') q = q.gte('last_active_date', daysAgoISO(90))
       if (recency === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
       if (needsNurt && Array.isArray(coveredIds) && coveredIds.length) q = q.not('id', 'in', `(${coveredIds.join(',')})`)
-      if (debounced) q = q.or(`full_name.ilike.%${debounced}%,pincode.ilike.%${debounced}%`)
+      const searchOr = multiFieldOr(debounced, PEOPLE_SEARCH_FIELDS) // name|phone|email|pincode, sanitized
+      if (searchOr) q = q.or(searchOr)
       return q
     },
     [prog, recency, debounced, needsNurt, coveredIds],
@@ -120,6 +124,7 @@ export default function Meditators({ me, onToast }) {
     if (needsNurt && !Array.isArray(coveredIds)) return // wait for the covered set
     setLoading(true)
     setErr(null)
+    const seq = ++reqSeq.current // cancel-in-flight: only the newest request applies
     try {
       let q = applyFilters(
         supabase.from('people').select('id, full_name, phone, area, pincode, center_id, ie_date, bsp_date, shoonya_date, samyama_date, last_active_date', { count: 'exact' }),
@@ -127,13 +132,15 @@ export default function Meditators({ me, onToast }) {
       q = q.order('id', { ascending: true }).range(page * pageSize, page * pageSize + pageSize - 1)
       const { data, count, error } = await q
       if (error) throw error
+      if (seq !== reqSeq.current) return
       setRows(data || [])
       setTotal(count ?? 0)
     } catch (e) {
+      if (seq !== reqSeq.current) return
       setErr(e.message || String(e))
       setRows([])
     } finally {
-      setLoading(false)
+      if (seq === reqSeq.current) setLoading(false)
     }
   }, [applyFilters, page, pageSize, needsNurt, coveredIds])
 
@@ -179,6 +186,12 @@ export default function Meditators({ me, onToast }) {
 
   return (
     <Pad>
+      {campaignDraft && (
+        <div className="card" style={{ padding: '12px 16px', marginBottom: 14, background: '#FBF1E4', borderColor: '#E7C9B8', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, color: '#9C4A14', fontWeight: 600 }}>Building the call list for “{campaignDraft.eventName}” — select people, then Create campaign.</div>
+          <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onClearCampaignDraft && onClearCampaignDraft()}>Cancel</button>
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 13, color: 'var(--muted)' }}>{loading ? 'Loading…' : `${total} in care · filter by programme and recent activity.`}</div>
@@ -191,18 +204,20 @@ export default function Meditators({ me, onToast }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: isPhone ? '11px 12px' : '8px 12px', minWidth: 200, flexBasis: isPhone ? '100%' : undefined }}>
           {Icon.search(15)}
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or pincode…" style={{ border: 'none', outline: 'none', fontSize: 13, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email or pincode…" style={{ border: 'none', outline: 'none', fontSize: 13, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
-        <select value={prog} onChange={(e) => setProg(e.target.value)} style={selStyle}>
-          {PROGRAMS.map((p) => (<option key={p.key} value={p.key}>{p.label}</option>))}
-        </select>
-        <select value={recency} onChange={(e) => setRecency(e.target.value)} style={selStyle}>
-          {RECENCY.map((r) => (<option key={r.key} value={r.key}>{r.label}</option>))}
-        </select>
-        <select value={needsNurt ? 'needs' : ''} onChange={(e) => setNeedsNurt(e.target.value === 'needs')} style={selStyle}>
-          <option value="">Nurturer · any</option>
-          <option value="needs">Needs a nurturer</option>
-        </select>
+        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0)}>
+          <select value={prog} onChange={(e) => setProg(e.target.value)} style={selStyle}>
+            {PROGRAMS.map((p) => (<option key={p.key} value={p.key}>{p.label}</option>))}
+          </select>
+          <select value={recency} onChange={(e) => setRecency(e.target.value)} style={selStyle}>
+            {RECENCY.map((r) => (<option key={r.key} value={r.key}>{r.label}</option>))}
+          </select>
+          <select value={needsNurt ? 'needs' : ''} onChange={(e) => setNeedsNurt(e.target.value === 'needs')} style={selStyle}>
+            <option value="">Nurturer · any</option>
+            <option value="needs">Needs a nurturer</option>
+          </select>
+        </MobileFilterSheet>
       </div>
 
       <SelectionBar isAllMode={sel.isAllMode} count={selCount} onCreate={openCampaign} onAssign={openAssign} onClear={sel.clear} />
@@ -273,16 +288,17 @@ export default function Meditators({ me, onToast }) {
         <CampaignForm
           audience="meditator"
           personIds={formIds}
-          segmentLabel={formIds.length ? `${formIds.length} selected meditators` : ''}
+          eventId={campaignDraft?.eventId || null}
+          segmentLabel={campaignDraft ? `Inviting for ${campaignDraft.eventName}` : formIds.length ? `${formIds.length} selected meditators` : ''}
           onClose={() => setShowForm(false)}
           onToast={onToast}
-          onCreated={() => sel.clear()}
+          onCreated={() => { sel.clear(); if (campaignDraft) onDone?.() }}
         />
       )}
       {showAssign && (
         <AssignNurturerDialog personIds={assignIds} label="meditators" me={me} onClose={() => setShowAssign(false)} onToast={onToast} onDone={() => { setShowAssign(false); sel.clear(); loadPage() }} />
       )}
-      {profileId && <PersonProfile personId={profileId} onClose={() => setProfileId(null)} onToast={onToast} onChanged={loadPage} />}
+      {profileId && <PersonProfile personId={profileId} me={me} onClose={() => setProfileId(null)} onToast={onToast} onChanged={loadPage} />}
     </Pad>
   )
 }

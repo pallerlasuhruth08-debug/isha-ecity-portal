@@ -18,7 +18,7 @@ const DIST = [
 ]
 const ckey = (c) => `${c.source}:${c.id}`
 
-export default function CampaignForm({ audience = 'volunteer', personIds = [], segmentLabel = '', onClose, onCreated, onToast }) {
+export default function CampaignForm({ audience = 'volunteer', personIds = [], segmentLabel = '', eventId = null, onClose, onCreated, onToast }) {
   const [name, setName] = useState('')
   const [goal, setGoal] = useState(segmentLabel || '')
   const [templates, setTemplates] = useState([])
@@ -131,6 +131,7 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
           audience,
           status: 'active',
           is_test: isTest,
+          event_id: eventId || null,
           segment: { from: audience === 'meditator' ? 'meditators' : 'volunteers', schedule: schedule || null, size: personIds.length, distribution, callers: selCallers.map((c) => ({ source: c.source, id: c.id })) },
         })
         .select('id, name')

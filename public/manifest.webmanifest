@@ -1,0 +1,12 @@
+{
+  "name": "Volunteer Care Portal",
+  "short_name": "Care Portal",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F6ECDC",
+  "theme_color": "#241B14",
+  "icons": [
+    { "src": "favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any maskable" }
+  ]
+}

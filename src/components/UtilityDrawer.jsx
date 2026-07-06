@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Loading, Empty } from './View'
 import { MonthGrid } from './EventList'
-import { fmtDay } from '../lib/planning'
+import { fmtDay, groupPhases } from '../lib/planning'
 
 // Utility drawer — SEPARATE from the left nav. Slides in from the RIGHT edge over
 // the current page (page state preserved). Tabs: Calendar (quick glance) + Notes.
 // Available on every screen. Toggle via the edge button (App) or edge-swipe (mobile).
-export default function UtilityDrawer({ open, onClose, me, onOpenEvent }) {
+export default function UtilityDrawer({ open, onClose, me, onOpenEvent, onCreateEvent }) {
   const [tab, setTab] = useState('calendar')
   return (
     <>
@@ -20,7 +20,7 @@ export default function UtilityDrawer({ open, onClose, me, onOpenEvent }) {
           <div onClick={onClose} style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 600, color: 'var(--orange)', cursor: 'pointer' }}>✕</div>
         </div>
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 16 }} className="scrollarea">
-          {open && tab === 'calendar' && <CalendarTab onOpenEvent={onOpenEvent} />}
+          {open && tab === 'calendar' && <CalendarTab onOpenEvent={onOpenEvent} onCreateEvent={onCreateEvent} />}
           {open && tab === 'notes' && <NotesTab me={me} />}
         </div>
       </aside>
@@ -28,27 +28,33 @@ export default function UtilityDrawer({ open, onClose, me, onOpenEvent }) {
   )
 }
 
-function CalendarTab({ onOpenEvent }) {
+function CalendarTab({ onOpenEvent, onCreateEvent }) {
   const [events, setEvents] = useState(null)
-  const [stageRows, setStageRows] = useState({})
+  const [phasesByEvent, setPhasesByEvent] = useState({})
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const [a, s] = await Promise.all([
+      const [a, p] = await Promise.all([
         supabase.from('activities').select('id, name, center_id, activity_date, start_date, end_date').is('archived_at', null),
-        supabase.from('event_stages').select('activity_id, stage, manual'),
+        supabase.from('event_phases').select('activity_id, kind, sort_order, start_by, finish_by'),
       ])
       if (!alive) return
       setEvents(a.data || [])
-      setStageRows(Object.fromEntries((s.data || []).map((r) => [r.activity_id, r])))
+      setPhasesByEvent(groupPhases(p.data))
     })()
     return () => { alive = false }
   }, [])
   if (!events) return <Loading label="Loading calendar…" />
   return (
     <>
-      <MonthGrid events={events} stageRows={stageRows} compact onOpen={(id) => onOpenEvent && onOpenEvent(id)} />
-      <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--muted-2)' }}>Click an event to open it on the Attendance page. Create events from Attendance or Planning.</div>
+      <MonthGrid
+        events={events} phasesByEvent={phasesByEvent} compact
+        onOpen={(id) => onOpenEvent && onOpenEvent(id)}
+        onCreateDay={onCreateEvent ? (dayISO) => onCreateEvent(dayISO) : undefined}
+      />
+      <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--muted-2)' }}>
+        Click an event to open it{onCreateEvent ? ' · click a day to create one' : ''}.
+      </div>
     </>
   )
 }
