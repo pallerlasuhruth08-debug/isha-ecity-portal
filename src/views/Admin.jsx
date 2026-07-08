@@ -9,21 +9,24 @@ import { initials, avatarFor } from '../lib/ui'
 // layer (profiles_self_update / centers_write / settings_write), so this is not
 // UI-only hiding. Role/centre changes are audited by a DB trigger (role_audit).
 
-// The three assignable tiers. sector_nurturer is a legacy all-access alias kept
-// working by can_all(); it's shown for existing users but re-tiering moves them
-// onto one of these.
-const ASSIGNABLE_ROLES = [
-  { v: 'nurturer', label: 'Nurturer' },
-  { v: 'center_coordinator', label: 'Centre Coordinator' },
+// A role is the (SCOPE × SPECIALTY) pair, stored as fields — never a flat string.
+// SCOPE: Admin (all + config) · Sector (all centres) · Centre (one centre).
+// SPECIALTY: Volunteer · Meditator · Both (Both = the super-role / admin).
+// The stored role encodes the scope tier; center_id carries the centre; specialty
+// its own column. Adding a role = picking (scope, specialty) here — no code change.
+const LEVELS = [
+  { v: 'sector', label: 'Sector — all centres' },
+  { v: 'center', label: 'Centre — one centre' },
   { v: 'admin', label: 'RCO / Admin' },
 ]
-const ROLE_LABEL = {
-  nurturer: 'Nurturer',
-  center_coordinator: 'Centre Coordinator',
-  admin: 'RCO / Admin',
-  sector_nurturer: 'Sector Nurturer (legacy)',
-  volunteer: 'Volunteer',
-}
+const SPECIALTIES = [
+  { v: 'volunteer', label: 'Volunteer' },
+  { v: 'meditator', label: 'Meditator' },
+  { v: 'both', label: 'Both' },
+]
+const roleForLevel = { sector: 'sector_nurturer', center: 'center_coordinator', admin: 'admin' }
+const levelForRole = (role, centerId) =>
+  role === 'admin' ? 'admin' : role === 'center_coordinator' || (centerId && centerId !== 'all') ? 'center' : 'sector'
 const SENTINELS = ['all', 'unassigned']
 const selStyle = { padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: 40 }
 const inputStyle = { padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 13, fontFamily: 'inherit', background: '#fff', color: 'var(--ink)', outline: 'none', minHeight: 40 }
@@ -65,7 +68,7 @@ function UsersRoles({ onToast }) {
   const load = useCallback(async () => {
     setErr(null)
     const [pf, ce] = await Promise.all([
-      supabase.from('profiles').select('id, full_name, email, role, center_id, active').order('role').order('full_name'),
+      supabase.from('profiles').select('id, full_name, email, role, center_id, active, specialty').order('role').order('full_name'),
       supabase.from('centers').select('id, name, active').order('name'),
     ])
     if (pf.error) { setErr(pf.error.message); setRows([]); return }
@@ -88,37 +91,40 @@ function UsersRoles({ onToast }) {
 }
 
 function UserRow({ u, idx, centres, onToast, onSaved }) {
-  const [role, setRole] = useState(u.role)
+  const [name, setName] = useState(u.full_name || '')
+  const [level, setLevel] = useState(levelForRole(u.role, u.center_id))
+  const [specialty, setSpecialty] = useState(u.specialty || '')
   const [centre, setCentre] = useState(SENTINELS.includes(u.center_id) ? (centres[0]?.id || '') : u.center_id)
   const [busy, setBusy] = useState(false)
 
-  // sector_nurturer/volunteer aren't assignable but must still render as the
-  // current value — prepend the current role if it isn't one of the three tiers.
-  const roleOpts = ASSIGNABLE_ROLES.some((r) => r.v === u.role)
-    ? ASSIGNABLE_ROLES
-    : [{ v: u.role, label: ROLE_LABEL[u.role] || u.role }, ...ASSIGNABLE_ROLES]
-
-  const targetCentre = role === 'center_coordinator' ? centre : 'all'
-  const dirty = role !== u.role || (role === 'center_coordinator' && centre !== u.center_id)
+  // Admin is always both-specialty; sector/centre must pick a specialty.
+  const specialtyValue = level === 'admin' ? 'both' : specialty
+  const targetCentre = level === 'center' ? centre : 'all'
+  const dirty =
+    name.trim() !== (u.full_name || '') ||
+    level !== levelForRole(u.role, u.center_id) ||
+    specialtyValue !== (u.specialty || (level === 'admin' ? 'both' : '')) ||
+    (level === 'center' && centre !== u.center_id)
 
   async function save() {
-    if (role === 'center_coordinator' && !centre) return onToast('Pick a centre for a coordinator.')
+    if (level !== 'admin' && !specialty) return onToast('Pick a specialty (Volunteer / Meditator / Both).')
+    if (level === 'center' && !centre) return onToast('Pick a centre.')
     setBusy(true)
     try {
-      const { error } = await supabase.from('profiles').update({ role, center_id: targetCentre }).eq('id', u.id)
+      const { error } = await supabase.from('profiles')
+        .update({ full_name: name.trim(), role: roleForLevel[level], center_id: targetCentre, specialty: specialtyValue })
+        .eq('id', u.id)
       if (error) throw error
-      onToast(`${u.full_name || u.email} → ${ROLE_LABEL[role] || role}${role === 'center_coordinator' ? ' · ' + targetCentre : ''}`)
+      const lvl = LEVELS.find((l) => l.v === level)?.label
+      onToast(`${name.trim() || u.email} → ${lvl}${level === 'center' ? ' · ' + targetCentre : ''}${level !== 'admin' ? ' · ' + specialtyValue : ''}`)
       onSaved()
     } catch (e) {
       onToast('Could not update: ' + (e.message || e))
-    } finally {
-      setBusy(false)
-    }
+    } finally { setBusy(false) }
   }
 
   // Deactivating flips profiles.active → is_active() false → RLS denies ALL data
-  // access for that user, regardless of role. The right lever for test / departed
-  // accounts (keeps the record + role type; just removes live scope).
+  // access, regardless of role. The reversible lever for departed accounts.
   async function toggleActive() {
     setBusy(true)
     try {
@@ -126,26 +132,44 @@ function UserRow({ u, idx, centres, onToast, onSaved }) {
       if (error) throw error
       onToast(`${u.full_name || u.email} ${u.active ? 'deactivated — no data access' : 'reactivated'}.`)
       onSaved()
+    } catch (e) { onToast('Could not update: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  // Hard-remove the profile. Irreversible. If the account owns linked records the
+  // FK refuses and we tell the admin to deactivate instead. (Auth login, if it ever
+  // signs in again, is recreated inactive by handle_new_user — no access.)
+  async function remove() {
+    if (!window.confirm(`Remove ${u.full_name || u.email}? This deletes their profile and access. This cannot be undone.`)) return
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('profiles').delete().eq('id', u.id)
+      if (error) throw error
+      onToast(`${u.full_name || u.email} removed.`)
+      onSaved()
     } catch (e) {
-      onToast('Could not update: ' + (e.message || e))
-    } finally {
-      setBusy(false)
-    }
+      const msg = /foreign key|violates/i.test(e.message || '') ? 'Account owns linked records — deactivate instead of deleting.' : (e.message || e)
+      onToast('Could not remove: ' + msg)
+    } finally { setBusy(false) }
   }
 
   return (
-    <div className="rowhover" style={{ display: 'flex', gap: 12, padding: '14px 18px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', flexWrap: 'wrap' }}>
-      <div style={{ width: 38, height: 38, borderRadius: '50%', background: avatarFor(idx), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(u.full_name || u.email || '?')}</div>
-      <div style={{ minWidth: 160, flex: 1 }}>
-        <div style={{ fontSize: 14, fontWeight: 600 }}>{u.full_name || '—'}{!u.active && <span style={{ fontSize: 11, color: '#B5532F', marginLeft: 8 }}>inactive</span>}</div>
-        <div style={{ fontSize: 12, color: 'var(--muted)' }}>{u.email || 'no email'}</div>
+    <div className="rowhover" style={{ display: 'flex', gap: 10, padding: '14px 18px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ width: 38, height: 38, borderRadius: '50%', background: avatarFor(idx), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(name || u.email || '?')}</div>
+      <div style={{ minWidth: 150, flex: 1 }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" style={{ ...inputStyle, width: '100%', minHeight: 34, padding: '6px 9px', fontWeight: 600 }} />
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>{u.email || 'no email'}{!u.active && <span style={{ color: '#B5532F', marginLeft: 8 }}>inactive</span>}</div>
       </div>
-      <select value={role} onChange={(e) => setRole(e.target.value)} style={selStyle}>
-        {roleOpts.map((r) => <option key={r.v} value={r.v}>{r.label}</option>)}
+      <select value={level} onChange={(e) => setLevel(e.target.value)} style={selStyle} title="Scope">
+        {LEVELS.map((l) => <option key={l.v} value={l.v}>{l.label}</option>)}
       </select>
-      <select value={role === 'center_coordinator' ? centre : ''} disabled={role !== 'center_coordinator'} onChange={(e) => setCentre(e.target.value)} style={{ ...selStyle, opacity: role === 'center_coordinator' ? 1 : 0.5 }}>
-        {role === 'center_coordinator'
-          ? [<option key="_" value="">— pick centre —</option>, ...centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)]
+      <select value={specialtyValue} disabled={level === 'admin'} onChange={(e) => setSpecialty(e.target.value)} style={{ ...selStyle, opacity: level === 'admin' ? 0.5 : 1 }} title="Specialty">
+        {level === 'admin'
+          ? [<option key="both" value="both">Both</option>]
+          : [<option key="_" value="">— specialty —</option>, ...SPECIALTIES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)]}
+      </select>
+      <select value={level === 'center' ? centre : ''} disabled={level !== 'center'} onChange={(e) => setCentre(e.target.value)} style={{ ...selStyle, opacity: level === 'center' ? 1 : 0.5 }} title="Centre">
+        {level === 'center'
+          ? [<option key="_" value="">— centre —</option>, ...centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)]
           : [<option key="_" value="">n/a</option>]}
       </select>
       <button className="btn btn-primary" disabled={!dirty || busy} onClick={save} style={{ padding: '9px 15px', fontSize: 12.5, opacity: dirty ? 1 : 0.5 }}>
@@ -154,6 +178,7 @@ function UserRow({ u, idx, centres, onToast, onSaved }) {
       <button className="btn btn-ghost" disabled={busy} onClick={toggleActive} title={u.active ? 'Remove all data access (keeps the record)' : 'Restore access'} style={{ padding: '9px 12px', fontSize: 12.5, color: u.active ? '#B5532F' : '#4E7C3F' }}>
         {u.active ? 'Deactivate' : 'Activate'}
       </button>
+      <button disabled={busy} onClick={remove} title="Delete this profile (irreversible)" style={{ padding: '9px 11px', fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: busy ? 'default' : 'pointer' }}>Remove</button>
     </div>
   )
 }

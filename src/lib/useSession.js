@@ -29,7 +29,7 @@ export function useSession() {
     let alive = true
     supabase
       .from('profiles')
-      .select('id, full_name, email, role, center_id, active')
+      .select('id, full_name, email, role, center_id, active, specialty')
       .eq('id', session.user.id)
       .maybeSingle()
       .then(({ data }) => {

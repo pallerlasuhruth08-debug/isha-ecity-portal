@@ -19,7 +19,7 @@ import PublicAccept from './views/PublicAccept'
 import PublicInterest from './views/PublicInterest'
 import UtilityDrawer from './components/UtilityDrawer'
 import CreateEventModal from './components/CreateEventModal'
-import { ALL_TABS, TAB_TITLES, TAB_LABELS } from './lib/roles'
+import { TAB_TITLES, TAB_LABELS, visibleTabs } from './lib/roles'
 import { useSession } from './lib/useSession'
 import { useBreakpoint } from './lib/useBreakpoint'
 import { supabase } from './lib/supabase'
@@ -81,9 +81,10 @@ function Portal({ profile, email }) {
   const isCoordinator = ['admin', 'sector_nurturer', 'center_coordinator'].includes(profile?.role)
   const isAdmin = profile?.role === 'admin'
 
-  // Everyone sees the full tab set (Admin appended only for real admins). Data scope
-  // is enforced by RLS per the real role, not by hiding tabs.
-  const tabs = isAdmin ? [...ALL_TABS, 'admin'] : ALL_TABS
+  // Tabs follow the (scope, specialty) role: volunteer specialty has no Advance
+  // (Admin appended only for real admins). Data scope is still enforced by RLS —
+  // this is the additional UI visibility layer.
+  const tabs = visibleTabs(profile, isAdmin)
   // 'planning' is routable per-event (from the hub) but no longer a sidebar tab.
   const routable = [...tabs, 'planning']
   const activeView = routable.includes(view) ? view : tabs[0]

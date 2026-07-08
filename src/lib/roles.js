@@ -78,6 +78,22 @@ export const REAL_ROLE_LABEL = {
   volunteer: 'Volunteer',
 }
 
+// The role IS the (scope, specialty) pair. Scope derives from center_id
+// ('all' = sector, else one center); specialty is its own field. Mirrors the
+// DB's my_specialty(): legacy privileged roles with no specialty set read as
+// 'both' until an admin assigns one.
+export function effectiveSpecialty(profile) {
+  if (profile?.specialty) return profile.specialty
+  return ['admin', 'sector_nurturer', 'center_coordinator'].includes(profile?.role) ? 'both' : null
+}
+export const scopeOf = (profile) => (profile?.center_id && profile.center_id !== 'all' ? 'center' : 'sector')
+// Advance programmes are meditator-track — hidden from volunteer specialty
+// (and unassigned). Mirrors the RLS sees_advance() gate.
+export function visibleTabs(profile, isAdmin) {
+  const base = isAdmin ? [...ALL_TABS, 'admin'] : [...ALL_TABS]
+  return ['meditator', 'both'].includes(effectiveSpecialty(profile)) ? base : base.filter((t) => t !== 'advance')
+}
+
 export const ROLE_ORDER = [
   'centre',
   'sector',
