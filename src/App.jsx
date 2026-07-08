@@ -132,7 +132,7 @@ function Portal({ profile, email }) {
       case 'meditators':
         return <Meditators me={profile} onToast={showToast} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} />
       case 'interest':
-        return <Interest onToast={showToast} eventScopeId={pendingInterestEventId} onScopeConsumed={() => setPendingInterestEventId(null)} />
+        return <Interest me={profile} onToast={showToast} eventScopeId={pendingInterestEventId} onScopeConsumed={() => setPendingInterestEventId(null)} />
       case 'advance':
         return <Advance me={profile} onToast={showToast} />
       case 'nurturing':

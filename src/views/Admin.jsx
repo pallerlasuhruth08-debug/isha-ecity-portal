@@ -97,6 +97,17 @@ function UserRow({ u, idx, centres, onToast, onSaved }) {
   const [centre, setCentre] = useState(SENTINELS.includes(u.center_id) ? (centres[0]?.id || '') : u.center_id)
   const [busy, setBusy] = useState(false)
 
+  // After a save the parent reloads; re-seed the editor from the fresh DB row so
+  // it always reflects persisted truth. A failed save leaves u unchanged, so the
+  // attempted value + dirty state (and the error toast) remain visible.
+  useEffect(() => {
+    setName(u.full_name || '')
+    setLevel(levelForRole(u.role, u.center_id))
+    setSpecialty(u.specialty || '')
+    setCentre(SENTINELS.includes(u.center_id) ? (centres[0]?.id || '') : u.center_id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [u.full_name, u.role, u.center_id, u.specialty])
+
   // Admin is always both-specialty; sector/centre must pick a specialty.
   const specialtyValue = level === 'admin' ? 'both' : specialty
   const targetCentre = level === 'center' ? centre : 'all'
