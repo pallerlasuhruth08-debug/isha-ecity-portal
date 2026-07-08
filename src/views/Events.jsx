@@ -98,6 +98,7 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
   const [markBlockId, setMarkBlockId] = useState('') // which block the walk-in attended (its type is inherited)
   const [busy, setBusy] = useState(false)
   const [capturing, setCapturing] = useState(false)
+  const [creating, setCreating] = useState(false) // Create Attendance (date + centre + type) form
   const [typeChange, setTypeChange] = useState(null) // { newId } — keep-vs-propagate prompt
   const [busyAction, setBusyAction] = useState(false)
   const searchSeq = useRef(0)
@@ -234,9 +235,14 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
           </div>
 
           {isCoordinator && (
-            <button className="btn btn-primary" style={{ width: '100%', padding: '11px', fontSize: 14, marginBottom: 12 }} onClick={() => setCapturing(true)}>
-              + Capture walk-in
-            </button>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" style={{ flex: 1, minWidth: 150, padding: '11px', fontSize: 14 }} onClick={() => setCreating(true)}>
+                ＋ Create attendance
+              </button>
+              <button className="btn btn-ghost" style={{ flex: 1, minWidth: 150, padding: '11px', fontSize: 14 }} onClick={() => setCapturing(true)}>
+                + Capture walk-in
+              </button>
+            </div>
           )}
           {unresolvedCount > 0 && (
             <div style={{ fontSize: 12.5, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 9, padding: '8px 11px', marginBottom: 12 }}>
@@ -307,6 +313,17 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
         />
       )}
 
+      {creating && (
+        <CreateAttendanceForm
+          activity={activity}
+          types={types}
+          me={me}
+          onClose={() => setCreating(false)}
+          onChanged={load}
+          onToast={onToast}
+        />
+      )}
+
       {/* Type-change keep-vs-propagate prompt (attendance present). */}
       {typeChange && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={() => setTypeChange(null)}>
@@ -325,6 +342,174 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
       )}
 
     </AttWrap>
+  )
+}
+
+// Create Attendance — capture presence on a specific DATE (within the event span)
+// at a CENTRE (location only, never reassigns the person's owning centre), tagged
+// with a SHARED activity_type. Add multiple people under one context; run again
+// for another date. The activity_type_id flows to each volunteer's history +
+// drives the Volunteers activity-type filter (same-activity targeting).
+function CreateAttendanceForm({ activity, types = [], me, onClose, onChanged, onToast }) {
+  const spanStart = activity.start_date || activity.activity_date
+  const spanEnd = activity.end_date || activity.start_date || activity.activity_date
+  const today = new Date().toISOString().slice(0, 10)
+  const [kind, setKind] = useState('volunteer') // volunteer | meditator (= participant)
+  const [date, setDate] = useState(today >= spanStart && today <= spanEnd ? today : spanStart)
+  const [centre, setCentre] = useState(activity.center_id || '')
+  const [centres, setCentres] = useState([])
+  const [localTypes, setLocalTypes] = useState([])
+  const [typeId, setTypeId] = useState('')
+  const [newType, setNewType] = useState('')
+  const [addingType, setAddingType] = useState(false)
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState([])
+  const [added, setAdded] = useState([])
+  const [busy, setBusy] = useState(false)
+  const seq = useRef(0)
+
+  useEffect(() => {
+    supabase.from('centers').select('id, name, active').order('name')
+      .then(({ data }) => setCentres((data || []).filter((c) => c.active && !['all', 'unassigned'].includes(c.id))))
+  }, [])
+
+  const allTypes = [...types, ...localTypes]
+  const typeOpts = allTypes.filter((t) => (t.kind || 'volunteer') === kind && t.active !== false)
+  useEffect(() => { if (typeId && !typeOpts.some((t) => t.id === typeId)) setTypeId('') }, [kind]) // eslint-disable-line
+
+  useEffect(() => {
+    const h = setTimeout(async () => {
+      const term = q.trim()
+      if (term.length < 2) { setResults([]); return }
+      const s = ++seq.current
+      const { data } = await supabase.from('people').select('id, full_name, phone').ilike('full_name', `%${term}%`).limit(8)
+      if (s === seq.current) setResults(data || [])
+    }, 300)
+    return () => clearTimeout(h)
+  }, [q])
+
+  const dateOk = date >= spanStart && date <= spanEnd
+
+  async function createType() {
+    const label = newType.trim()
+    if (!label) return
+    setBusy(true)
+    try {
+      const { data, error } = await supabase.from('activity_types').insert({ label, kind }).select('id, label, kind, active').single()
+      if (error) throw error
+      setLocalTypes((l) => [...l, data])
+      setTypeId(data.id); setNewType(''); setAddingType(false)
+      onToast(`Activity type "${label}" added — reusable everywhere.`)
+    } catch (e) { onToast('Could not add type: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  async function add(p) {
+    if (!typeId) return onToast('Pick an activity type first.')
+    if (!dateOk) return onToast(`Pick a date within ${fmtDay(spanStart)}–${fmtDay(spanEnd)}.`)
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('attendance').insert({
+        activity_id: activity.id, person_id: p.id, activity_type_id: typeId,
+        attended_on: date, center_id: centre || activity.center_id || null,
+      })
+      if (error) throw error
+      await ensureParticipation(p.id, kind, { source: 'event_attendance' })
+      setAdded((a) => [{ id: p.id, name: p.full_name }, ...a.filter((x) => x.id !== p.id)])
+      setQ(''); setResults([])
+      onToast(`${p.full_name} — present on ${fmtDay(date)}.`)
+      onChanged()
+    } catch (e) { onToast('Could not add: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  const lbl = { fontSize: 12, fontWeight: 600, color: '#5C5142', display: 'block', marginBottom: 5 }
+  const fld = { fontSize: 13, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)', width: '100%' }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
+      <div className="card" style={{ width: 520, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 22, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Create attendance</h3>
+          <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={onClose}>✕ Close</button>
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16 }}>{activity.name} · {fmtDay(spanStart)}{spanEnd !== spanStart ? `–${fmtDay(spanEnd)}` : ''}</div>
+
+        {/* Volunteer / Participant */}
+        <div style={{ marginBottom: 14 }}>
+          <span style={lbl}>They attended as</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[['volunteer', 'Volunteer'], ['meditator', 'Participant']].map(([k, label]) => (
+              <button key={k} onClick={() => setKind(k)} style={{ flex: 1, padding: '9px', fontSize: 13, fontWeight: 600, borderRadius: 9, cursor: 'pointer',
+                border: kind === k ? '1px solid #C2691F' : '1px solid var(--border)', background: kind === k ? '#F6E8D8' : '#fff', color: kind === k ? '#C2691F' : 'var(--muted)' }}>{label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 150 }}>
+            <span style={lbl}>Date</span>
+            <input type="date" value={date} min={spanStart} max={spanEnd} onChange={(e) => setDate(e.target.value)} style={{ ...fld, borderColor: dateOk ? 'var(--border)' : '#E7A08A' }} />
+            {!dateOk && <div style={{ fontSize: 11, color: '#B5532F', marginTop: 3 }}>Must be within the event span.</div>}
+          </div>
+          <div style={{ flex: 1, minWidth: 150 }}>
+            <span style={lbl}>Centre <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· where it happened</span></span>
+            <select value={centre} onChange={(e) => setCentre(e.target.value)} style={fld}>
+              {!centres.some((c) => c.id === centre) && centre && <option value={centre}>{centre}</option>}
+              {centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Activity type from the shared vocabulary + inline create */}
+        <div style={{ marginBottom: 16 }}>
+          <span style={lbl}>Activity type <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· shared list</span></span>
+          {addingType ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input autoFocus value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="New activity type (e.g. Kitchen)"
+                onKeyDown={(e) => e.key === 'Enter' && createType()} style={fld} />
+              <button className="btn btn-primary" disabled={busy || !newType.trim()} onClick={createType} style={{ fontSize: 12.5, padding: '8px 12px' }}>Add</button>
+              <button className="btn btn-ghost" onClick={() => { setAddingType(false); setNewType('') }} style={{ fontSize: 12.5, padding: '8px 10px' }}>Cancel</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={fld}>
+                <option value="">— pick {kind === 'meditator' ? 'participant' : 'volunteer'} activity —</option>
+                {typeOpts.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+              <button className="btn btn-ghost" onClick={() => setAddingType(true)} style={{ fontSize: 12.5, padding: '8px 12px', whiteSpace: 'nowrap' }}>＋ New type</button>
+            </div>
+          )}
+        </div>
+
+        {/* Person search — adds each under the context above */}
+        <div style={{ position: 'relative', marginBottom: 10 }}>
+          <span style={lbl}>Mark people present</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: '8px 12px' }}>
+            {Icon.search(15)}
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a person…" style={{ border: 'none', outline: 'none', fontSize: 13, background: 'transparent', width: '100%' }} />
+          </div>
+          {results.length > 0 && (
+            <div className="card" style={{ position: 'absolute', top: 66, left: 0, right: 0, zIndex: 20, boxShadow: 'var(--shadow-lg)', padding: 6 }}>
+              {results.map((p) => (
+                <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', borderRadius: 8, cursor: busy ? 'default' : 'pointer' }} onClick={() => !busy && add(p)}>
+                  <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>{initials(p.full_name)}</div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{p.full_name}</div>
+                  <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--orange)', fontWeight: 600 }}>{busy ? '…' : '+ present'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {added.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 6 }}>Added on {fmtDay(date)} · {added.length}</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {added.map((a) => <span key={a.id} className="pill" style={pill('#EAF2E5', '#4E7C3F')}>{a.name}</span>)}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

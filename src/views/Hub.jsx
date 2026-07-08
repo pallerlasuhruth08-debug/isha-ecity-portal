@@ -184,8 +184,8 @@ function EventInterestTab({ ev, isCoordinator, onOpenInterestInbox }) {
     <div>
       {isCoordinator && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => onOpenInterestInbox?.(ev.id)}>Manage in interest inbox →</button>
-          <span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>Add, scan or tag interest in the inbox — it opens scoped to this event.</span>
+          <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => onOpenInterestInbox?.(ev.id)}>＋ Add / Import Interest</button>
+          <span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>Opens the interest inbox scoped to this event — add, scan or tag there.</span>
         </div>
       )}
       {!rows ? <Loading label="Loading interest…" /> : rows.length === 0 ? (
