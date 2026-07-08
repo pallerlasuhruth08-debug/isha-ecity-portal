@@ -6,6 +6,7 @@ import { supabase } from './supabase'
 export function useSession() {
   const [session, setSession] = useState(undefined) // undefined = still loading
   const [profile, setProfile] = useState(null)
+  const [sections, setSections] = useState(null) // the role's granted section keys
 
   useEffect(() => {
     let alive = true
@@ -29,16 +30,22 @@ export function useSession() {
     let alive = true
     supabase
       .from('profiles')
-      .select('id, full_name, email, role, center_id, active, specialty')
+      .select('id, full_name, email, role, center_id, active')
       .eq('id', session.user.id)
       .maybeSingle()
-      .then(({ data }) => {
-        if (alive) setProfile(data || null)
+      .then(async ({ data }) => {
+        if (!alive) return
+        setProfile(data || null)
+        // Which sections this role grants (drives nav + mirrors RLS). Admin = all.
+        if (!data) { setSections([]); return }
+        const { data: rs } = await supabase
+          .from('roles').select('key, role_sections(section)').eq('key', data.role).maybeSingle()
+        if (alive) setSections((rs?.role_sections || []).map((r) => r.section))
       })
     return () => {
       alive = false
     }
   }, [session])
 
-  return { session, profile }
+  return { session, profile, sections }
 }

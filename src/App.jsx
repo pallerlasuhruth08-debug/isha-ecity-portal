@@ -19,7 +19,7 @@ import PublicAccept from './views/PublicAccept'
 import PublicInterest from './views/PublicInterest'
 import UtilityDrawer from './components/UtilityDrawer'
 import CreateEventModal from './components/CreateEventModal'
-import { TAB_TITLES, TAB_LABELS, visibleTabs } from './lib/roles'
+import { TAB_TITLES, TAB_LABELS, tabsForSections } from './lib/roles'
 import { useSession } from './lib/useSession'
 import { useBreakpoint } from './lib/useBreakpoint'
 import { supabase } from './lib/supabase'
@@ -37,7 +37,7 @@ export default function App() {
   const interestId = readHashId('interest')
   if (interestId) return <PublicInterest eventId={interestId} />
 
-  const { session, profile } = useSession()
+  const { session, profile, sections } = useSession()
 
   if (session === undefined) {
     return (
@@ -48,10 +48,10 @@ export default function App() {
   }
   if (session === null) return <Login />
 
-  return <Portal profile={profile} email={session.user.email} />
+  return <Portal profile={profile} email={session.user.email} sections={sections} />
 }
 
-function Portal({ profile, email }) {
+function Portal({ profile, email, sections }) {
   const [view, setView] = useState('dashboard')
   const [toast, setToast] = useState(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -81,10 +81,10 @@ function Portal({ profile, email }) {
   const isCoordinator = ['admin', 'sector_nurturer', 'center_coordinator'].includes(profile?.role)
   const isAdmin = profile?.role === 'admin'
 
-  // Tabs follow the (scope, specialty) role: volunteer specialty has no Advance
-  // (Admin appended only for real admins). Data scope is still enforced by RLS —
-  // this is the additional UI visibility layer.
-  const tabs = visibleTabs(profile, isAdmin)
+  // Tabs come from the role's granted sections (admin sees all + Admin). Data
+  // scope is separately enforced by RLS (centre) + can_see_section — this is the
+  // nav-visibility layer on top.
+  const tabs = tabsForSections(sections, isAdmin)
   // 'planning' is routable per-event (from the hub) but no longer a sidebar tab.
   const routable = [...tabs, 'planning']
   const activeView = routable.includes(view) ? view : tabs[0]
@@ -132,7 +132,7 @@ function Portal({ profile, email }) {
       case 'meditators':
         return <Meditators me={profile} onToast={showToast} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} />
       case 'interest':
-        return <Interest me={profile} onToast={showToast} eventScopeId={pendingInterestEventId} onScopeConsumed={() => setPendingInterestEventId(null)} />
+        return <Interest onToast={showToast} eventScopeId={pendingInterestEventId} onScopeConsumed={() => setPendingInterestEventId(null)} />
       case 'advance':
         return <Advance me={profile} onToast={showToast} />
       case 'nurturing':

@@ -9,24 +9,21 @@ import { initials, avatarFor } from '../lib/ui'
 // layer (profiles_self_update / centers_write / settings_write), so this is not
 // UI-only hiding. Role/centre changes are audited by a DB trigger (role_audit).
 
-// A role is the (SCOPE × SPECIALTY) pair, stored as fields — never a flat string.
-// SCOPE: Admin (all + config) · Sector (all centres) · Centre (one centre).
-// SPECIALTY: Volunteer · Meditator · Both (Both = the super-role / admin).
-// The stored role encodes the scope tier; center_id carries the centre; specialty
-// its own column. Adding a role = picking (scope, specialty) here — no code change.
-const LEVELS = [
-  { v: 'sector', label: 'Sector — all centres' },
-  { v: 'center', label: 'Centre — one centre' },
-  { v: 'admin', label: 'RCO / Admin' },
+// Roles are DATA (roles + role_sections tables). Admin creates a role, toggles
+// which SECTIONS it can open; assigning a user a role grants those sections.
+// Centre scope (which centre's data) is a separate dimension via profiles.center_id.
+const SECTIONS = [
+  { k: 'dashboard', label: 'Dashboard' },
+  { k: 'volunteers', label: 'Volunteers' },
+  { k: 'meditators', label: 'Meditators' },
+  { k: 'advance', label: 'Advance Programmes' },
+  { k: 'event_hub', label: 'Event Hub' },
+  { k: 'attendance', label: 'Attendance' },
+  { k: 'nurturing', label: 'Nurturing & Care' },
+  { k: 'interest', label: 'Interest Inbox' },
+  { k: 'campaigns', label: 'Campaigns' },
+  { k: 'unresolved', label: 'Unresolved' },
 ]
-const SPECIALTIES = [
-  { v: 'volunteer', label: 'Volunteer' },
-  { v: 'meditator', label: 'Meditator' },
-  { v: 'both', label: 'Both' },
-]
-const roleForLevel = { sector: 'sector_nurturer', center: 'center_coordinator', admin: 'admin' }
-const levelForRole = (role, centerId) =>
-  role === 'admin' ? 'admin' : role === 'center_coordinator' || (centerId && centerId !== 'all') ? 'center' : 'sector'
 const SENTINELS = ['all', 'unassigned']
 const selStyle = { padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: 40 }
 const inputStyle = { padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 13, fontFamily: 'inherit', background: '#fff', color: 'var(--ink)', outline: 'none', minHeight: 40 }
@@ -35,6 +32,7 @@ export default function Admin({ me, onToast }) {
   const [tab, setTab] = useState('users')
   const tabs = [
     { k: 'users', label: 'Users & Roles' },
+    { k: 'roles', label: 'Roles' },
     { k: 'centres', label: 'Centres' },
     { k: 'pincodes', label: 'Pincode → Centre' },
   ]
@@ -53,6 +51,7 @@ export default function Admin({ me, onToast }) {
         ))}
       </div>
       {tab === 'users' && <UsersRoles onToast={onToast} />}
+      {tab === 'roles' && <RolesManager onToast={onToast} />}
       {tab === 'centres' && <Centres onToast={onToast} />}
       {tab === 'pincodes' && <Pincodes onToast={onToast} />}
     </Pad>
@@ -63,71 +62,73 @@ export default function Admin({ me, onToast }) {
 function UsersRoles({ onToast }) {
   const [rows, setRows] = useState(null)
   const [centres, setCentres] = useState([])
+  const [roles, setRoles] = useState([])
+  const [q, setQ] = useState('')
   const [err, setErr] = useState(null)
 
   const load = useCallback(async () => {
     setErr(null)
-    const [pf, ce] = await Promise.all([
-      supabase.from('profiles').select('id, full_name, email, role, center_id, active, specialty').order('role').order('full_name'),
+    const [pf, ce, rl] = await Promise.all([
+      supabase.from('profiles').select('id, full_name, email, role, center_id, active').order('role').order('full_name'),
       supabase.from('centers').select('id, name, active').order('name'),
+      supabase.from('roles').select('key, label, active').order('label'),
     ])
     if (pf.error) { setErr(pf.error.message); setRows([]); return }
     setRows(pf.data || [])
     setCentres((ce.data || []).filter((c) => !SENTINELS.includes(c.id) && c.active))
+    setRoles((rl.data || []).filter((r) => r.active))
   }, [])
   useEffect(() => { load() }, [load])
 
   if (err) return <ErrorCard>Couldn't load users: {err}</ErrorCard>
   if (!rows) return <Loading label="Loading users…" />
-  if (rows.length === 0) return <Empty label="No user profiles found." />
+
+  const s = q.trim().toLowerCase()
+  const shown = s ? rows.filter((u) => (u.full_name || '').toLowerCase().includes(s) || (u.email || '').toLowerCase().includes(s)) : rows
 
   return (
-    <div className="card" style={{ overflow: 'hidden' }}>
-      {rows.map((u, i) => (
-        <UserRow key={u.id} u={u} idx={i} centres={centres} onToast={onToast} onSaved={load} />
-      ))}
-    </div>
+    <>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or email…"
+        style={{ ...inputStyle, width: '100%', marginBottom: 12 }} />
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{shown.length} of {rows.length} user{rows.length !== 1 ? 's' : ''}</div>
+      {shown.length === 0 ? <Empty label="No users match." /> : (
+        <div className="card" style={{ overflow: 'hidden' }}>
+          {shown.map((u, i) => (
+            <UserRow key={u.id} u={u} idx={i} centres={centres} roles={roles} onToast={onToast} onSaved={load} />
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 
-function UserRow({ u, idx, centres, onToast, onSaved }) {
+function UserRow({ u, idx, centres, roles, onToast, onSaved }) {
   const [name, setName] = useState(u.full_name || '')
-  const [level, setLevel] = useState(levelForRole(u.role, u.center_id))
-  const [specialty, setSpecialty] = useState(u.specialty || '')
-  const [centre, setCentre] = useState(SENTINELS.includes(u.center_id) ? (centres[0]?.id || '') : u.center_id)
+  const [role, setRole] = useState(u.role)
+  // Centre scope: 'all' = sector (all centres); else a specific centre.
+  const [centre, setCentre] = useState(SENTINELS.includes(u.center_id) ? 'all' : u.center_id)
   const [busy, setBusy] = useState(false)
 
-  // After a save the parent reloads; re-seed the editor from the fresh DB row so
-  // it always reflects persisted truth. A failed save leaves u unchanged, so the
-  // attempted value + dirty state (and the error toast) remain visible.
+  // Re-seed from the fresh DB row after a save, so the editor reflects persisted
+  // truth (a failed save leaves the attempt + dirty state + error toast visible).
   useEffect(() => {
     setName(u.full_name || '')
-    setLevel(levelForRole(u.role, u.center_id))
-    setSpecialty(u.specialty || '')
-    setCentre(SENTINELS.includes(u.center_id) ? (centres[0]?.id || '') : u.center_id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [u.full_name, u.role, u.center_id, u.specialty])
+    setRole(u.role)
+    setCentre(SENTINELS.includes(u.center_id) ? 'all' : u.center_id)
+  }, [u.full_name, u.role, u.center_id])
 
-  // Admin is always both-specialty; sector/centre must pick a specialty.
-  const specialtyValue = level === 'admin' ? 'both' : specialty
-  const targetCentre = level === 'center' ? centre : 'all'
-  const dirty =
-    name.trim() !== (u.full_name || '') ||
-    level !== levelForRole(u.role, u.center_id) ||
-    specialtyValue !== (u.specialty || (level === 'admin' ? 'both' : '')) ||
-    (level === 'center' && centre !== u.center_id)
+  // Admin is always all-centres; other roles can be sector ('all') or one centre.
+  const targetCentre = role === 'admin' ? 'all' : centre
+  const dirty = name.trim() !== (u.full_name || '') || role !== u.role || targetCentre !== u.center_id
 
   async function save() {
-    if (level !== 'admin' && !specialty) return onToast('Pick a specialty (Volunteer / Meditator / Both).')
-    if (level === 'center' && !centre) return onToast('Pick a centre.')
     setBusy(true)
     try {
       const { error } = await supabase.from('profiles')
-        .update({ full_name: name.trim(), role: roleForLevel[level], center_id: targetCentre, specialty: specialtyValue })
-        .eq('id', u.id)
+        .update({ full_name: name.trim(), role, center_id: targetCentre }).eq('id', u.id)
       if (error) throw error
-      const lvl = LEVELS.find((l) => l.v === level)?.label
-      onToast(`${name.trim() || u.email} → ${lvl}${level === 'center' ? ' · ' + targetCentre : ''}${level !== 'admin' ? ' · ' + specialtyValue : ''}`)
+      const label = roles.find((r) => r.key === role)?.label || role
+      onToast(`${name.trim() || u.email} → ${label} · ${targetCentre === 'all' ? 'all centres' : targetCentre}`)
       onSaved()
     } catch (e) {
       onToast('Could not update: ' + (e.message || e))
@@ -170,18 +171,13 @@ function UserRow({ u, idx, centres, onToast, onSaved }) {
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" style={{ ...inputStyle, width: '100%', minHeight: 34, padding: '6px 9px', fontWeight: 600 }} />
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>{u.email || 'no email'}{!u.active && <span style={{ color: '#B5532F', marginLeft: 8 }}>inactive</span>}</div>
       </div>
-      <select value={level} onChange={(e) => setLevel(e.target.value)} style={selStyle} title="Scope">
-        {LEVELS.map((l) => <option key={l.v} value={l.v}>{l.label}</option>)}
+      <select value={role} onChange={(e) => setRole(e.target.value)} style={selStyle} title="Role">
+        {roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+        {!roles.some((r) => r.key === role) && <option value={role}>{role}</option>}
       </select>
-      <select value={specialtyValue} disabled={level === 'admin'} onChange={(e) => setSpecialty(e.target.value)} style={{ ...selStyle, opacity: level === 'admin' ? 0.5 : 1 }} title="Specialty">
-        {level === 'admin'
-          ? [<option key="both" value="both">Both</option>]
-          : [<option key="_" value="">— specialty —</option>, ...SPECIALTIES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)]}
-      </select>
-      <select value={level === 'center' ? centre : ''} disabled={level !== 'center'} onChange={(e) => setCentre(e.target.value)} style={{ ...selStyle, opacity: level === 'center' ? 1 : 0.5 }} title="Centre">
-        {level === 'center'
-          ? [<option key="_" value="">— centre —</option>, ...centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)]
-          : [<option key="_" value="">n/a</option>]}
+      <select value={targetCentre} disabled={role === 'admin'} onChange={(e) => setCentre(e.target.value)} style={{ ...selStyle, opacity: role === 'admin' ? 0.5 : 1 }} title="Centre (data scope)">
+        <option value="all">All centres (sector)</option>
+        {centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
       </select>
       <button className="btn btn-primary" disabled={!dirty || busy} onClick={save} style={{ padding: '9px 15px', fontSize: 12.5, opacity: dirty ? 1 : 0.5 }}>
         {busy ? 'Saving…' : 'Save'}
@@ -190,6 +186,119 @@ function UserRow({ u, idx, centres, onToast, onSaved }) {
         {u.active ? 'Deactivate' : 'Activate'}
       </button>
       <button disabled={busy} onClick={remove} title="Delete this profile (irreversible)" style={{ padding: '9px 11px', fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: busy ? 'default' : 'pointer' }}>Remove</button>
+    </div>
+  )
+}
+
+// ------------------------------------------------------------- Roles (as data)
+function RolesManager({ onToast }) {
+  const [roles, setRoles] = useState(null)
+  const [err, setErr] = useState(null)
+  const [newLabel, setNewLabel] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    setErr(null)
+    const { data, error } = await supabase.from('roles')
+      .select('id, key, label, is_system, active, role_sections(section)').order('label')
+    if (error) { setErr(error.message); setRoles([]); return }
+    setRoles(data || [])
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  async function addRole() {
+    const label = newLabel.trim()
+    if (!label) return
+    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+    if (!key) return onToast('Give the role a name with letters or numbers.')
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('roles').insert({ key, label })
+      if (error) throw error
+      setNewLabel(''); onToast(`Role "${label}" added — now pick its sections.`); load()
+    } catch (e) {
+      onToast(/duplicate|unique/i.test(e.message || '') ? 'A role with that name already exists.' : 'Could not add role: ' + (e.message || e))
+    } finally { setBusy(false) }
+  }
+
+  if (err) return <ErrorCard>Couldn't load roles: {err}</ErrorCard>
+  if (!roles) return <Loading label="Loading roles…" />
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="New role name (e.g. Volunteer Nurturer)"
+          onKeyDown={(e) => e.key === 'Enter' && addRole()} style={{ ...inputStyle, flex: 1, minWidth: 220 }} />
+        <button className="btn btn-primary" disabled={busy || !newLabel.trim()} onClick={addRole} style={{ padding: '9px 16px', fontSize: 13 }}>＋ Add role</button>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {roles.map((r) => <RoleCard key={r.id} role={r} onToast={onToast} onChanged={load} />)}
+      </div>
+    </>
+  )
+}
+
+function RoleCard({ role, onToast, onChanged }) {
+  const [label, setLabel] = useState(role.label)
+  const [busy, setBusy] = useState(false)
+  const editable = !role.is_system // admin is locked to all-access
+  const secSet = new Set((role.role_sections || []).map((s) => s.section))
+
+  async function toggleSection(sec) {
+    if (!editable) return
+    setBusy(true)
+    try {
+      const q = secSet.has(sec)
+        ? supabase.from('role_sections').delete().eq('role_id', role.id).eq('section', sec)
+        : supabase.from('role_sections').insert({ role_id: role.id, section: sec })
+      const { error } = await q
+      if (error) throw error
+      onChanged()
+    } catch (e) { onToast('Could not update sections: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+  async function rename() {
+    if (label.trim() === role.label || !label.trim()) return
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('roles').update({ label: label.trim() }).eq('id', role.id)
+      if (error) throw error
+      onToast('Role renamed.'); onChanged()
+    } catch (e) { onToast('Could not rename: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+  async function toggleActive() {
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('roles').update({ active: !role.active }).eq('id', role.id)
+      if (error) throw error
+      onToast(`Role ${role.active ? 'deactivated' : 'reactivated'}.`); onChanged()
+    } catch (e) { onToast('Could not update: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card" style={{ padding: 16, opacity: role.active ? 1 : 0.55 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <input value={label} disabled={!editable} onChange={(e) => setLabel(e.target.value)} onBlur={rename}
+          style={{ ...inputStyle, minWidth: 180, fontWeight: 600, opacity: editable ? 1 : 0.7 }} />
+        {role.is_system && <span className="pill" style={{ background: '#EDE4D6', color: '#8C7E6B', fontSize: 10.5 }}>system · all access</span>}
+        {!role.active && <span className="pill" style={{ background: '#FBE6E0', color: '#B5532F', fontSize: 10.5 }}>inactive</span>}
+        {!role.is_system && (
+          <button className="btn btn-ghost" disabled={busy} onClick={toggleActive} style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 11px', color: role.active ? '#B5532F' : '#4E7C3F' }}>
+            {role.active ? 'Deactivate' : 'Reactivate'}
+          </button>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {SECTIONS.map((s) => {
+          const on = role.is_system || secSet.has(s.k)
+          return (
+            <button key={s.k} disabled={!editable || busy} onClick={() => toggleSection(s.k)}
+              style={{ fontSize: 12, padding: '6px 11px', borderRadius: 8, cursor: editable ? 'pointer' : 'default',
+                border: on ? '1px solid #2F6E5E' : '1px solid var(--border)', background: on ? '#E9F0EF' : '#fff', color: on ? '#2F6E5E' : 'var(--muted)', fontWeight: on ? 600 : 400 }}>
+              {on ? '✓ ' : ''}{s.label}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }

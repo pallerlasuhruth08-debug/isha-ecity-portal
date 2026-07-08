@@ -4,7 +4,6 @@ import { pill, initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty, Chip, PagerBar } from '../components/View'
 import CampaignForm from '../components/CampaignForm'
 import SidePanel, { PanelHeader } from '../components/SidePanel'
-import { effectiveSpecialty } from '../lib/roles'
 
 const STATUS_PILL = {
   new: pill('#E9F0EF', '#2F6E5E'),
@@ -45,14 +44,7 @@ const IE_SEL = 'id, full_name, phone, ie_date, program_name, status, source, not
 const mapVp = (v) => ({ key: 'vp:' + v.person_id, kind: 'volunteering', table: 'volunteer_profiles', id: v.person_id, idCol: 'person_id', personId: v.person_id, name: v.person?.full_name || 'Unknown', phone: v.person?.phone || '', status: v.status || 'new', ieo: false, tags: [], availability: v.preferred_timing || '—', activity: (v.interests || []).join(', ') || '—', activityList: v.interests || [], notes: v.screening_notes, src: v.interest_source, date: v.interest_date, origin: { label: v.interest_source || 'Volunteering form', date: v.interest_date, verb: 'submitted' } })
 const mapIe = (r) => ({ key: 'ie:' + r.id, kind: 'volunteering', table: 'ie_completion_volunteer', id: r.id, idCol: 'id', personId: null, name: r.full_name || 'Unknown', phone: r.phone || '', status: r.status || 'new', ieo: true, tags: ['IEO'], availability: '—', activity: r.program_name || 'Inner Engineering Online', activityList: [], notes: r.notes, src: r.source, date: r.ie_date, origin: { label: r.program_name || 'Inner Engineering Online', date: r.ie_date, verb: 'completed' } })
 
-export default function Interest({ me, onToast, eventScopeId = null, onScopeConsumed }) {
-  // Interest Inbox splits by specialty: volunteer nurturers see volunteering
-  // interest, meditator nurturers see advanced/meditator interest; both/super/
-  // admin see all. (Advanced is also RLS-gated; volunteering isn't, since those
-  // are the same volunteer records both specialties see on the Volunteers tab.)
-  const spec = effectiveSpecialty(me)
-  const canVol = spec !== 'meditator'
-  const canAdv = spec !== 'volunteer'
+export default function Interest({ onToast, eventScopeId = null, onScopeConsumed }) {
   const [advItems, setAdvItems] = useState([]) // advanced grouped-by-person (small, bounded)
   const [vpCount, setVpCount] = useState(0)
   const [ieCount, setIeCount] = useState(0)
@@ -112,28 +104,14 @@ export default function Interest({ me, onToast, eventScopeId = null, onScopeCons
     const vpSrc = { count: vpCount, fetch: async (off, lim) => { const { data } = await supabase.from('volunteer_profiles').select(VP_SEL).eq('status', 'new').order('interest_date', { ascending: false }).range(off, off + lim - 1); return (data || []).map(mapVp) } }
     const ieSrc = { count: ieCount, fetch: async (off, lim) => { const { data } = await supabase.from('ie_completion_volunteer').select(IE_SEL).order('ie_date', { ascending: false, nullsFirst: false }).range(off, off + lim - 1); return (data || []).map(mapIe) } }
     const advSrc = { count: advItems.length, fetch: async (off, lim) => advItems.slice(off, off + lim) }
-    if (tab === 'advanced') return canAdv ? [advSrc] : []
+    if (tab === 'advanced') return [advSrc]
     if (ieoOnly) return [ieSrc]
-    if (tab === 'volunteering') return canVol ? [vpSrc, ieSrc] : []
-    // 'all' — only the segments this specialty may see.
-    return [...(canVol ? [vpSrc, ieSrc] : []), ...(canAdv ? [advSrc] : [])]
-  }, [tab, ieoOnly, vpCount, ieCount, advItems, canVol, canAdv])
+    if (tab === 'volunteering') return [vpSrc, ieSrc]
+    return [vpSrc, ieSrc, advSrc]
+  }, [tab, ieoOnly, vpCount, ieCount, advItems])
 
   const total = sources.reduce((s, x) => s + x.count, 0)
-  const counts = {
-    all: (canVol ? vpCount + ieCount : 0) + (canAdv ? advItems.length : 0),
-    volunteering: vpCount + ieCount,
-    advanced: advItems.length,
-  }
-  // Segment tabs visible to this specialty (Events + All always; volunteering/
-  // advanced by specialty).
-  const visibleTabs = TABS.filter((t) => t.key === 'all' || t.key === 'events'
-    || (t.key === 'volunteering' && canVol) || (t.key === 'advanced' && canAdv))
-  // If the active tab isn't allowed for this specialty, fall back to All.
-  useEffect(() => {
-    if (!visibleTabs.some((t) => t.key === tab)) setTab('all')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canVol, canAdv])
+  const counts = { all: vpCount + ieCount + advItems.length, volunteering: vpCount + ieCount, advanced: advItems.length }
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
 
   useEffect(() => {
@@ -275,7 +253,7 @@ export default function Interest({ me, onToast, eventScopeId = null, onScopeCons
     <Pad>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          {visibleTabs.map((t) => (<Chip key={t.key} on={tab === t.key} label={t.label} count={counts[t.key] || 0} onClick={() => setTab(t.key)} />))}
+          {TABS.map((t) => (<Chip key={t.key} on={tab === t.key} label={t.label} count={counts[t.key] || 0} onClick={() => setTab(t.key)} />))}
           {tab !== 'advanced' && tab !== 'events' && (
             <button onClick={() => setIeoOnly((v) => !v)} className="btn" style={{ padding: '6px 11px', fontSize: 12, borderRadius: 20, background: ieoOnly ? '#2F6E5E' : '#fff', color: ieoOnly ? '#fff' : 'var(--ink-soft)', border: ieoOnly ? 'none' : '1px solid var(--border)' }}>IEO only</button>
           )}

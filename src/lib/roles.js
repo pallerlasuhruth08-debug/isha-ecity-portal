@@ -78,20 +78,28 @@ export const REAL_ROLE_LABEL = {
   volunteer: 'Volunteer',
 }
 
-// The role IS the (scope, specialty) pair. Scope derives from center_id
-// ('all' = sector, else one center); specialty is its own field. Mirrors the
-// DB's my_specialty(): legacy privileged roles with no specialty set read as
-// 'both' until an admin assigns one.
-export function effectiveSpecialty(profile) {
-  if (profile?.specialty) return profile.specialty
-  return ['admin', 'sector_nurturer', 'center_coordinator'].includes(profile?.role) ? 'both' : null
+// Roles are DATA (roles + role_sections tables). A role grants a set of SECTIONS;
+// each section maps to one nav tab. Center scope (which centre's data) is a
+// separate dimension carried by profiles.center_id.
+export const SECTION_TO_TAB = {
+  dashboard: 'dashboard',
+  volunteers: 'volunteers',
+  meditators: 'meditators',
+  advance: 'advance',
+  event_hub: 'hub',
+  attendance: 'events',
+  nurturing: 'nurturing',
+  interest: 'interest',
+  campaigns: 'campaigns',
+  unresolved: 'unresolved',
 }
-export const scopeOf = (profile) => (profile?.center_id && profile.center_id !== 'all' ? 'center' : 'sector')
-// Advance programmes are meditator-track — hidden from volunteer specialty
-// (and unassigned). Mirrors the RLS sees_advance() gate.
-export function visibleTabs(profile, isAdmin) {
-  const base = isAdmin ? [...ALL_TABS, 'admin'] : [...ALL_TABS]
-  return ['meditator', 'both'].includes(effectiveSpecialty(profile)) ? base : base.filter((t) => t !== 'advance')
+export const ALL_SECTIONS = Object.keys(SECTION_TO_TAB)
+// Tabs the signed-in user may see: admin gets everything + Admin; everyone else
+// gets exactly the tabs their role's granted sections map to.
+export function tabsForSections(sections, isAdmin) {
+  if (isAdmin) return [...ALL_TABS, 'admin']
+  const allowed = new Set((sections || []).map((s) => SECTION_TO_TAB[s]).filter(Boolean))
+  return ALL_TABS.filter((t) => allowed.has(t))
 }
 
 export const ROLE_ORDER = [
