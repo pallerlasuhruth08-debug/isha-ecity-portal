@@ -12,6 +12,7 @@ import CommentThread from '../components/CommentThread'
 import CreateTeamForm from '../components/CreateTeamForm'
 import { AddImport } from './Interest'
 import { buildTeamRoster, teamsToCSV, downloadCSV, teamsToPDF } from '../lib/teamExport'
+import KebabMenu from '../components/KebabMenu'
 
 // EVENT HUB — the home for events. The list surfaces overdue/at-risk phases across
 // all events; opening one shows four LENSES over four separate tables joined by the
@@ -264,6 +265,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   const [creating, setCreating] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [phaseSpanByBlock, setPhaseSpanByBlock] = useState({})
 
   const load = useCallback(async () => {
     setErr(null)
@@ -275,12 +277,30 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
     setBlocks(bl.data || []); setTypes(ty || [])
     const ids = (bl.data || []).map((b) => b.id)
     if (ids.length) {
-      const { data: asg } = await supabase.from('block_assignments').select('id, block_id, person_id, status, is_poc').in('block_id', ids)
+      const [asgRes, bpRes, epRes] = await Promise.all([
+        supabase.from('block_assignments').select('id, block_id, person_id, status, is_poc').in('block_id', ids),
+        supabase.from('block_phases').select('block_id, phase_id').in('block_id', ids),
+        supabase.from('event_phases').select('id, start_by, finish_by').eq('activity_id', ev.id),
+      ])
+      const asg = asgRes.data
       setAssigns(asg || [])
       const pids = [...new Set((asg || []).map((a) => a.person_id))]
       if (pids.length) { const { data: pp } = await supabase.from('people').select('id, full_name, phone, email').in('id', pids); setPeople(Object.fromEntries((pp || []).map((p) => [p.id, p]))) }
       else setPeople({})
-    } else setAssigns([])
+      // Each team's execution period — its own phase span if it has one, else the event's.
+      const phaseById = Object.fromEntries((epRes.data || []).map((p) => [p.id, p]))
+      const eventSpan = rangeLabel(ev.start_date || ev.activity_date, ev.end_date)
+      const byBlock = {}
+      for (const r of bpRes.data || []) (byBlock[r.block_id] ||= []).push(r.phase_id)
+      const spans = {}
+      for (const id of ids) {
+        const phases = (byBlock[id] || []).map((pid) => phaseById[pid]).filter(Boolean)
+        const starts = phases.map((p) => p.start_by).filter(Boolean).sort()
+        const finishes = phases.map((p) => p.finish_by).filter(Boolean).sort()
+        spans[id] = starts.length ? rangeLabel(starts[0], finishes[finishes.length - 1] || starts[starts.length - 1]) : eventSpan
+      }
+      setPhaseSpanByBlock(spans)
+    } else { setAssigns([]); setPhaseSpanByBlock({}) }
   }, [ev.id])
   useEffect(() => { load() }, [load])
 
@@ -334,7 +354,8 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
       )}
       {blocks.length === 0 ? <Empty label="No teams yet — create one below." /> : blocks.map((b) => (
         <TeamCard key={b.id} ev={ev} block={b} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator} types={types}
-          assigns={assigns.filter((a) => a.block_id === b.id)} allAssigns={assigns} allBlocks={blocks} people={people} onToast={onToast} onChanged={load} />
+          assigns={assigns.filter((a) => a.block_id === b.id)} allAssigns={assigns} allBlocks={blocks} people={people}
+          phaseSpan={phaseSpanByBlock[b.id]} onToast={onToast} onChanged={load} />
       ))}
       {isCoordinator && (
         <button className="btn btn-primary tap44" style={{ padding: '11px', fontSize: 14 }} onClick={() => setCreating(true)}>＋ Create team</button>
@@ -344,7 +365,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   )
 }
 
-function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, types = [], onToast, onChanged }) {
+function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, phaseSpan, types = [], onToast, onChanged }) {
   const [q, setQ] = useState('')
   const [results, setResults] = useState([])
   const [busy, setBusy] = useState(false)
@@ -443,19 +464,35 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
     <div className="card" style={{ padding: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>{block.heading}{block.activity_type_id && typeLabel(block.activity_type_id) ? <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {typeLabel(block.activity_type_id)}</span> : null}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{block.heading}{block.activity_type_id && typeLabel(block.activity_type_id) ? <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {typeLabel(block.activity_type_id)}</span> : null}</div>
+          {pocs.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>POC: {pocs.map((m) => people[m.person_id]?.full_name).filter(Boolean).join(', ')}</div>}
         </div>
-        <span className="pill" style={full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
-        {isCoordinator && (
-          <button className="tap44" onClick={() => setAdding((a) => !a)} title="Add member" style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? '#C2691F' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
-        )}
-        {isCoordinator && (
-          <button className="tap44" onClick={() => setEditing(true)} title="Edit team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
-        )}
-        {isCoordinator && (
-          <button className="tap44" disabled={busy} onClick={removeTeam} title="Delete / archive team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>🗑</button>
-        )}
-        <button className="tap44" onClick={() => setShowComments((s) => !s)} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: showComments ? '#EDE4D6' : '#fff', cursor: 'pointer' }}>💬</button>
+        <span className="pill" style={{ ...(full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')), flexShrink: 0 }}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
+
+        {/* Desktop: inline actions when space allows. */}
+        <div className="desktop-only" style={{ gap: 8, flexShrink: 0 }}>
+          {isCoordinator && (
+            <button className="tap44" onClick={() => setAdding((a) => !a)} title="Add member" style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? '#C2691F' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
+          )}
+          {isCoordinator && (
+            <button className="tap44" onClick={() => setEditing(true)} title="Edit team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
+          )}
+          {isCoordinator && (
+            <button className="tap44" disabled={busy} onClick={removeTeam} title="Delete / archive team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>🗑</button>
+          )}
+          <button className="tap44" onClick={() => setShowComments((s) => !s)} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: showComments ? '#EDE4D6' : '#fff', cursor: 'pointer' }}>💬</button>
+        </div>
+
+        {/* Mobile: everything collapses behind one 3-dot menu so it never crowds the team name. */}
+        <div className="mobile-only">
+          <KebabMenu items={[
+            { label: 'Dates: ' + (phaseSpan || '—'), view: true },
+            ...(isCoordinator ? [{ label: adding ? 'Hide add member' : '＋ Add member', onClick: () => setAdding((a) => !a) }] : []),
+            ...(isCoordinator ? [{ label: 'Edit team', onClick: () => setEditing(true) }] : []),
+            { label: showComments ? 'Hide comments' : 'Show comments', onClick: () => setShowComments((s) => !s) },
+            ...(isCoordinator ? [{ label: 'Delete / archive team', onClick: removeTeam, danger: true, disabled: busy }] : []),
+          ]} />
+        </div>
       </div>
       {editing && (
         <CreateTeamForm ev={ev} types={types} firstDay={firstDay} me={me} block={block}

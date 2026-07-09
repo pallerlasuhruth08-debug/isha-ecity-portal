@@ -7,6 +7,7 @@ import EventList from '../components/EventList'
 import CreateTeamForm from '../components/CreateTeamForm'
 import { CreateSessionForm } from './Events'
 import { AddImport } from './Interest'
+import KebabMenu from '../components/KebabMenu'
 import { eventDays, currentPhase, phaseTone, groupPhases, PHASE_SHORT, flaggedPhases, FLAG_META, fmtDay, rangeLabel } from '../lib/planning'
 import { ensureSeriesWindow } from '../lib/series'
 
@@ -160,14 +161,12 @@ const TODO_ACTIONS = [
   { kind: 'attendance', label: 'Create Attendance session' },
   { kind: 'team', label: 'Create Team' },
 ]
-const miniBtn = { fontSize: 12, padding: '3px 7px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', lineHeight: 1 }
 
 function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInterest }) {
   const [rows, setRows] = useState(null)
   const [text, setText] = useState('')
   const [date, setDate] = useState('')
   const [busy, setBusy] = useState(false)
-  const [menuFor, setMenuFor] = useState(null) // to-do id whose ⋯ menu is open
   const [launch, setLaunch] = useState(null)   // { todo, kind } for inline modals
   const [dragId, setDragId] = useState(null)   // to-do id being dragged
   const [types, setTypes] = useState([])
@@ -215,6 +214,7 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
   }
   async function patch(id, p) { const { error } = await supabase.from('event_todos').update(p).eq('id', id); if (error) return onToast('Could not update: ' + error.message); load() }
   function toggleDone(r) { return patch(r.id, r.done ? { done: false, done_at: null, done_by: null } : { done: true, done_at: new Date().toISOString(), done_by: me?.id || null }) }
+  function toggleStar(r) { return patch(r.id, { is_priority: !r.is_priority }) }
   async function remove(r) { if (!window.confirm(`Delete to-do “${r.text}”?`)) return; const { error } = await supabase.from('event_todos').delete().eq('id', r.id); if (error) return onToast('Could not delete: ' + error.message); load() }
   // Drag-to-reorder: drop `fromId` at `toId`'s position, renumber sort_order, persist.
   async function reorder(fromId, toId) {
@@ -230,7 +230,6 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
   }
 
   function pickAction(todo, kind) {
-    setMenuFor(null)
     // Attendance / team / interest all run IN-CONTEXT as modals — no navigation, so the
     // event context is never lost. Only campaign navigates (it needs the Volunteers table
     // to build a call-list); it stashes a link-back token resolved when we return.
@@ -241,6 +240,8 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
 
   if (rows === null) return <Loading label="Loading to-dos…" />
   const done = rows.filter((r) => r.done).length
+  // Starred to-dos float to the top; stable sort preserves each group's existing drag order.
+  const displayRows = [...rows].sort((a, b) => (b.is_priority ? 1 : 0) - (a.is_priority ? 1 : 0))
   return (
     <div className="card" style={{ padding: 18 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -249,10 +250,9 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
       </div>
       {rows.length === 0 && <Empty label="No to-dos yet — add the first below." />}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {rows.map((r) => (
+        {displayRows.map((r) => (
           <TodoRow key={r.id} r={r} isCoordinator={isCoordinator}
-            menuOpen={menuFor === r.id} onMenu={() => setMenuFor(menuFor === r.id ? null : r.id)}
-            onToggle={() => toggleDone(r)} onText={(v) => patch(r.id, { text: v })} onDate={(v) => patch(r.id, { due_date: v || null })}
+            onToggle={() => toggleDone(r)} onStar={() => toggleStar(r)} onText={(v) => patch(r.id, { text: v })} onDate={(v) => patch(r.id, { due_date: v || null })}
             onDelete={() => remove(r)} onPick={(k) => pickAction(r, k)}
             dragging={dragId === r.id}
             onDragStart={() => setDragId(r.id)} onDragEnd={() => setDragId(null)}
@@ -285,39 +285,43 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
   )
 }
 
-function TodoRow({ r, isCoordinator, menuOpen, onMenu, onToggle, onText, onDate, onDelete, onPick, dragging, onDragStart, onDragEnd, onDragOver, onDrop }) {
+function TodoRow({ r, isCoordinator, onToggle, onStar, onText, onDate, onDelete, onPick, dragging, onDragStart, onDragEnd, onDragOver, onDrop }) {
+  // Two lines: text is NEVER shared with the date control (that's what let the date
+  // input crowd/cover to-do text on narrow screens) — date + the actions menu sit on
+  // their own row below, indented to align under the text.
   return (
     <div draggable={isCoordinator} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop}
-      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #F4EEE2', opacity: dragging ? 0.4 : 1, background: dragging ? '#FBF1E6' : 'transparent' }}>
-      {isCoordinator && <span title="Drag to reorder" style={{ cursor: 'grab', color: 'var(--muted-2)', fontSize: 14, flexShrink: 0, userSelect: 'none' }}>⠿</span>}
-      <input type="checkbox" checked={!!r.done} disabled={!isCoordinator} onChange={onToggle} style={{ width: 16, height: 16, flexShrink: 0, cursor: isCoordinator ? 'pointer' : 'default' }} />
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-        {isCoordinator ? (
-          <input defaultValue={r.text} key={r.text} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== r.text) onText(v) }}
-            style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', fontSize: 13.5, background: 'transparent', fontFamily: 'inherit', color: r.done ? 'var(--muted-2)' : 'var(--ink)', textDecoration: r.done ? 'line-through' : 'none' }} />
-        ) : (
-          <span style={{ fontSize: 13.5, color: r.done ? 'var(--muted-2)' : 'var(--ink)', textDecoration: r.done ? 'line-through' : 'none' }}>{r.text}</span>
-        )}
-        {(r.linked_id || r.linked_type) && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), fontSize: 9.5 }}>{r.action_kind || 'linked'} ✓</span>}
-      </div>
-      {isCoordinator ? (
-        <input type="date" value={r.due_date || ''} onChange={(e) => onDate(e.target.value)}
-          style={{ fontSize: 11.5, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 7, background: '#fff', color: 'var(--ink-soft)', flexShrink: 0 }} />
-      ) : r.due_date ? <span style={{ fontSize: 11.5, color: 'var(--muted)', flexShrink: 0 }}>{fmtDay(r.due_date)}</span> : null}
-      {isCoordinator && (
-        <div style={{ display: 'flex', gap: 2, position: 'relative', flexShrink: 0 }}>
-          <button title="Actions" onClick={onMenu} style={miniBtn}>⋯</button>
-          {menuOpen && (
-            <div className="card" style={{ position: 'absolute', top: 26, right: 0, zIndex: 30, boxShadow: 'var(--shadow-lg)', padding: 6, width: 214 }}>
-              {TODO_ACTIONS.map((a) => (
-                <div key={a.kind} className="rowhover" style={{ padding: '8px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 600 }} onClick={() => onPick(a.kind)}>{a.label} →</div>
-              ))}
-              <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
-              <div className="rowhover" style={{ padding: '8px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, color: '#B5532F' }} onClick={onDelete}>Delete to-do</div>
-            </div>
+      style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 0', borderBottom: '1px solid #F4EEE2', opacity: dragging ? 0.4 : 1, background: dragging ? '#FBF1E6' : 'transparent' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {isCoordinator && <span title="Drag to reorder" style={{ cursor: 'grab', color: 'var(--muted-2)', fontSize: 14, flexShrink: 0, userSelect: 'none' }}>⠿</span>}
+        <input type="checkbox" checked={!!r.done} disabled={!isCoordinator} onChange={onToggle} style={{ width: 16, height: 16, flexShrink: 0, cursor: isCoordinator ? 'pointer' : 'default' }} />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+          {isCoordinator ? (
+            <input defaultValue={r.text} key={r.text} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== r.text) onText(v) }}
+              style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', fontSize: 13.5, background: 'transparent', fontFamily: 'inherit', color: r.done ? 'var(--muted-2)' : 'var(--ink)', textDecoration: r.done ? 'line-through' : 'none' }} />
+          ) : (
+            <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: r.done ? 'var(--muted-2)' : 'var(--ink)', textDecoration: r.done ? 'line-through' : 'none' }}>{r.text}</span>
           )}
+          {(r.linked_id || r.linked_type) && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), fontSize: 9.5, flexShrink: 0 }}>{r.action_kind || 'linked'} ✓</span>}
         </div>
-      )}
+        {/* Priority star: a primary, always-visible action — never hidden behind the menu. */}
+        <button className="tap44" title={r.is_priority ? 'Unstar' : 'Mark as priority'} disabled={!isCoordinator} onClick={onStar}
+          style={{ flexShrink: 0, background: 'none', border: 'none', fontSize: 16, lineHeight: 1, padding: '2px 4px', cursor: isCoordinator ? 'pointer' : 'default', color: r.is_priority ? '#C2691F' : 'var(--muted-2)' }}>{r.is_priority ? '★' : '☆'}</button>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: isCoordinator ? 40 : 24 }}>
+        {isCoordinator ? (
+          <input type="date" value={r.due_date || ''} onChange={(e) => onDate(e.target.value)}
+            style={{ fontSize: 11.5, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 7, background: '#fff', color: 'var(--ink-soft)', flexShrink: 0 }} />
+        ) : r.due_date ? <span style={{ fontSize: 11.5, color: 'var(--muted)', flexShrink: 0 }}>{fmtDay(r.due_date)}</span> : null}
+        {isCoordinator && (
+          <div style={{ marginLeft: 'auto' }}>
+            <KebabMenu items={[
+              ...TODO_ACTIONS.map((a) => ({ label: a.label + ' →', onClick: () => onPick(a.kind) })),
+              { label: 'Delete to-do', onClick: onDelete, danger: true },
+            ]} />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

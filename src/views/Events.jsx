@@ -9,6 +9,7 @@ import { fetchActivityTypes } from '../lib/activityTypes'
 import { fmtDay, groupPhases } from '../lib/planning'
 import { ensureSeriesWindow } from '../lib/series'
 import EventList from '../components/EventList'
+import KebabMenu from '../components/KebabMenu'
 
 // ────────────────────────────────────────────────────────────────────────────
 // BOUNDARY (do not remove): Event CREATION now lives at the SINGLE site-toolbar
@@ -275,17 +276,31 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
             <div key={s.id} className="rowhover" onClick={() => setOpenId(s.id)}
               style={{ cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: '#fff' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{s.title || typeLabel(s.activity_type_id) || 'Attendance'}</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtDay(s.session_date)} · {s.center_id || '—'}{s.activity_type_id ? ` · ${typeLabel(s.activity_type_id)}` : ''}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title || typeLabel(s.activity_type_id) || 'Attendance'}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fmtDay(s.session_date)} · {s.center_id || '—'}{s.activity_type_id ? ` · ${typeLabel(s.activity_type_id)}` : ''}</div>
               </div>
-              <span className="pill" style={s.type === 'meditator' ? pill('#E9F0EF', '#2F6E5E') : pill('#F6E8D8', '#C2691F')}>{s.type === 'meditator' ? 'participant' : 'volunteer'}</span>
-              <span className="pill" style={pill('#EAF2E5', '#4E7C3F')}>{counts[s.id] || 0} present</span>
+              <span className="pill" style={{ ...(s.type === 'meditator' ? pill('#E9F0EF', '#2F6E5E') : pill('#F6E8D8', '#C2691F')), flexShrink: 0 }}>{s.type === 'meditator' ? 'participant' : 'volunteer'}</span>
+              <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), flexShrink: 0 }}>{counts[s.id] || 0} present</span>
+
+              {/* Desktop: inline actions when space allows. */}
+              <div className="desktop-only" style={{ gap: 8, flexShrink: 0 }}>
+                {isCoordinator && (
+                  <button className="tap44" disabled={busy} onClick={(e) => { e.stopPropagation(); setEditing(s) }} title="Edit session" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
+                )}
+                {isCoordinator && (
+                  <button className="tap44" disabled={busy} onClick={(e) => removeSession(e, s)} title={(counts[s.id] || 0) > 0 ? 'Archive session (has records)' : 'Delete empty session'}
+                    style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>🗑</button>
+                )}
+              </div>
+
+              {/* Mobile: collapse behind one 3-dot menu so actions never crowd the title. */}
               {isCoordinator && (
-                <button disabled={busy} onClick={(e) => { e.stopPropagation(); setEditing(s) }} title="Edit session" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
-              )}
-              {isCoordinator && (
-                <button disabled={busy} onClick={(e) => removeSession(e, s)} title={(counts[s.id] || 0) > 0 ? 'Archive session (has records)' : 'Delete empty session'}
-                  style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>🗑</button>
+                <div className="mobile-only">
+                  <KebabMenu items={[
+                    { label: 'Edit session', onClick: () => setEditing(s) },
+                    { label: (counts[s.id] || 0) > 0 ? 'Archive session' : 'Delete session', onClick: () => removeSession({ stopPropagation() {} }, s), danger: true, disabled: busy },
+                  ]} />
+                </div>
               )}
             </div>
           ))}

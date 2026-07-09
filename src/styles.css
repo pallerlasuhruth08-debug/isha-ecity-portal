@@ -6,6 +6,15 @@
 /* Date inputs read as clickable everywhere (event forms and beyond). */
 input[type="date"] { cursor: pointer; }
 
+/* Row-action responsive pattern: inline buttons on desktop, a single 3-dot menu on
+   mobile, so actions never crowd or cover row content (team names, to-do text, etc.). */
+.desktop-only { display: flex; }
+.mobile-only { display: none; }
+@media (max-width: 640px) {
+  .desktop-only { display: none !important; }
+  .mobile-only { display: flex !important; }
+}
+
 /* Mobile: modal dialogs become full-screen sheets (edge-to-edge, no corners) so
    their existing "✕ Close" header reads as a back control, not a floating card. */
 @media (max-width: 640px) {
