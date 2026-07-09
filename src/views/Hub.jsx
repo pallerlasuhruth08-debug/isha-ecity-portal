@@ -13,6 +13,8 @@ import CreateTeamForm from '../components/CreateTeamForm'
 import { AddImport } from './Interest'
 import { buildTeamRoster, teamsToCSV, downloadCSV, teamsToPDF } from '../lib/teamExport'
 import { multiFieldOr } from '../lib/searchFilter'
+import EventInterestPanel from '../components/EventInterestPanel'
+import { eventDays } from '../lib/planning'
 import KebabMenu from '../components/KebabMenu'
 
 // EVENT HUB — the home for events. The list surfaces overdue/at-risk phases across
@@ -163,7 +165,7 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
 
       {tab === 'planning' && <PlanningEvent ev={ev} me={me} isCoordinator={isCoordinator} embedded onToast={onToast} onEventChanged={reload} onStartCampaign={onStartCampaign} onOpenInterest={onOpenInterestInbox} />}
       {tab === 'teams' && <EventTeams ev={ev} me={me} isCoordinator={isCoordinator} onToast={onToast} />}
-      {tab === 'interest' && <EventInterestTab ev={ev} isCoordinator={isCoordinator} onToast={onToast} />}
+      {tab === 'interest' && <EventInterestTab ev={ev} me={me} isCoordinator={isCoordinator} onToast={onToast} />}
       {tab === 'campaigns' && <EventCampaignsTab ev={ev} isCoordinator={isCoordinator} onOpenCampaign={onOpenCampaign} onStartCampaign={onStartCampaign} />}
       {tab === 'attendance' && <AttendanceDetail activity={ev} me={me} isCoordinator={isCoordinator} types={types} embedded onToast={onToast} onActivityChanged={reload} />}
     </Pad>
@@ -175,16 +177,9 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
 // there (scoped to this event) rather than duplicating the importers.
 // Add/Import interest happens IN-CONTEXT here (modal), never navigating away — so the
 // event context is never lost and the new interest shows immediately on save.
-function EventInterestTab({ ev, isCoordinator, onToast }) {
-  const [rows, setRows] = useState(null)
+function EventInterestTab({ ev, me, isCoordinator, onToast }) {
   const [addOpen, setAddOpen] = useState(false)
-  const load = useCallback(async () => {
-    const { data } = await supabase.from('event_interest')
-      .select('id, source, created_at, person:people!event_interest_person_id_fkey(id, full_name, phone)')
-      .eq('activity_id', ev.id).order('created_at', { ascending: false })
-    setRows(data || [])
-  }, [ev.id])
-  useEffect(() => { load() }, [load])
+  const [reloadKey, setReloadKey] = useState(0)
 
   return (
     <div>
@@ -194,18 +189,8 @@ function EventInterestTab({ ev, isCoordinator, onToast }) {
           <span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>Add or import against this event — stays right here.</span>
         </div>
       )}
-      {!rows ? <Loading label="Loading interest…" /> : rows.length === 0 ? (
-        <Empty label="No interests yet for this event." />
-      ) : (
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ fontSize: 12, color: 'var(--muted-2)', marginBottom: 8 }}>{rows.length} interested</div>
-          {rows.map((r, i) => (
-            <Row key={r.id} avatar={{ i, name: r.person?.full_name }} main={r.person?.full_name || 'Unknown'}
-              side={<span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{r.person?.phone || 'no phone'} · <SourcePill source={r.source} /></span>} />
-          ))}
-        </div>
-      )}
-      {addOpen && <AddImport lockEventId={ev.id} onClose={() => setAddOpen(false)} onToast={onToast} onDone={() => { setAddOpen(false); load() }} />}
+      <EventInterestPanel uid={me?.id} lockEventId={ev.id} reloadKey={reloadKey} onToast={onToast} isCoordinator={isCoordinator} />
+      {addOpen && <AddImport lockEventId={ev.id} me={me} onClose={() => setAddOpen(false)} onToast={onToast} onDone={() => { setAddOpen(false); setReloadKey((k) => k + 1) }} />}
     </div>
   )
 }
@@ -267,6 +252,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   const [showInfo, setShowInfo] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [phaseSpanByBlock, setPhaseSpanByBlock] = useState({})
+  const [teamDaysByBlock, setTeamDaysByBlock] = useState({})
 
   const load = useCallback(async () => {
     setErr(null)
@@ -289,19 +275,31 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
       if (pids.length) { const { data: pp } = await supabase.from('people').select('id, full_name, phone, email').in('id', pids); setPeople(Object.fromEntries((pp || []).map((p) => [p.id, p]))) }
       else setPeople({})
       // Each team's execution period — its own phase span if it has one, else the event's.
+      // Also its DAY SET (actual dates) for the availability-mismatch check at assign time.
       const phaseById = Object.fromEntries((epRes.data || []).map((p) => [p.id, p]))
       const eventSpan = rangeLabel(ev.start_date || ev.activity_date, ev.end_date)
+      const eventDayList = eventDays(ev.start_date || ev.activity_date, ev.end_date)
       const byBlock = {}
       for (const r of bpRes.data || []) (byBlock[r.block_id] ||= []).push(r.phase_id)
       const spans = {}
+      const teamDays = {}
       for (const id of ids) {
         const phases = (byBlock[id] || []).map((pid) => phaseById[pid]).filter(Boolean)
         const starts = phases.map((p) => p.start_by).filter(Boolean).sort()
         const finishes = phases.map((p) => p.finish_by).filter(Boolean).sort()
         spans[id] = starts.length ? rangeLabel(starts[0], finishes[finishes.length - 1] || starts[starts.length - 1]) : eventSpan
+        // Team days = its phase windows ∩ the event's own days (so pre/post-event phases
+        // like "Promotion" don't cause false mismatches). No phases → the whole event.
+        if (phases.length) {
+          const evSet = new Set(eventDayList)
+          const s = new Set()
+          for (const ph of phases) if (ph.start_by) for (const d of eventDays(ph.start_by, ph.finish_by || ph.start_by)) if (evSet.has(d)) s.add(d)
+          teamDays[id] = [...s].sort()
+        } else teamDays[id] = eventDayList
       }
       setPhaseSpanByBlock(spans)
-    } else { setAssigns([]); setPhaseSpanByBlock({}) }
+      setTeamDaysByBlock(teamDays)
+    } else { setAssigns([]); setPhaseSpanByBlock({}); setTeamDaysByBlock({}) }
   }, [ev.id])
   useEffect(() => { load() }, [load])
 
@@ -356,7 +354,8 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
       {blocks.length === 0 ? <Empty label="No teams yet — create one below." /> : blocks.map((b) => (
         <TeamCard key={b.id} ev={ev} block={b} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator} types={types}
           assigns={assigns.filter((a) => a.block_id === b.id)} allAssigns={assigns} allBlocks={blocks} people={people}
-          phaseSpan={phaseSpanByBlock[b.id]} onToast={onToast} onChanged={load} />
+          phaseSpan={phaseSpanByBlock[b.id]} teamDays={teamDaysByBlock[b.id] || []} eventDayList={eventDays(ev.start_date || ev.activity_date, ev.end_date)}
+          onToast={onToast} onChanged={load} />
       ))}
       {isCoordinator && (
         <button className="btn btn-primary tap44" style={{ padding: '11px', fontSize: 14 }} onClick={() => setCreating(true)}>＋ Create team</button>
@@ -366,7 +365,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   )
 }
 
-function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, phaseSpan, types = [], onToast, onChanged }) {
+function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, phaseSpan, teamDays = [], eventDayList = [], types = [], onToast, onChanged }) {
   const [q, setQ] = useState('')
   const [debouncedQ, setDebouncedQ] = useState('')
   const [pickerTab, setPickerTab] = useState('interest') // 'interest' (default) | 'all'
@@ -406,14 +405,16 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
     return () => clearTimeout(h)
   }, [q])
 
-  // Tab 1 (default): this event's Volunteer Interest pool, minus anyone already on ANY
-  // team for this event — these are fresh hands-raised candidates. Loaded once per
-  // picker-open (closing after an add forces a fresh load next time, so it can't go stale).
+  // Tab 1 (default): this event's Volunteer Interest pool = only APPROVED interests,
+  // minus anyone already on ANY team for this event. Interested/Contacted/Declined/
+  // No-Response never appear here — approval is what flows a volunteer into the pool.
+  // Loaded once per picker-open (a fresh open reloads, so it can't go stale).
   useEffect(() => {
     if (!adding) return
     setPickerTab('interest')
     let alive = true
-    supabase.from('event_interest').select('person:people!event_interest_person_id_fkey(id, full_name, phone)').eq('activity_id', ev.id)
+    supabase.from('event_interest').select('availability_dates, person:people!event_interest_person_id_fkey(id, full_name, phone)')
+      .eq('activity_id', ev.id).eq('status', 'approved')
       .then(({ data }) => {
         if (!alive) return
         const assignedIds = new Set(allAssigns.filter((a) => ['assigned', 'show', 'involved'].includes(a.status)).map((a) => a.person_id))
@@ -422,7 +423,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
         for (const row of data || []) {
           const p = row.person
           if (!p || assignedIds.has(p.id) || seen.has(p.id)) continue
-          seen.add(p.id); pool.push(p)
+          seen.add(p.id); pool.push({ ...p, availability_dates: row.availability_dates || [] })
         }
         setInterestPool(pool)
       })
@@ -447,8 +448,26 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   const interestFiltered = debouncedQ ? interestPool.filter((p) => matchesQuery(p, debouncedQ)) : interestPool
   const pickerResults = pickerTab === 'interest' ? interestFiltered : allResults
 
+  // Map a set of dates to "Day 1, Day 3" labels (day number = position in the event's
+  // day list); dates outside that list fall back to their own short date.
+  const dayLabels = (dates) => (dates || []).map((d) => { const i = eventDayList.indexOf(d); return i >= 0 ? `Day ${i + 1}` : fmtDay(d) }).join(', ')
+
   async function addMember(p) {
     if (memberIds.has(p.id)) { onToast(`${p.full_name} already on the team.`); return }
+    // Availability-vs-team-days mismatch check (warns, never blocks — coordinator overrides).
+    try {
+      let avail = p.availability_dates
+      if (avail === undefined) { // came from All-Volunteers tab → look up this event's interest row
+        const { data: ei } = await supabase.from('event_interest').select('availability_dates').eq('activity_id', ev.id).eq('person_id', p.id).maybeSingle()
+        avail = ei?.availability_dates || []
+      }
+      let msg = null
+      if (!avail || !avail.length) msg = `Availability not set for ${p.full_name} — confirm before assigning.`
+      else if (teamDays.length && !teamDays.some((d) => avail.includes(d))) {
+        msg = `${p.full_name} is available ${dayLabels(avail)} but this team runs ${dayLabels(teamDays)}. Assign anyway?`
+      }
+      if (msg && !window.confirm(msg)) return
+    } catch { /* availability check is best-effort — never blocks the add */ }
     setBusy(true)
     try {
       const { error } = await supabase.from('block_assignments').insert({ block_id: block.id, person_id: p.id, day_date: firstDay, status: 'assigned', assigned_by: me?.id || null })
@@ -620,12 +639,6 @@ function Row({ avatar, main, side, onClick }) {
       <div style={{ marginLeft: 'auto', flexShrink: 0 }}>{side}</div>
     </div>
   )
-}
-
-const SOURCE_TONE = { form: ['#E9F0EF', '#2F6E5E'], campaign: ['#F6E8D8', '#C2691F'], broadcast: ['#EAF2E5', '#4E7C3F'] }
-function SourcePill({ source }) {
-  const [bg, fg] = SOURCE_TONE[source] || ['#F1EADD', '#8C7E6B']
-  return <span className="pill" style={{ background: bg, color: fg, fontSize: 10.5 }}>{source || 'other'}</span>
 }
 function statusPill(status) {
   const map = { active: ['#EAF2E5', '#4E7C3F'], paused: ['#FBEAD9', '#C28A2A'], done: ['#F1EADD', '#8C7E6B'] }
