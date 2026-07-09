@@ -12,6 +12,7 @@ import CommentThread from '../components/CommentThread'
 import CreateTeamForm from '../components/CreateTeamForm'
 import { AddImport } from './Interest'
 import { buildTeamRoster, teamsToCSV, downloadCSV, teamsToPDF } from '../lib/teamExport'
+import { multiFieldOr } from '../lib/searchFilter'
 import KebabMenu from '../components/KebabMenu'
 
 // EVENT HUB — the home for events. The list surfaces overdue/at-risk phases across
@@ -367,7 +368,10 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
 
 function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, phaseSpan, types = [], onToast, onChanged }) {
   const [q, setQ] = useState('')
-  const [results, setResults] = useState([])
+  const [debouncedQ, setDebouncedQ] = useState('')
+  const [pickerTab, setPickerTab] = useState('interest') // 'interest' (default) | 'all'
+  const [interestPool, setInterestPool] = useState([])
+  const [allResults, setAllResults] = useState([])
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -396,14 +400,52 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
     return ids.map((id) => ({ id, name: blockNameById[id] || 'Unknown team' }))
   }
 
+  // Debounce the raw keystroke ~300ms before it drives either tab's search.
   useEffect(() => {
-    if (q.trim().length < 2) { setResults([]); return }
-    const h = setTimeout(async () => {
-      const { data } = await supabase.from('people').select('id, full_name, phone').ilike('full_name', `%${q.trim()}%`).limit(6)
-      setResults(data || [])
-    }, 300)
+    const h = setTimeout(() => setDebouncedQ(q.trim()), 300)
     return () => clearTimeout(h)
   }, [q])
+
+  // Tab 1 (default): this event's Volunteer Interest pool, minus anyone already on ANY
+  // team for this event — these are fresh hands-raised candidates. Loaded once per
+  // picker-open (closing after an add forces a fresh load next time, so it can't go stale).
+  useEffect(() => {
+    if (!adding) return
+    setPickerTab('interest')
+    let alive = true
+    supabase.from('event_interest').select('person:people!event_interest_person_id_fkey(id, full_name, phone)').eq('activity_id', ev.id)
+      .then(({ data }) => {
+        if (!alive) return
+        const assignedIds = new Set(allAssigns.filter((a) => ['assigned', 'show', 'involved'].includes(a.status)).map((a) => a.person_id))
+        const seen = new Set()
+        const pool = []
+        for (const row of data || []) {
+          const p = row.person
+          if (!p || assignedIds.has(p.id) || seen.has(p.id)) continue
+          seen.add(p.id); pool.push(p)
+        }
+        setInterestPool(pool)
+      })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adding, ev.id])
+
+  // Tab 2: the full volunteers list, name-or-phone search (same pattern as the Volunteers page).
+  useEffect(() => {
+    if (!adding || pickerTab !== 'all' || !debouncedQ) { setAllResults([]); return }
+    let alive = true
+    const searchOr = multiFieldOr(debouncedQ, ['full_name', 'phone'])
+    supabase.from('people').select('id, full_name, phone').eq('is_volunteer', true).or(searchOr).limit(8)
+      .then(({ data }) => { if (alive) setAllResults(data || []) })
+    return () => { alive = false }
+  }, [adding, pickerTab, debouncedQ])
+
+  const matchesQuery = (p, term) => {
+    const t = term.toLowerCase()
+    return (p.full_name || '').toLowerCase().includes(t) || (p.phone || '').includes(t)
+  }
+  const interestFiltered = debouncedQ ? interestPool.filter((p) => matchesQuery(p, debouncedQ)) : interestPool
+  const pickerResults = pickerTab === 'interest' ? interestFiltered : allResults
 
   async function addMember(p) {
     if (memberIds.has(p.id)) { onToast(`${p.full_name} already on the team.`); return }
@@ -411,7 +453,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
     try {
       const { error } = await supabase.from('block_assignments').insert({ block_id: block.id, person_id: p.id, day_date: firstDay, status: 'assigned', assigned_by: me?.id || null })
       if (error) throw error
-      setQ(''); setResults([]); setAdding(false); onToast(`${p.full_name} added to ${block.heading}.`); onChanged()
+      setQ(''); setAdding(false); onToast(`${p.full_name} added to ${block.heading}.`); onChanged()
     } catch (e) { onToast(/duplicate/i.test(e.message || '') ? 'Already on the team.' : 'Could not add: ' + (e.message || e)) } finally { setBusy(false) }
   }
   async function removeMember(pid, name) {
@@ -521,17 +563,34 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
       )}
 
       {isCoordinator && adding && (
-        <div style={{ position: 'relative', marginTop: 10 }}>
-          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a person to add…" style={{ fontSize: 13, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, width: '100%' }} />
-          {results.length > 0 && (
-            <div className="card" style={{ position: 'absolute', top: 42, left: 0, right: 0, zIndex: 20, boxShadow: 'var(--shadow-lg)', padding: 6 }}>
-              {results.map((p) => {
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <button className="tap44" onClick={() => setPickerTab('interest')}
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 7, border: '1px solid var(--border)', cursor: 'pointer', background: pickerTab === 'interest' ? '#241B14' : '#fff', color: pickerTab === 'interest' ? '#F6ECDC' : 'var(--ink-soft)' }}>
+              Volunteer Interests{interestPool.length ? ` (${interestPool.length})` : ''}
+            </button>
+            <button className="tap44" onClick={() => setPickerTab('all')}
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 7, border: '1px solid var(--border)', cursor: 'pointer', background: pickerTab === 'all' ? '#241B14' : '#fff', color: pickerTab === 'all' ? '#F6ECDC' : 'var(--ink-soft)' }}>
+              All Volunteers
+            </button>
+          </div>
+          <div style={{ position: 'relative' }}>
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or phone…" style={{ fontSize: 13, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, width: '100%' }} />
+            <div className="card" style={{ marginTop: 6, boxShadow: 'var(--shadow-lg)', padding: 6, maxHeight: 260, overflowY: 'auto' }}>
+              {pickerTab === 'all' && !debouncedQ ? (
+                <div style={{ padding: '10px 9px', fontSize: 12, color: 'var(--muted-2)' }}>Type a name or phone number to search all volunteers.</div>
+              ) : pickerResults.length === 0 ? (
+                <div style={{ padding: '10px 9px', fontSize: 12, color: 'var(--muted-2)' }}>
+                  {pickerTab === 'interest' ? (interestPool.length ? 'No matches.' : 'No one from Volunteer Interests is available for this event yet.') : 'No matches.'}
+                </div>
+              ) : pickerResults.map((p) => {
                 const teams = teamsForPerson(p.id)
                 const inThisTeam = teams.some((t) => t.id === block.id)
                 return (
                   <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, cursor: 'pointer' }} onClick={() => !busy && addMember(p)}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 500 }}>{p.full_name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted-2)' }}>{p.phone || 'no phone'}</div>
                       {inThisTeam ? (
                         <div style={{ fontSize: 11, fontWeight: 600, color: '#9C4A14' }}>Already a member of this team.</div>
                       ) : teams.length ? (
@@ -545,7 +604,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
                 )
               })}
             </div>
-          )}
+          </div>
         </div>
       )}
       {showComments && <CommentThread scope={{ block_id: block.id }} me={me} onToast={onToast} />}
