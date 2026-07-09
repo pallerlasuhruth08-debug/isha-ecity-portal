@@ -6,6 +6,7 @@ import { fetchActivityTypes } from '../lib/activityTypes'
 import EventList from '../components/EventList'
 import CreateTeamForm from '../components/CreateTeamForm'
 import { CreateSessionForm } from './Events'
+import { AddImport } from './Interest'
 import { eventDays, currentPhase, phaseTone, groupPhases, PHASE_SHORT, flaggedPhases, FLAG_META, fmtDay, rangeLabel } from '../lib/planning'
 import { ensureSeriesWindow } from '../lib/series'
 
@@ -224,11 +225,12 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
 
   function pickAction(todo, kind) {
     setMenuFor(null)
-    if (kind === 'attendance' || kind === 'team') { setLaunch({ todo, kind }); return }
-    // Navigation flows leave the hub — stash a link-back token, launch the real flow.
+    // Attendance / team / interest all run IN-CONTEXT as modals — no navigation, so the
+    // event context is never lost. Only campaign navigates (it needs the Volunteers table
+    // to build a call-list); it stashes a link-back token resolved when we return.
+    if (kind === 'attendance' || kind === 'team' || kind === 'interest') { setLaunch({ todo, kind }); return }
     localStorage.setItem('todo_pending', JSON.stringify({ todoId: todo.id, actionKind: kind, activityId: ev.id, since: new Date().toISOString() }))
-    if (kind === 'campaign') return onStartCampaign ? onStartCampaign(ev.id, ev.name, 'volunteer') : onToast('Campaign flow unavailable here.')
-    if (kind === 'interest') return onOpenInterest ? onOpenInterest(ev.id) : onToast('Interest flow unavailable here.')
+    return onStartCampaign ? onStartCampaign(ev.id, ev.name, 'volunteer') : onToast('Campaign flow unavailable here.')
   }
 
   if (rows === null) return <Loading label="Loading to-dos…" />
@@ -266,6 +268,10 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
         <CreateTeamForm ev={ev} types={types} firstDay={firstDay} me={me} onToast={onToast} onClose={() => setLaunch(null)}
           onCreated={(blockId) => { stamp(launch.todo.id, 'activity_blocks', blockId).then(() => { setLaunch(null); load(); onToast('Team created — checked off the to-do.') }) }} />
       )}
+      {launch?.kind === 'interest' && (
+        <AddImport lockEventId={ev.id} me={me} onToast={onToast} onClose={() => setLaunch(null)}
+          onDone={() => { stamp(launch.todo.id, 'event_interest', null).then(() => { setLaunch(null); load(); onToast('Interest added — checked off the to-do.') }) }} />
+      )}
     </div>
   )
 }
@@ -281,7 +287,7 @@ function TodoRow({ r, i, n, isCoordinator, menuOpen, onMenu, onToggle, onText, o
         ) : (
           <span style={{ fontSize: 13.5, color: r.done ? 'var(--muted-2)' : 'var(--ink)', textDecoration: r.done ? 'line-through' : 'none' }}>{r.text}</span>
         )}
-        {r.linked_id && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), fontSize: 9.5 }}>{r.action_kind || 'linked'} ✓</span>}
+        {(r.linked_id || r.linked_type) && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), fontSize: 9.5 }}>{r.action_kind || 'linked'} ✓</span>}
       </div>
       {isCoordinator ? (
         <input type="date" value={r.due_date || ''} onChange={(e) => onDate(e.target.value)}

@@ -10,6 +10,7 @@ import { PlanningEvent } from './Planning'
 import { Detail as AttendanceDetail, EventActions } from './Events'
 import CommentThread from '../components/CommentThread'
 import CreateTeamForm from '../components/CreateTeamForm'
+import { AddImport } from './Interest'
 
 // EVENT HUB — the home for events. The list surfaces overdue/at-risk phases across
 // all events; opening one shows four LENSES over four separate tables joined by the
@@ -163,7 +164,7 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
 
       {tab === 'planning' && <PlanningEvent ev={ev} me={me} isCoordinator={isCoordinator} embedded onToast={onToast} onEventChanged={reload} onStartCampaign={onStartCampaign} onOpenInterest={onOpenInterestInbox} />}
       {tab === 'teams' && <EventTeams ev={ev} me={me} isCoordinator={isCoordinator} onToast={onToast} />}
-      {tab === 'interest' && <EventInterestTab ev={ev} isCoordinator={isCoordinator} onOpenInterestInbox={onOpenInterestInbox} />}
+      {tab === 'interest' && <EventInterestTab ev={ev} isCoordinator={isCoordinator} onToast={onToast} />}
       {tab === 'campaigns' && <EventCampaignsTab ev={ev} isCoordinator={isCoordinator} onOpenCampaign={onOpenCampaign} onStartCampaign={onStartCampaign} />}
       {tab === 'attendance' && <AttendanceDetail activity={ev} me={me} isCoordinator={isCoordinator} types={types} embedded onToast={onToast} onActivityChanged={reload} />}
     </Pad>
@@ -173,23 +174,25 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
 // Volunteer Interests tab — a READ-THROUGH of everyone who showed interest for THIS
 // event. Import / scan / tag live in ONE place: the Interest Inbox. This tab links
 // there (scoped to this event) rather than duplicating the importers.
-function EventInterestTab({ ev, isCoordinator, onOpenInterestInbox }) {
+// Add/Import interest happens IN-CONTEXT here (modal), never navigating away — so the
+// event context is never lost and the new interest shows immediately on save.
+function EventInterestTab({ ev, isCoordinator, onToast }) {
   const [rows, setRows] = useState(null)
-  useEffect(() => {
-    let alive = true
-    supabase.from('event_interest')
+  const [addOpen, setAddOpen] = useState(false)
+  const load = useCallback(async () => {
+    const { data } = await supabase.from('event_interest')
       .select('id, source, created_at, person:people!event_interest_person_id_fkey(id, full_name, phone)')
       .eq('activity_id', ev.id).order('created_at', { ascending: false })
-      .then(({ data }) => { if (alive) setRows(data || []) })
-    return () => { alive = false }
+    setRows(data || [])
   }, [ev.id])
+  useEffect(() => { load() }, [load])
 
   return (
     <div>
       {isCoordinator && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => onOpenInterestInbox?.(ev.id)}>＋ Add / Import Interest</button>
-          <span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>Opens the interest inbox scoped to this event — add, scan or tag there.</span>
+          <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setAddOpen(true)}>＋ Add / Import Interest</button>
+          <span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>Add or import against this event — stays right here.</span>
         </div>
       )}
       {!rows ? <Loading label="Loading interest…" /> : rows.length === 0 ? (
@@ -203,6 +206,7 @@ function EventInterestTab({ ev, isCoordinator, onOpenInterestInbox }) {
           ))}
         </div>
       )}
+      {addOpen && <AddImport lockEventId={ev.id} onClose={() => setAddOpen(false)} onToast={onToast} onDone={() => { setAddOpen(false); load() }} />}
     </div>
   )
 }
@@ -301,7 +305,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
         </div>
       )}
       {blocks.length === 0 ? <Empty label="No teams yet — create one below." /> : blocks.map((b) => (
-        <TeamCard key={b.id} block={b} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator}
+        <TeamCard key={b.id} ev={ev} block={b} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator} types={types}
           assigns={assigns.filter((a) => a.block_id === b.id)} people={people} onToast={onToast} onChanged={load} />
       ))}
       {isCoordinator && (
@@ -312,11 +316,12 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   )
 }
 
-function TeamCard({ block, typeLabel, firstDay, me, isCoordinator, assigns, people, onToast, onChanged }) {
+function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, people, types = [], onToast, onChanged }) {
   const [q, setQ] = useState('')
   const [results, setResults] = useState([])
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [showComments, setShowComments] = useState(false)
 
   const byPerson = {}
@@ -369,6 +374,34 @@ function TeamCard({ block, typeLabel, firstDay, me, isCoordinator, assigns, peop
     } catch (e) { onToast('Could not update POC: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
+  // Destructive-action guard: a team with MARKED attendance (assignment show/no-show/
+  // involved, or event-level attendance rows tagged to this block) is ARCHIVED so its
+  // participation history survives. Only an attendance-free team is hard-deleted — and
+  // even then we warn about the members whose assignments the cascade removes.
+  async function removeTeam() {
+    const markedAssign = assigns.filter((a) => ['show', 'no_show', 'involved'].includes(a.status)).length
+    const { count: attCount } = await supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('block_id', block.id)
+    const marked = markedAssign + (attCount || 0)
+    setBusy(true)
+    try {
+      if (marked > 0) {
+        if (!window.confirm(`"${block.heading}" has ${marked} attendance record(s). It will be ARCHIVED — hidden from Teams but all attendance is preserved. Continue?`)) return
+        const { error } = await supabase.from('activity_blocks').update({ archived_at: new Date().toISOString(), archived_by: me?.id || null }).eq('id', block.id)
+        if (error) throw error
+        onToast(`Team "${block.heading}" archived (attendance preserved).`)
+      } else {
+        const n = assigns.length
+        const msg = n ? `Delete "${block.heading}"? No attendance is marked, but ${n} member assignment(s) will be removed. This cannot be undone.`
+          : `Delete "${block.heading}"? This cannot be undone.`
+        if (!window.confirm(msg)) return
+        const { error } = await supabase.from('activity_blocks').delete().eq('id', block.id)
+        if (error) throw error
+        onToast(`Team "${block.heading}" deleted.`)
+      }
+      onChanged()
+    } catch (e) { onToast('Could not remove team: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
   return (
     <div className="card" style={{ padding: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
@@ -380,8 +413,18 @@ function TeamCard({ block, typeLabel, firstDay, me, isCoordinator, assigns, peop
         {isCoordinator && (
           <button onClick={() => setAdding((a) => !a)} title="Add member" style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? '#C2691F' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
         )}
+        {isCoordinator && (
+          <button onClick={() => setEditing(true)} title="Edit team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
+        )}
+        {isCoordinator && (
+          <button disabled={busy} onClick={removeTeam} title="Delete / archive team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>🗑</button>
+        )}
         <button onClick={() => setShowComments((s) => !s)} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: showComments ? '#EDE4D6' : '#fff', cursor: 'pointer' }}>💬</button>
       </div>
+      {editing && (
+        <CreateTeamForm ev={ev} types={types} firstDay={firstDay} me={me} block={block}
+          onClose={() => setEditing(false)} onToast={onToast} onCreated={() => { setEditing(false); onChanged() }} />
+      )}
 
       {members.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>

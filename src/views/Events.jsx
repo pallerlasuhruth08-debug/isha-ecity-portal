@@ -177,7 +177,7 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
               {unresolvedCount} unresolved walk-in{unresolvedCount > 1 ? 's' : ''} — resolve in the <strong>Unresolved</strong> queue.
             </div>
           )}
-          <AttendanceSessions activity={activity} types={types} me={me} onToast={onToast} onChanged={load} />
+          <AttendanceSessions activity={activity} types={types} me={me} isCoordinator={isCoordinator} onToast={onToast} onChanged={load} />
         </div>
       </div>
 
@@ -211,18 +211,19 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
 const daysBetween = (a, b) => Math.round((new Date(a) - new Date(b)) / 86400000)
 const addDays = (iso, n) => { const d = new Date(iso); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
 
-function AttendanceSessions({ activity, types = [], me, onToast, onChanged }) {
+function AttendanceSessions({ activity, types = [], me, isCoordinator = false, onToast, onChanged }) {
   const [sessions, setSessions] = useState(null)
   const [counts, setCounts] = useState({})
   const [openId, setOpenId] = useState(null)
   const [creating, setCreating] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
   const load = useCallback(async () => {
     setErr(null)
     const { data, error } = await supabase.from('attendance_sessions')
       .select('id, title, type, session_date, center_id, activity_type_id')
-      .eq('activity_id', activity.id).order('session_date').order('created_at')
+      .eq('activity_id', activity.id).is('archived_at', null).order('session_date').order('created_at')
     if (error) { setErr(error.message); setSessions([]); return }
     setSessions(data || [])
     const { data: att } = await supabase.from('attendance').select('session_id').eq('activity_id', activity.id).not('session_id', 'is', null)
@@ -233,6 +234,29 @@ function AttendanceSessions({ activity, types = [], me, onToast, onChanged }) {
   useEffect(() => { load() }, [load])
 
   const typeLabel = (id) => types.find((t) => t.id === id)?.label
+
+  // A session with ZERO captured records has nothing to protect → hard delete.
+  // A session WITH records is archived (records preserved via attendance.session_id
+  // SET NULL is avoided — we keep the row, just hide the session).
+  async function removeSession(e, s) {
+    e.stopPropagation()
+    const n = counts[s.id] || 0
+    setBusy(true)
+    try {
+      if (n > 0) {
+        if (!window.confirm(`This session has ${n} attendance record(s). It will be ARCHIVED — hidden here, records preserved. Continue?`)) return
+        const { error } = await supabase.from('attendance_sessions').update({ archived_at: new Date().toISOString(), archived_by: me?.id || null }).eq('id', s.id)
+        if (error) throw error
+        onToast('Session archived (records preserved).')
+      } else {
+        if (!window.confirm('Delete this session? It has no attendance records.')) return
+        const { error } = await supabase.from('attendance_sessions').delete().eq('id', s.id)
+        if (error) throw error
+        onToast('Session deleted.')
+      }
+      load()
+    } catch (err2) { onToast('Could not remove session: ' + (err2.message || err2)) } finally { setBusy(false) }
+  }
 
   if (openId && sessions) {
     const s = sessions.find((x) => x.id === openId)
@@ -255,6 +279,10 @@ function AttendanceSessions({ activity, types = [], me, onToast, onChanged }) {
               </div>
               <span className="pill" style={s.type === 'meditator' ? pill('#E9F0EF', '#2F6E5E') : pill('#F6E8D8', '#C2691F')}>{s.type === 'meditator' ? 'participant' : 'volunteer'}</span>
               <span className="pill" style={pill('#EAF2E5', '#4E7C3F')}>{counts[s.id] || 0} present</span>
+              {isCoordinator && (
+                <button disabled={busy} onClick={(e) => removeSession(e, s)} title={(counts[s.id] || 0) > 0 ? 'Archive session (has records)' : 'Delete empty session'}
+                  style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>🗑</button>
+              )}
             </div>
           ))}
         </div>

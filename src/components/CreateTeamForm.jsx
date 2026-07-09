@@ -6,13 +6,14 @@ import { fmtDay } from '../lib/planning'
 // Create a team = create an ACTIVITY BLOCK on this event (one source of truth).
 // Shared by the Teams tab and the Planning to-do launchers. onCreated(blockId) fires
 // with the new block id so a caller can link it back (e.g. check off a to-do).
-export default function CreateTeamForm({ ev, types = [], firstDay, me, onClose, onCreated, onToast }) {
+export default function CreateTeamForm({ ev, types = [], firstDay, me, block = null, onClose, onCreated, onToast }) {
+  const editing = !!block
   const [localTypes, setLocalTypes] = useState([])
-  const [typeId, setTypeId] = useState('')
-  const [name, setName] = useState('')
-  const [nameEdited, setNameEdited] = useState(false)
-  const [needed, setNeeded] = useState(4)
-  const [phaseId, setPhaseId] = useState('')
+  const [typeId, setTypeId] = useState(block?.activity_type_id || '')
+  const [name, setName] = useState(block?.heading || '')
+  const [nameEdited, setNameEdited] = useState(!!block)
+  const [needed, setNeeded] = useState(block?.volunteers_needed ?? 4)
+  const [phaseId, setPhaseId] = useState(block?.phase_id || '')
   const [phases, setPhases] = useState([])
   const [leadQ, setLeadQ] = useState('')
   const [leadResults, setLeadResults] = useState([])
@@ -54,6 +55,15 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, onClose, 
     if (!typeId) return onToast('Pick an activity type.')
     setBusy(true)
     try {
+      if (editing) {
+        const { error } = await supabase.from('activity_blocks').update({
+          heading: effName, activity_type_id: typeId, volunteers_needed: Number(needed) || 0, phase_id: phaseId || null,
+        }).eq('id', block.id)
+        if (error) throw error
+        onToast(`Team "${effName}" updated.`)
+        onCreated(block.id)
+        return
+      }
       const { data: blk, error } = await supabase.from('activity_blocks').insert({
         activity_id: ev.id, heading: effName, activity_type_id: typeId, volunteers_needed: Number(needed) || 0,
         phase_id: phaseId || null, recruiting_method: 'manual', attendance_mode: 'per_day', created_by: me?.id || null,
@@ -64,7 +74,7 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, onClose, 
       }
       onToast(`Team "${effName}" created.`)
       onCreated(blk.id)
-    } catch (e) { onToast('Could not create team: ' + (e.message || e)) } finally { setBusy(false) }
+    } catch (e) { onToast(`Could not ${editing ? 'update' : 'create'} team: ` + (e.message || e)) } finally { setBusy(false) }
   }
 
   const lbl = { fontSize: 12, fontWeight: 600, color: '#5C5142', display: 'block', marginBottom: 5 }
@@ -74,7 +84,7 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, onClose, 
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
       <div className="card" style={{ width: 480, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 22, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Create team</h3>
+          <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>{editing ? 'Edit team' : 'Create team'}</h3>
           <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={onClose}>✕ Close</button>
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>A team is an activity block on {ev.name}. Dates come from the phase; mode is set in Planning.</div>
@@ -119,6 +129,7 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, onClose, 
           </div>
         )}
 
+        {!editing && (
         <div style={{ marginBottom: 18, position: 'relative' }}>
           <span style={lbl}>Lead / POC <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· optional</span></span>
           {lead ? (
@@ -139,9 +150,10 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, onClose, 
             </>
           )}
         </div>
+        )}
 
         <button className="btn btn-primary" disabled={busy || !typeId} onClick={create} style={{ width: '100%', padding: '12px', fontSize: 14, opacity: busy || !typeId ? 0.55 : 1 }}>
-          {busy ? 'Creating…' : 'Create team'}
+          {busy ? (editing ? 'Saving…' : 'Creating…') : (editing ? 'Save changes' : 'Create team')}
         </button>
       </div>
     </div>
