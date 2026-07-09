@@ -7,7 +7,10 @@ import { rangeLabel } from './planning'
 
 const ACTIVE_STATUSES = ['assigned', 'show', 'involved']
 
-// One entry per team: { teamName, pocName, pocPhone, execPeriod, members: [{ name, phone, email, comments[] }] }
+// One entry per team: { teamName, sizeNeeded, pocName, pocPhone, execPeriod,
+// members: [{ name, phone, email, isPoc, comments[] }] } — member ROW COUNT is always
+// the team's actual distinct assigned-member count (from block_assignments), never
+// sizeNeeded (that's a separate target-headcount field, not a row source).
 export function buildTeamRoster({ ev, blocks, assigns, people, blockPhases = {}, eventPhases = [], commentsByPerson = {} }) {
   const phaseById = Object.fromEntries(eventPhases.map((p) => [p.id, p]))
   const eventSpan = rangeLabel(ev.start_date || ev.activity_date, ev.end_date)
@@ -30,12 +33,13 @@ export function buildTeamRoster({ ev, blocks, assigns, people, blockPhases = {},
 
     return {
       teamName: b.heading,
+      sizeNeeded: b.volunteers_needed || 0,
       pocName: pocs.map((p) => p.full_name).join(', '),
       pocPhone: pocs.map((p) => p.phone).filter(Boolean).join(', '),
       execPeriod,
       members: members.map((m) => {
         const p = people[m.person_id] || {}
-        return { name: p.full_name || 'Unknown', phone: p.phone || '', email: p.email || '', comments: commentsByPerson[m.person_id] || [] }
+        return { name: p.full_name || 'Unknown', phone: p.phone || '', email: p.email || '', isPoc: m.poc, comments: commentsByPerson[m.person_id] || [] }
       }),
     }
   })
@@ -46,12 +50,19 @@ function csvField(v) {
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
 }
 
-// Denormalized: one row per member (a team with no members still gets one blank-member row).
+// One row per DISTINCT assigned member (never sizeNeeded). Team-level fields (name,
+// size, dates) print only on that team's FIRST row and are left blank on the rest —
+// so nothing reads as "one person's name repeated with other members' phone numbers".
+// Per-member is_poc replaces a separate POC name/phone column entirely.
 export function teamsToCSV(teams) {
-  const rows = [['Team Name', 'POC Name', 'POC Phone', 'Execution Period', 'Member Name', 'Member Phone', 'Member Email', 'Comments']]
+  const rows = [['Team Name', 'Size Needed', 'Dates', 'Member Name', 'Phone', 'Email', 'Is POC', 'Comments']]
   for (const t of teams) {
-    if (!t.members.length) { rows.push([t.teamName, t.pocName, t.pocPhone, t.execPeriod, '', '', '', '']); continue }
-    for (const m of t.members) rows.push([t.teamName, t.pocName, t.pocPhone, t.execPeriod, m.name, m.phone, m.email, m.comments.join(', ')])
+    const teamCols = [t.teamName, t.sizeNeeded, t.execPeriod]
+    const blankTeamCols = ['', '', '']
+    if (!t.members.length) { rows.push([...teamCols, '', '', '', '', '']); continue }
+    t.members.forEach((m, i) => {
+      rows.push([...(i === 0 ? teamCols : blankTeamCols), m.name, m.phone, m.email, m.isPoc ? 'yes' : '', m.comments.join(', ')])
+    })
   }
   return rows.map((r) => r.map(csvField).join(',')).join('\r\n')
 }
