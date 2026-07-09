@@ -48,7 +48,7 @@ export default function CallerWorkspace({ me, onToast }) {
     try {
       const { data: js, error } = await supabase
         .from('journeys')
-        .select('id, person_id, campaign_id, status, person:people!journeys_person_id_fkey(full_name, phone), campaign:campaigns!journeys_campaign_id_fkey(id, name, audience, goal, script, whatsapp_template, sms_template, is_test)')
+        .select('id, person_id, campaign_id, status, person:people!journeys_person_id_fkey(full_name, phone), campaign:campaigns!journeys_campaign_id_fkey(id, name, audience, goal, script, whatsapp_template, sms_template, is_test, campaign_type)')
         .eq('assigned_to', myId)
         .not('campaign_id', 'is', null)
         .neq('status', 'dropped')
@@ -133,7 +133,7 @@ export default function CallerWorkspace({ me, onToast }) {
         </div>
 
         {/* Callers see the coordinator's current script + message templates (read-only). */}
-        <CampaignScriptPanel campaign={c} />
+        <CampaignScriptPanel campaign={c} hideScript={c.campaign_type === 'messaging'} />
 
         <div className="card" style={{ overflow: 'hidden' }}>
           {!isPhone && (
@@ -169,11 +169,12 @@ export default function CallerWorkspace({ me, onToast }) {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10, alignItems: 'center' }}>
                     <ReachButtons
                       phone={phone}
+                      messaging={c.campaign_type === 'messaging'}
                       smsText={fillTemplate(c.sms_template, { name, myName })}
                       waText={fillTemplate(c.whatsapp_template, { name, myName })}
                       onArm={() => { setArmed(j); wentHiddenRef.current = false }}
                     />
-                    <button className="btn btn-ghost" style={{ padding: '9px 16px', fontSize: 13, minHeight: 40, marginLeft: 'auto' }} onClick={() => setLogFor(j)}>Log</button>
+                    {c.campaign_type !== 'messaging' && <button className="btn btn-ghost" style={{ padding: '9px 16px', fontSize: 13, minHeight: 40, marginLeft: 'auto' }} onClick={() => setLogFor(j)}>Log</button>}
                   </div>
                 </div>
               )
@@ -193,12 +194,13 @@ export default function CallerWorkspace({ me, onToast }) {
                 </div>
                 <ReachButtons
                   phone={phone}
+                  messaging={c.campaign_type === 'messaging'}
                   smsText={fillTemplate(c.sms_template, { name, myName })}
                   waText={fillTemplate(c.whatsapp_template, { name, myName })}
                   onArm={() => { setArmed(j); wentHiddenRef.current = false }}
                 />
                 <div>
-                  <button className="btn btn-ghost" style={{ padding: '6px 11px', fontSize: 12 }} onClick={() => setLogFor(j)}>Log</button>
+                  {c.campaign_type !== 'messaging' && <button className="btn btn-ghost" style={{ padding: '6px 11px', fontSize: 12 }} onClick={() => setLogFor(j)}>Log</button>}
                 </div>
               </div>
             )

@@ -10,6 +10,7 @@ import MobileFilterSheet from '../components/MobileFilterSheet'
 import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
 import AssignNurturerDialog from '../components/AssignNurturerDialog'
+import { addRecipientsToCampaign } from '../lib/campaignRecipients'
 
 const PROGRAMS = [
   { key: 'all', label: 'All programmes' },
@@ -38,7 +39,7 @@ function lastActive(d) {
   return `Quiet ${Math.round(days / 30)}mo`
 }
 
-export default function Meditators({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone }) {
+export default function Meditators({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone }) {
   const { isPhone } = useBreakpoint()
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
@@ -165,6 +166,22 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     }
   }
 
+  async function addSelectedToCampaign() {
+    if (!recipientDraft || sel.count(total) === 0) return
+    setResolving(true)
+    try {
+      const ids = await sel.resolveIds(fetchAllIds)
+      const { added, skipped } = await addRecipientsToCampaign(recipientDraft.campaignId, ids)
+      onToast(`Added ${added} to “${recipientDraft.campaignName}”${skipped ? ` · ${skipped} already in it` : ''}.`)
+      sel.clear()
+      onRecipientsDone?.()
+    } catch (e) {
+      onToast('Could not add: ' + (e.message || e))
+    } finally {
+      setResolving(false)
+    }
+  }
+
   async function openAssign() {
     if (sel.count(total) === 0) return
     setResolving(true)
@@ -200,11 +217,17 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
           <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onClearCampaignDraft && onClearCampaignDraft()}>Cancel</button>
         </div>
       )}
+      {recipientDraft && (
+        <div className="card" style={{ padding: '12px 16px', marginBottom: 14, background: '#FBF1E4', borderColor: '#E7C9B8', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, color: '#9C4A14', fontWeight: 600 }}>Adding meditators to “{recipientDraft.campaignName}” — select people, then Add to campaign.</div>
+          <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onRecipientsDone && onRecipientsDone()}>Cancel</button>
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 13, color: 'var(--muted)' }}>{loading ? 'Loading…' : `${total} in care · filter by programme and recent activity.`}</div>
         </div>
-        <button className="btn" disabled={resolving} onClick={openCampaign}>{Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}</button>
+        {!recipientDraft && <button className="btn" disabled={resolving} onClick={openCampaign}>{Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}</button>}
       </div>
 
       {err && <ErrorCard>Couldn't load meditators: {err}</ErrorCard>}
@@ -228,7 +251,10 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
         </MobileFilterSheet>
       </div>
 
-      <SelectionBar isFullySelected={isFullySelected} count={selCount} total={total} onSelectAll={sel.selectAllMatching} onCreate={openCampaign} onAssign={openAssign} onClear={sel.clear} />
+      <SelectionBar isFullySelected={isFullySelected} count={selCount} total={total} onSelectAll={sel.selectAllMatching}
+        onCreate={recipientDraft ? addSelectedToCampaign : openCampaign}
+        createLabel={recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : 'Create campaign'}
+        onAssign={recipientDraft ? undefined : openAssign} onClear={sel.clear} />
 
       <div className="card" style={{ overflow: 'hidden' }}>
         {!loading && total > 0 && <PagerBar position="top" page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />}

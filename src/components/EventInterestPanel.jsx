@@ -7,6 +7,7 @@ import { eventDays, fmtDay } from '../lib/planning'
 import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import CampaignForm from './CampaignForm'
+import { addRecipientsToCampaign } from '../lib/campaignRecipients'
 
 export const EI_STATUS = [
   { v: 'interested', label: 'Interested', pill: pill('#F1EADD', '#8C7E6B') },
@@ -49,7 +50,7 @@ function availLabel(r, daysByEvent) {
 // Shared Event-Interest table view. Two modes:
 //  - lockEventId set → single event, no event filter pill row (Event Hub tab).
 //  - lockEventId null → all events with an "Event" pill row; scopeEventId presets it.
-export default function EventInterestPanel({ uid, lockEventId = null, scopeEventId = null, onScopeConsumed, reloadKey = 0, onToast, isCoordinator = true }) {
+export default function EventInterestPanel({ uid, lockEventId = null, scopeEventId = null, onScopeConsumed, reloadKey = 0, onToast, isCoordinator = true, recipientDraft = null, onRecipientsDone }) {
   const { isPhone } = useBreakpoint()
 
   // Server-side pagination
@@ -193,6 +194,22 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
     } finally { setResolving(false) }
   }
 
+  // Add-to-existing-campaign: resolve the selected interests to their canonical people
+  // and append them to the campaign we arrived from, then return to it.
+  async function addSelectedToCampaign() {
+    if (!recipientDraft || selCount === 0) return
+    setResolving(true)
+    try {
+      const ids = await sel.resolveIds(fetchAllIds)
+      const { added, skipped } = await addRecipientsToCampaign(recipientDraft.campaignId, ids)
+      onToast?.(`Added ${added} to “${recipientDraft.campaignName}”${skipped ? ` · ${skipped} already in it` : ''}.`)
+      sel.clear()
+      onRecipientsDone?.()
+    } catch (e) {
+      onToast?.('Could not add: ' + (e.message || e))
+    } finally { setResolving(false) }
+  }
+
   // Availability filter — client-side on current page rows
   const daysByEvent = Object.fromEntries(evList.map((e) => [e.id, eventDays(e.start_date || e.activity_date, e.end_date)]))
   const maxDays = Math.max(1, ...evList.map((e) => (daysByEvent[e.id] || []).length))
@@ -264,7 +281,8 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
         count={selCount}
         total={total}
         onSelectAll={sel.selectAllMatching}
-        onCreate={resolving ? undefined : openCampaign}
+        onCreate={resolving ? undefined : (recipientDraft ? addSelectedToCampaign : openCampaign)}
+        createLabel={recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : 'Create campaign'}
         onClear={sel.clear}
       />
 

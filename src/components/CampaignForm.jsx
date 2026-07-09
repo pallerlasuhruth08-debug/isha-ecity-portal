@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { multiFieldOr } from '../lib/searchFilter'
 
 // Campaign creation form (design §2 + two-source caller assignment).
 // Callers can come from VOLUNTEERS (people) or the NURTURING TEAM (nurturers) —
@@ -25,6 +26,9 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
   const [templateId, setTemplateId] = useState('')
   const [message, setMessage] = useState('')
   const [script, setScript] = useState('')
+  const [wa, setWa] = useState('')
+  const [sms, setSms] = useState('')
+  const [campaignType, setCampaignType] = useState('full') // 'full' | 'messaging'
   const [schedule, setSchedule] = useState('')
 
   // caller sources
@@ -52,18 +56,25 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
     })
   }, [])
 
-  // volunteer caller search (exclude phones already on the nurturing team — nurturing wins)
+  // volunteer caller search — debounced name+phone, same multi-field pattern used
+  // everywhere else (exclude phones already on the nurturing team — nurturing wins).
+  const [volSearchDebounced, setVolSearchDebounced] = useState('')
   useEffect(() => {
-    if (callerTab === 'nurturing' || volSearch.trim().length < 2) {
+    const t = setTimeout(() => setVolSearchDebounced(volSearch.trim()), 300)
+    return () => clearTimeout(t)
+  }, [volSearch])
+  useEffect(() => {
+    if (callerTab === 'nurturing' || volSearchDebounced.length < 2) {
       setVolResults([])
       return
     }
     let alive = true
+    const or = multiFieldOr(volSearchDebounced, ['full_name', 'phone'])
     supabase
       .from('people')
       .select('id, full_name, phone')
       .eq('is_volunteer', true)
-      .ilike('full_name', `%${volSearch.trim()}%`)
+      .or(or)
       .limit(12)
       .then(({ data }) => {
         if (alive) setVolResults((data || []).filter((p) => !p.phone || !nurturerPhones.has(p.phone)))
@@ -71,7 +82,7 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
     return () => {
       alive = false
     }
-  }, [volSearch, callerTab, nurturerPhones])
+  }, [volSearchDebounced, callerTab, nurturerPhones])
 
   const callerCount = selCallers.length
   const needMode = callerCount >= 2
@@ -126,8 +137,11 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
         .insert({
           name: name.trim(),
           goal: goal.trim() || null,
-          script: script.trim() || null,
+          campaign_type: campaignType,
+          script: campaignType === 'messaging' ? null : (script.trim() || null),
           message: message.trim() || null,
+          whatsapp_template: wa.trim() || null,
+          sms_template: sms.trim() || null,
           audience,
           status: 'active',
           is_test: isTest,
@@ -199,6 +213,15 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
 
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
+            <label style={label}>Campaign type</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[{ v: 'full', l: 'Full Campaign' }, { v: 'messaging', l: 'Messaging Campaign' }].map((t) => (
+                <button key={t.v} type="button" onClick={() => setCampaignType(t.v)} className="btn" style={{ flex: 1, padding: '9px 12px', fontSize: 12.5, background: campaignType === t.v ? '#241B14' : '#fff', color: campaignType === t.v ? '#F6ECDC' : 'var(--ink-soft)', border: campaignType === t.v ? 'none' : '1px solid var(--border)' }}>{t.l}</button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6 }}>{campaignType === 'messaging' ? 'WhatsApp & SMS only — no call script or dialing.' : 'Calls + WhatsApp + SMS, with a call script.'}</div>
+          </div>
+          <div>
             <label style={label}>Campaign name *</label>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Shoonya — August cohort" style={field} />
           </div>
@@ -220,10 +243,24 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
             </select>
             <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={3} placeholder="Message body…" style={{ ...field, marginTop: 8, resize: 'vertical' }} />
           </div>
-          <div>
-            <label style={label}>Call script (optional)</label>
-            <textarea value={script} onChange={(e) => setScript(e.target.value)} rows={2} placeholder="One step per line…" style={{ ...field, resize: 'vertical' }} />
+          {/* WhatsApp + SMS templates — the primary content for a messaging campaign. */}
+          <div style={campaignType === 'messaging' ? { padding: 12, border: '1px solid #E7C9B8', borderRadius: 10, background: '#FBF6EC', display: 'flex', flexDirection: 'column', gap: 12 } : { display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {campaignType === 'messaging' && <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: '#9C4A14' }}>Message content</div>}
+            <div>
+              <label style={label}>WhatsApp template</label>
+              <textarea value={wa} onChange={(e) => setWa(e.target.value)} rows={3} placeholder="Prefilled into the WhatsApp button…" style={{ ...field, resize: 'vertical' }} />
+            </div>
+            <div>
+              <label style={label}>SMS template</label>
+              <textarea value={sms} onChange={(e) => setSms(e.target.value)} rows={2} placeholder="Prefilled into the SMS button…" style={{ ...field, resize: 'vertical' }} />
+            </div>
           </div>
+          {campaignType === 'full' && (
+            <div>
+              <label style={label}>Call script (optional)</label>
+              <textarea value={script} onChange={(e) => setScript(e.target.value)} rows={2} placeholder="One step per line…" style={{ ...field, resize: 'vertical' }} />
+            </div>
+          )}
 
           {/* CALLERS — two sources */}
           <div>
@@ -248,7 +285,7 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
             )}
 
             {(callerTab === 'volunteers' || callerTab === 'both') && (
-              <input value={volSearch} onChange={(e) => setVolSearch(e.target.value)} placeholder="Search volunteer callers…" style={{ ...field, marginBottom: 8 }} />
+              <input value={volSearch} onChange={(e) => setVolSearch(e.target.value)} placeholder="Search volunteer callers by name or phone…" style={{ ...field, marginBottom: 8 }} />
             )}
 
             <div style={{ maxHeight: 170, overflowY: 'auto', border: '1px solid var(--border-soft)', borderRadius: 10 }}>

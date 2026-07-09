@@ -3,8 +3,9 @@ import { telHref, smsHref, waHref, hasDialable } from '../lib/phone'
 // One-way deep-link buttons: Call (tel:), Message (sms: with optional prefilled
 // body), WhatsApp (wa.me with optional prefilled text). A tap never changes status.
 // onArm (Call only) arms the return-prompt in the caller workspace.
-// No dialable phone -> all three render disabled ("no phone on record").
-export default function ReachButtons({ phone, smsText, waText, onArm }) {
+// No dialable phone -> buttons render disabled ("no phone on record").
+// messaging=true (messaging campaigns) drops the Call button — outreach is message-only.
+export default function ReachButtons({ phone, smsText, waText, onArm, messaging = false }) {
   const base = {
     padding: '6px 10px',
     fontSize: 12,
@@ -14,10 +15,11 @@ export default function ReachButtons({ phone, smsText, waText, onArm }) {
     textDecoration: 'none',
     whiteSpace: 'nowrap',
   }
+  const labels = messaging ? ['Message', 'WhatsApp'] : ['Call', 'Message', 'WhatsApp']
   if (!hasDialable(phone)) {
     return (
       <div style={{ display: 'flex', gap: 6 }} title="no phone on record">
-        {['Call', 'Message', 'WhatsApp'].map((l) => (
+        {labels.map((l) => (
           <span key={l} style={{ ...base, color: 'var(--muted-2)', background: '#F7F1E7', cursor: 'not-allowed', userSelect: 'none' }}>{l}</span>
         ))}
       </div>
@@ -26,7 +28,7 @@ export default function ReachButtons({ phone, smsText, waText, onArm }) {
   const link = { ...base, color: 'var(--ink-soft)', background: '#fff' }
   return (
     <div style={{ display: 'flex', gap: 6 }}>
-      <a href={telHref(phone)} onClick={onArm} style={link}>Call</a>
+      {!messaging && <a href={telHref(phone)} onClick={onArm} style={link}>Call</a>}
       <a href={smsHref(phone, smsText)} style={link}>Message</a>
       <a href={waHref(phone, waText)} target="_blank" rel="noopener noreferrer" style={link}>WhatsApp</a>
     </div>

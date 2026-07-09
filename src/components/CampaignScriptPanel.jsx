@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 // row: script, whatsapp_template, sms_template). Read-only for callers; coordinators
 // get an inline editor (canEdit). Callers always see the coordinator's latest saved
 // version because both read the same campaign row.
-export default function CampaignScriptPanel({ campaign, canEdit = false, onSaved, onToast }) {
+export default function CampaignScriptPanel({ campaign, canEdit = false, onSaved, onToast, hideScript = false }) {
   const [editing, setEditing] = useState(false)
   const [script, setScript] = useState(campaign.script || '')
   const [wa, setWa] = useState(campaign.whatsapp_template || '')
@@ -49,10 +49,12 @@ export default function CampaignScriptPanel({ campaign, canEdit = false, onSaved
           <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Edit script & templates</h3>
           <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>{'placeholders: {name}, {my_name}'}</div>
         </div>
-        <label style={{ display: 'block', ...sectionLabel, marginBottom: 0 }}>Call script
-          <textarea value={script} onChange={(e) => setScript(e.target.value)} rows={4} style={ta} placeholder="What the caller says…" />
-        </label>
-        <label style={{ display: 'block', ...sectionLabel, marginTop: 14, marginBottom: 0 }}>WhatsApp template
+        {!hideScript && (
+          <label style={{ display: 'block', ...sectionLabel, marginBottom: 0 }}>Call script
+            <textarea value={script} onChange={(e) => setScript(e.target.value)} rows={4} style={ta} placeholder="What the caller says…" />
+          </label>
+        )}
+        <label style={{ display: 'block', ...sectionLabel, marginTop: hideScript ? 0 : 14, marginBottom: 0 }}>WhatsApp template
           <textarea value={wa} onChange={(e) => setWa(e.target.value)} rows={3} style={ta} placeholder="Prefilled into the WhatsApp button…" />
         </label>
         <label style={{ display: 'block', ...sectionLabel, marginTop: 14, marginBottom: 0 }}>SMS template
@@ -69,14 +71,16 @@ export default function CampaignScriptPanel({ campaign, canEdit = false, onSaved
   return (
     <div className="card" style={{ padding: 20, marginBottom: 18 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Call script & message templates</h3>
+        <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>{hideScript ? 'Message templates' : 'Call script & message templates'}</h3>
         {canEdit && <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12.5 }} onClick={startEdit}>Edit</button>}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 18 }}>
-        <div>
-          <div style={sectionLabel}>Call script</div>
-          {campaign.script ? <div style={body}>{campaign.script}</div> : <div style={empty}>Not set yet.</div>}
-        </div>
+        {!hideScript && (
+          <div>
+            <div style={sectionLabel}>Call script</div>
+            {campaign.script ? <div style={body}>{campaign.script}</div> : <div style={empty}>Not set yet.</div>}
+          </div>
+        )}
         <div>
           <div style={sectionLabel}>WhatsApp template</div>
           {campaign.whatsapp_template ? <div style={body}>{campaign.whatsapp_template}</div> : <div style={empty}>Not set yet.</div>}

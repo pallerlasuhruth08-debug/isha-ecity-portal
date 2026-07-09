@@ -17,6 +17,7 @@ import Placeholder from './views/Placeholder'
 import Login from './views/Login'
 import PublicAccept from './views/PublicAccept'
 import PublicInterest from './views/PublicInterest'
+import PublicVolunteerPortal from './views/PublicVolunteerPortal'
 import UtilityDrawer from './components/UtilityDrawer'
 import CreateEventModal from './components/CreateEventModal'
 import { TAB_TITLES, TAB_LABELS, tabsForSections } from './lib/roles'
@@ -29,6 +30,12 @@ function readHashId(key) {
   const m = (typeof window !== 'undefined' ? window.location.hash || '' : '').match(new RegExp(`${key}=([0-9a-f-]{36})`, 'i'))
   return m ? m[1] : null
 }
+// Volunteer-portal share tokens are 32-char hex (no dashes) — a distinct shape from
+// the UUID-based public links above.
+function readHashToken(key) {
+  const m = (typeof window !== 'undefined' ? window.location.hash || '' : '').match(new RegExp(`${key}=([0-9a-f]{32})`, 'i'))
+  return m ? m[1] : null
+}
 
 export default function App() {
   // Checked BEFORE any hook so the public pages bypass the auth gate entirely.
@@ -36,6 +43,8 @@ export default function App() {
   if (acceptId) return <PublicAccept blockId={acceptId} />
   const interestId = readHashId('interest')
   if (interestId) return <PublicInterest eventId={interestId} />
+  const volunteerToken = readHashToken('volunteer')
+  if (volunteerToken) return <PublicVolunteerPortal token={volunteerToken} />
 
   const { session, profile, sections } = useSession()
 
@@ -62,6 +71,7 @@ function Portal({ profile, email, sections }) {
   const [pendingCampaignId, setPendingCampaignId] = useState(null)
   const [pendingHubEventId, setPendingHubEventId] = useState(null) // open this event IN the hub
   const [campaignDraft, setCampaignDraft] = useState(null) // { eventId, eventName } — call-list build in progress
+  const [recipientDraft, setRecipientDraft] = useState(null) // { campaignId, campaignName } — adding to an existing campaign
   const toastTimer = useRef(null)
   const { isPhone } = useBreakpoint()
 
@@ -119,6 +129,18 @@ function Portal({ profile, email, sections }) {
     setCampaignDraft((d) => { if (d) { setPendingHubEventId(d.eventId); setView('hub') } return null })
   }, [])
 
+  // Add-recipients-to-existing-campaign: from a campaign's detail, pick a source, go
+  // select people on that full page (campaign context held), then Add appends them.
+  const startAddRecipients = useCallback((campaignId, campaignName, source) => {
+    if (!isCoordinator) return
+    setRecipientDraft({ campaignId, campaignName })
+    setView(source === 'meditators' ? 'meditators' : source === 'interest' ? 'interest' : 'volunteers')
+  }, [isCoordinator])
+  // Cancelling / finishing returns to the campaign we came from.
+  const endRecipientDraft = useCallback(() => {
+    setRecipientDraft((d) => { if (d) { setPendingCampaignId(d.campaignId); setView('campaigns') } return null })
+  }, [])
+
   const [title, subtitle] = TAB_TITLES[activeView] || [TAB_LABELS[activeView], '']
 
   const content = useMemo(() => {
@@ -126,13 +148,13 @@ function Portal({ profile, email, sections }) {
       case 'dashboard':
         return <Dashboard me={profile} onToast={showToast} onNavigate={setView} />
       case 'volunteers':
-        return <Volunteers me={profile} onToast={showToast} onNavigate={setView} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} />
+        return <Volunteers me={profile} onToast={showToast} onNavigate={setView} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
       case 'campaigns':
-        return <Campaigns me={profile} isCoordinator={isCoordinator} onToast={showToast} onNavigate={setView} openCampaignId={pendingCampaignId} onCampaignConsumed={() => setPendingCampaignId(null)} />
+        return <Campaigns me={profile} isCoordinator={isCoordinator} onToast={showToast} onNavigate={setView} openCampaignId={pendingCampaignId} onCampaignConsumed={() => setPendingCampaignId(null)} onAddRecipients={startAddRecipients} />
       case 'meditators':
-        return <Meditators me={profile} onToast={showToast} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} />
+        return <Meditators me={profile} onToast={showToast} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
       case 'interest':
-        return <Interest onToast={showToast} eventScopeId={pendingInterestEventId} onScopeConsumed={() => setPendingInterestEventId(null)} />
+        return <Interest onToast={showToast} eventScopeId={pendingInterestEventId} onScopeConsumed={() => setPendingInterestEventId(null)} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
       case 'advance':
         return <Advance me={profile} onToast={showToast} />
       case 'nurturing':
@@ -152,7 +174,7 @@ function Portal({ profile, email, sections }) {
       default:
         return <Placeholder view={activeView} title={TAB_LABELS[activeView]} />
     }
-  }, [activeView, showToast, isCoordinator, isAdmin, profile, pendingEventId, requestCreate, openEventHub, openCampaign, startCampaignForEvent, endCampaignDraft, campaignDraft, pendingInterestEventId, pendingCampaignId, pendingHubEventId])
+  }, [activeView, showToast, isCoordinator, isAdmin, profile, pendingEventId, requestCreate, openEventHub, openCampaign, startCampaignForEvent, endCampaignDraft, campaignDraft, recipientDraft, startAddRecipients, endRecipientDraft, pendingInterestEventId, pendingCampaignId, pendingHubEventId])
 
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden', background: 'var(--bg)' }}>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { rangeLabel, groupPhases, phaseFlag, flaggedPhases, currentPhase, phaseTone, FLAG_META, PHASE_SHORT, fmtDay, countdownLabel } from '../lib/planning'
+import { rangeLabel, groupPhases, phaseFlag, currentPhase, phaseTone, fmtDay, countdownLabel } from '../lib/planning'
 import { ensureSeriesWindow } from '../lib/series'
 import { fetchActivityTypes } from '../lib/activityTypes'
 import EventList from '../components/EventList'
@@ -69,42 +69,8 @@ export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStar
           <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={onCreateEvent}>＋ Create event</button>
         )}
       </div>
-      <HubAttention events={events} phasesByEvent={phasesByEvent} onOpen={setOpenId} />
       <EventList events={events} phasesByEvent={phasesByEvent} onOpen={setOpenId} />
     </Pad>
-  )
-}
-
-// Global "needs attention" — every OVERDUE / AT-RISK phase across all events, worst
-// first. Clicking a row opens that event's hub. (Moved here from Planning, which is
-// no longer a top-level tab.)
-function HubAttention({ events, phasesByEvent, onOpen }) {
-  const flagged = flaggedPhases(events, phasesByEvent)
-  if (!flagged.length) return null
-  return (
-    <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: '#EBC7BB', background: '#FDF3EF' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B5391F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><path d="M12 9v4M12 17h.01" /></svg>
-        <div style={{ fontSize: 14, fontWeight: 600, color: '#8A2E18' }}>Needs attention</div>
-        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{flagged.length} phase{flagged.length > 1 ? 's' : ''} across all events</span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {flagged.map(({ event, phase, flag }) => {
-          const m = FLAG_META[flag]
-          return (
-            <div key={phase.activity_id + phase.kind} className="rowhover" onClick={() => onOpen(event.id)}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, cursor: 'pointer', background: '#fff', border: '1px solid #F0DED6' }}>
-              <span className="pill" style={{ background: m.bg, color: m.fg, fontSize: 10.5 }}>{m.label}</span>
-              <span style={{ fontSize: 13, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{event.name}</span>
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>· {PHASE_SHORT[phase.kind] || phase.label}</span>
-              <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted-2)', whiteSpace: 'nowrap' }}>
-                {flag === 'overdue' ? `start by ${fmtDay(phase.start_by)}` : `finish by ${fmtDay(phase.finish_by)}`}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </div>
   )
 }
 

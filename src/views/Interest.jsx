@@ -5,6 +5,7 @@ import { Pad, ErrorCard, Loading, Empty, Chip, PagerBar } from '../components/Vi
 import CampaignForm from '../components/CampaignForm'
 import SidePanel, { PanelHeader } from '../components/SidePanel'
 import EventInterestPanel from '../components/EventInterestPanel'
+import { multiFieldOr } from '../lib/searchFilter'
 
 const STATUS_PILL = {
   new: pill('#E9F0EF', '#2F6E5E'),
@@ -45,7 +46,7 @@ const IE_SEL = 'id, full_name, phone, ie_date, program_name, status, source, not
 const mapVp = (v) => ({ key: 'vp:' + v.person_id, kind: 'volunteering', table: 'volunteer_profiles', id: v.person_id, idCol: 'person_id', personId: v.person_id, name: v.person?.full_name || 'Unknown', phone: v.person?.phone || '', status: v.status || 'new', ieo: false, tags: [], availability: v.preferred_timing || '—', activity: (v.interests || []).join(', ') || '—', activityList: v.interests || [], notes: v.screening_notes, src: v.interest_source, date: v.interest_date, origin: { label: v.interest_source || 'Volunteering form', date: v.interest_date, verb: 'submitted' } })
 const mapIe = (r) => ({ key: 'ie:' + r.id, kind: 'volunteering', table: 'ie_completion_volunteer', id: r.id, idCol: 'id', personId: null, name: r.full_name || 'Unknown', phone: r.phone || '', status: r.status || 'new', ieo: true, tags: ['IEO'], availability: '—', activity: r.program_name || 'Inner Engineering Online', activityList: [], notes: r.notes, src: r.source, date: r.ie_date, origin: { label: r.program_name || 'Inner Engineering Online', date: r.ie_date, verb: 'completed' } })
 
-export default function Interest({ onToast, eventScopeId = null, onScopeConsumed }) {
+export default function Interest({ onToast, eventScopeId = null, onScopeConsumed, recipientDraft = null, onRecipientsDone }) {
   const [advItems, setAdvItems] = useState([]) // advanced grouped-by-person (small, bounded)
   const [vpCount, setVpCount] = useState(0)
   const [ieCount, setIeCount] = useState(0)
@@ -70,6 +71,8 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
 
   // Arriving from an event hub → jump to the Event Interests tab, scoped to it.
   useEffect(() => { if (eventScopeId) setTab('events') }, [eventScopeId])
+  // Arriving to add recipients to a campaign → the Event Interests tab is the source.
+  useEffect(() => { if (recipientDraft) setTab('events') }, [recipientDraft])
 
   const loadStatic = useCallback(async () => {
     try {
@@ -255,6 +258,12 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
 
   return (
     <Pad>
+      {recipientDraft && (
+        <div className="card" style={{ padding: '12px 16px', marginBottom: 14, background: '#FBF1E4', borderColor: '#E7C9B8', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, color: '#9C4A14', fontWeight: 600 }}>Adding volunteer interests to “{recipientDraft.campaignName}” — select approved people, then Add to campaign.</div>
+          <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onRecipientsDone && onRecipientsDone()}>Cancel</button>
+        </div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {TABS.map((t) => (<Chip key={t.key} on={tab === t.key} label={t.label} count={counts[t.key] || 0} onClick={() => setTab(t.key)} />))}
@@ -270,7 +279,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       </div>
       {err && <ErrorCard>Couldn't load interest inbox: {err}</ErrorCard>}
 
-      {tab === 'events' ? <EventInterestPanel uid={uid} scopeEventId={eventScopeId} onScopeConsumed={onScopeConsumed} onToast={onToast} /> : (
+      {tab === 'events' ? <EventInterestPanel uid={uid} scopeEventId={eventScopeId} onScopeConsumed={onScopeConsumed} onToast={onToast} recipientDraft={recipientDraft} onRecipientsDone={onRecipientsDone} /> : (
       <div className="card" style={{ overflow: 'hidden' }}>
           {loading && <Loading label="Loading interest inbox…" />}
           {!loading && shown.length === 0 && <Empty label="Nothing to triage here." />}
@@ -410,19 +419,24 @@ function Stepper({ labels, idx, busy, onStep }) {
 }
 
 // --- Add / import: pick target SEGMENT; always resolve to a canonical people row by phone ---
+// Volunteers and meditators are not separate tables — both are flags (is_volunteer /
+// is_meditator) on `people`. So this single phone-key lookup already matches ANY existing
+// person (volunteer OR meditator OR neither); only a phone with no match anywhere creates a
+// provisional record, stamped source='interest_import'. Dedupe is inherent: an existing
+// meditator's phone hits their people row, so no second record is made.
 async function ensurePersonId(name, phone) {
   const ph = normPhone(phone)
   if (ph) {
     const { data } = await supabase.from('people').select('id').eq('phone', ph).maybeSingle()
     if (data) return data.id
   }
-  const { data, error } = await supabase.from('people').insert({ full_name: name, phone: ph || null }).select('id').single()
+  const { data, error } = await supabase.from('people').insert({ full_name: name, phone: ph || null, source: 'interest_import' }).select('id').single()
   if (error) throw error
   return data.id
 }
 
 export function AddImport({ onClose, onToast, onDone, lockEventId = null }) {
-  const [mode, setMode] = useState('single')
+  const [mode, setMode] = useState('search') // 'search' | 'single' | 'import'
   const [segment, setSegment] = useState(lockEventId ? 'event' : 'volunteering')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -433,6 +447,14 @@ export function AddImport({ onClose, onToast, onDone, lockEventId = null }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
+  // Search-and-add existing people (volunteers, meditators or anyone on record).
+  const [q, setQ] = useState('')
+  const [debouncedQ, setDebouncedQ] = useState('')
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [added, setAdded] = useState({}) // person_id -> true (added this session)
+  const [addingId, setAddingId] = useState(null)
+
   // Load selectable events lazily when the Event target is chosen (skip when locked).
   useEffect(() => {
     if (lockEventId || segment !== 'event' || events.length) return
@@ -440,26 +462,52 @@ export function AddImport({ onClose, onToast, onDone, lockEventId = null }) {
       .then(({ data }) => { setEvents(data || []); if (!eventId && data?.[0]) setEventId(data[0].id) })
   }, [segment, events.length, eventId, lockEventId])
 
+  useEffect(() => { const t = setTimeout(() => setDebouncedQ(q.trim()), 300); return () => clearTimeout(t) }, [q])
+  // Search people by name OR phone — matches volunteers AND meditators (both live on `people`).
+  useEffect(() => {
+    if (mode !== 'search' || debouncedQ.length < 2) { setResults([]); return }
+    let alive = true
+    setSearching(true)
+    const or = multiFieldOr(debouncedQ, ['full_name', 'phone'])
+    supabase.from('people').select('id, full_name, phone, is_volunteer, is_meditator').or(or).order('full_name').limit(25)
+      .then(({ data }) => { if (alive) { setResults(data || []); setSearching(false) } })
+    return () => { alive = false }
+  }, [mode, debouncedQ])
+
   const parsed = useMemo(() => csv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => { const [nm, ph, pg] = l.split(',').map((s) => (s || '').trim()); return { name: nm, phone: ph, program: pg } }).filter((r) => r.name), [csv])
+
+  // Attach interest for an already-resolved person id, per the current segment.
+  async function attachInterest(pid, prog) {
+    if (segment === 'event') {
+      const { error } = await supabase.from('event_interest').upsert({ activity_id: eventId, person_id: pid, source: 'search' }, { onConflict: 'activity_id,person_id' })
+      if (error) throw error
+    } else if (segment === 'volunteering') {
+      const { error } = await supabase.from('volunteer_profiles').upsert({ person_id: pid, status: 'new', interest_source: 'manual' }, { onConflict: 'person_id' })
+      if (error) throw error
+    } else {
+      const { error } = await supabase.from('advanced_interest').upsert({ person_id: pid, program: (prog || program || 'bsp').toLowerCase(), status: 'new', source: 'manual' }, { onConflict: 'person_id,program' })
+      if (error) throw error
+    }
+  }
+
+  // Add an existing person by their canonical id — no phone re-resolve, no duplicate row.
+  async function addExisting(person) {
+    if (segment === 'event' && !eventId) { setErr('Pick an event first.'); return }
+    setErr(null); setAddingId(person.id)
+    try {
+      await attachInterest(person.id, program)
+      setAdded((s) => ({ ...s, [person.id]: true }))
+      onToast(`${person.full_name || 'Person'} added to interest.`)
+    } catch (e) { setErr(e.message || String(e)) } finally { setAddingId(null) }
+  }
 
   async function insertOne(row) {
     if (segment === 'event') {
       // Phone is the key — reject rows we can't resolve to a canonical person.
       if (!normPhone(row.phone)) throw new Error(`"${row.name}" has no valid 10-digit phone — event interest is phone-keyed.`)
-      const pid = await ensurePersonId(row.name, row.phone)
-      const { error } = await supabase.from('event_interest').upsert(
-        { activity_id: eventId, person_id: pid, source: 'import' }, { onConflict: 'activity_id,person_id' })
-      if (error) throw error
-      return
     }
     const pid = await ensurePersonId(row.name, row.phone) // canonical people, no unlinked rows
-    if (segment === 'volunteering') {
-      const { error } = await supabase.from('volunteer_profiles').upsert({ person_id: pid, status: 'new', interest_source: 'manual' }, { onConflict: 'person_id' })
-      if (error) throw error
-    } else {
-      const { error } = await supabase.from('advanced_interest').upsert({ person_id: pid, program: (row.program || program || 'bsp').toLowerCase(), status: 'new', source: 'manual' }, { onConflict: 'person_id,program' })
-      if (error) throw error
-    }
+    await attachInterest(pid, row.program)
   }
   async function submit() {
     setBusy(true); setErr(null)
@@ -501,23 +549,59 @@ export function AddImport({ onClose, onToast, onDone, lockEventId = null }) {
         </>
       )}
       <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-        {[{ k: 'single', l: 'Add one' }, { k: 'import', l: 'Import CSV' }].map((t) => (
+        {[{ k: 'search', l: 'Search & add' }, { k: 'single', l: 'Add one' }, { k: 'import', l: 'Import CSV' }].map((t) => (
           <button key={t.k} onClick={() => setMode(t.k)} className="btn" style={{ padding: '7px 12px', fontSize: 12.5, background: mode === t.k ? '#241B14' : '#fff', color: mode === t.k ? '#F6ECDC' : 'var(--ink-soft)', border: mode === t.k ? 'none' : '1px solid var(--border)' }}>{t.l}</button>
         ))}
       </div>
-      {mode === 'single' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name *" style={field} />
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (10-digit)" style={field} />
-          {segment === 'advanced' && <input value={program} onChange={(e) => setProgram(e.target.value)} placeholder="Programme (bsp/shoonya/samyama)" style={field} />}
-        </div>
-      ) : (
+      {mode === 'search' ? (
         <div>
-          <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={6} placeholder={'One per line: Name, Phone' + (segment === 'advanced' ? ', Programme' : '')} style={{ ...field, resize: 'vertical' }} />
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>{parsed.length} row(s) ready · resolved to a people row by phone.</div>
+          {segment === 'advanced' && <input value={program} onChange={(e) => setProgram(e.target.value)} placeholder="Programme (bsp/shoonya/samyama)" style={{ ...field, marginBottom: 8 }} />}
+          <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="Search by name or phone…" style={field} />
+          <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10, marginTop: 10 }}>
+            {searching && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--muted-2)' }}>Searching…</div>}
+            {!searching && debouncedQ.length < 2 && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--muted-2)' }}>Type a name or phone to find volunteers, meditators or anyone on record.</div>}
+            {!searching && debouncedQ.length >= 2 && results.length === 0 && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--muted-2)' }}>No matches.</div>}
+            {results.map((p, i) => (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: '1px solid #F4EEE2' }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name || '?')}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.full_name || '(no name)'}</div>
+                  <div style={{ fontSize: 11.5, color: p.phone ? 'var(--muted)' : '#B5532F' }}>
+                    {p.phone || 'no phone'}
+                    {p.is_volunteer && <span style={{ marginLeft: 6, color: '#9C4A14' }}>· Volunteer</span>}
+                    {p.is_meditator && <span style={{ marginLeft: 6, color: '#2F6E5E' }}>· Meditator</span>}
+                  </div>
+                </div>
+                {added[p.id] ? (
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#4E7C3F' }}>✓ Added</span>
+                ) : (
+                  <button className="btn btn-primary" style={{ fontSize: 12, padding: '6px 12px' }} disabled={addingId === p.id} onClick={() => addExisting(p)}>{addingId === p.id ? '…' : 'Add'}</button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+            <button className="btn btn-ghost" onClick={() => { if (Object.keys(added).length) onDone(); else onClose() }}>Done</button>
+          </div>
         </div>
+      ) : mode === 'single' ? (
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name *" style={field} />
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (10-digit)" style={field} />
+            {segment === 'advanced' && <input value={program} onChange={(e) => setProgram(e.target.value)} placeholder="Programme (bsp/shoonya/samyama)" style={field} />}
+          </div>
+          <Actions onClose={onClose} busy={busy} onSubmit={submit} label="Add entry" />
+        </>
+      ) : (
+        <>
+          <div>
+            <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={6} placeholder={'One per line: Name, Phone' + (segment === 'advanced' ? ', Programme' : '')} style={{ ...field, resize: 'vertical' }} />
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>{parsed.length} row(s) ready · resolved to a people row by phone.</div>
+          </div>
+          <Actions onClose={onClose} busy={busy} onSubmit={submit} label={`Import ${parsed.length}`} />
+        </>
       )}
-      <Actions onClose={onClose} busy={busy} onSubmit={submit} label={mode === 'single' ? 'Add entry' : `Import ${parsed.length}`} />
     </Modal>
   )
 }

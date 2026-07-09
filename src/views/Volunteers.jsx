@@ -11,6 +11,7 @@ import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
 import AssignNurturerDialog from '../components/AssignNurturerDialog'
 import { fetchActivityTypes } from '../lib/activityTypes'
+import { addRecipientsToCampaign } from '../lib/campaignRecipients'
 
 const STAGE_TO_STATUS = { New: 'new', 'Reached out': 'contacted', Oriented: 'matched', Active: 'active' }
 const STATUS_TO_STAGE = { new: 'New', contacted: 'Reached out', matched: 'Oriented', active: 'active', inactive: 'New' }
@@ -28,7 +29,7 @@ const todayISO = () => new Date().toISOString().slice(0, 10)
 const uniq = (a) => [...new Set(a.filter(Boolean))]
 const NIL = '00000000-0000-0000-0000-000000000000'
 
-export default function Volunteers({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone }) {
+export default function Volunteers({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone }) {
   const { isPhone } = useBreakpoint()
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
@@ -315,6 +316,24 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     }
   }
 
+  // Add-to-existing-campaign mode: resolve the selection to person ids and append them
+  // to the campaign we arrived from (deduped), then return to that campaign.
+  async function addSelectedToCampaign() {
+    if (!recipientDraft || sel.count(total) === 0) return
+    setResolving(true)
+    try {
+      const ids = await sel.resolveIds(fetchAllIds)
+      const { added, skipped } = await addRecipientsToCampaign(recipientDraft.campaignId, ids)
+      onToast(`Added ${added} to “${recipientDraft.campaignName}”${skipped ? ` · ${skipped} already in it` : ''}.`)
+      sel.clear()
+      onRecipientsDone?.()
+    } catch (e) {
+      onToast('Could not add: ' + (e.message || e))
+    } finally {
+      setResolving(false)
+    }
+  }
+
   async function openAssign() {
     if (sel.count(total) === 0) return
     setResolving(true)
@@ -387,6 +406,12 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
           <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onClearCampaignDraft && onClearCampaignDraft()}>Cancel</button>
         </div>
       )}
+      {recipientDraft && (
+        <div className="card" style={{ padding: '12px 16px', marginBottom: 14, background: '#FBF1E4', borderColor: '#E7C9B8', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, color: '#9C4A14', fontWeight: 600 }}>Adding volunteers to “{recipientDraft.campaignName}” — select people, then Add to campaign.</div>
+          <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onRecipientsDone && onRecipientsDone()}>Cancel</button>
+        </div>
+      )}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 13, color: 'var(--muted)' }}>
           {loading ? 'Loading…' : `${total} total · click a row to open the profile; use checkboxes to build a campaign.`}
@@ -429,7 +454,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
         </div>
       )}
 
-      <SelectionBar isFullySelected={isFullySelected} count={selCount} total={total} onSelectAll={sel.selectAllMatching} onCreate={openCampaign} onAssign={openAssign} onClear={sel.clear} />
+      <SelectionBar isFullySelected={isFullySelected} count={selCount} total={total} onSelectAll={sel.selectAllMatching}
+        onCreate={recipientDraft ? addSelectedToCampaign : openCampaign}
+        createLabel={recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : 'Create campaign'}
+        onAssign={recipientDraft ? undefined : openAssign} onClear={sel.clear} />
 
       <div className="card" style={{ overflow: 'hidden' }}>
         {!loading && total > 0 && <PagerBar position="top" page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />}

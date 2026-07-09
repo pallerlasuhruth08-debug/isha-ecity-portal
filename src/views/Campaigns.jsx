@@ -8,14 +8,20 @@ import { useBreakpoint } from '../lib/useBreakpoint'
 import ReachButtons from '../components/ReachButtons'
 import CallLogDialog from '../components/CallLogDialog'
 import CampaignScriptPanel from '../components/CampaignScriptPanel'
-import AddRecipientsDialog from '../components/AddRecipientsDialog'
 import AddCallerDialog from '../components/AddCallerDialog'
+import EditCampaignDialog from '../components/EditCampaignDialog'
 
 const CAMP_STATUS_PILL = {
   active: { background: '#EAF2E5', color: '#4E7C3F' },
   paused: { background: '#FBEAD9', color: '#C28A2A' },
   done: { background: '#F1EADD', color: '#8C7E6B' },
 }
+// Campaign type badge: messaging (WhatsApp/SMS only) vs full (calls + messaging).
+const TYPE_PILL = {
+  messaging: { background: '#E4EEF6', color: '#2F5E86', label: 'Messaging' },
+  full: { background: '#F1EADD', color: '#8C7E6B', label: 'Full' },
+}
+const typeOf = (c) => (c.campaign_type === 'messaging' ? 'messaging' : 'full')
 
 // Derive a contact's outreach status from their append-only call_logs (latest wins).
 function contactStatus(logs) {
@@ -33,7 +39,7 @@ function lastTouch(logs) {
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
 
-export default function Campaigns({ me, isCoordinator = false, onToast, openCampaignId = null, onCampaignConsumed }) {
+export default function Campaigns({ me, isCoordinator = false, onToast, openCampaignId = null, onCampaignConsumed, onAddRecipients }) {
   const [campaigns, setCampaigns] = useState(null)
   const [journeys, setJourneys] = useState([])
   const [logsByJourney, setLogsByJourney] = useState({})
@@ -41,8 +47,10 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
   const [callerPools, setCallerPools] = useState({}) // campaign_id -> [{key,source,id,name,profileId}]
   const [actorNames, setActorNames] = useState({}) // profile.id -> full_name (call_logs actor)
   const [eventNames, setEventNames] = useState({}) // activity.id -> {name, activity_date} for linked events
+  const [splitsByCampaign, setSplitsByCampaign] = useState({}) // campaign_id -> [campaign_splits row]
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
+  const [editId, setEditId] = useState(null) // campaign being edited from the LIST view
   const [callFilter, setCallFilter] = useState('all')
   const [showTest, setShowTest] = useState(false)
 
@@ -50,7 +58,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
     try {
       const { data: camps, error: e1 } = await supabase
         .from('campaigns')
-        .select('id, name, goal, script, message, whatsapp_template, sms_template, segment, audience, status, center_id, created_at, is_test, event_id')
+        .select('id, name, goal, script, message, whatsapp_template, sms_template, segment, audience, status, center_id, created_at, is_test, event_id, edited_by, edited_at, campaign_type')
         .order('created_at', { ascending: false })
       if (e1) throw e1
 
@@ -66,13 +74,22 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
       const { data: js, error: e2 } = await supabase
         .from('journeys')
         .select(
-          'id, campaign_id, status, assigned_to, caller_source, caller_id, ' +
+          'id, campaign_id, status, assigned_to, caller_source, caller_id, split_number, ' +
             'person:people!journeys_person_id_fkey(id, full_name, phone, center_id), ' +
             'assignee:profiles!journeys_assigned_to_fkey(full_name)',
         )
         .not('campaign_id', 'is', null)
         .limit(2000)
       if (e2) throw e2
+
+      const { data: splits, error: e4 } = await supabase
+        .from('campaign_splits')
+        .select('id, campaign_id, split_number, share_token, created_at')
+        .order('split_number')
+      if (e4) throw e4
+      setSplitsByCampaign(
+        (splits || []).reduce((m, s) => ((m[s.campaign_id] ||= []).push(s), m), {}),
+      )
 
       // Resolve callers (whichever source) to names, and build each campaign's caller
       // POOL (from segment.callers ∪ callers seen on journeys) with profile ids for
@@ -160,7 +177,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
   const enriched = useMemo(() => {
     const map = {}
     for (const c of campaigns || []) {
-      map[c.id] = { ...c, contacts: [], removed: [], callers: {}, callerPool: callerPools[c.id] || [] }
+      map[c.id] = { ...c, contacts: [], removed: [], callers: {}, callerPool: callerPools[c.id] || [], splitCount: (splitsByCampaign[c.id] || []).length }
     }
     for (const j of journeys) {
       const bucket = map[j.campaign_id]
@@ -180,6 +197,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
         last: lastTouch(logs),
         status,
         logs,
+        splitNumber: j.split_number ?? null,
       }
       if (j.status === 'dropped') {
         bucket.removed.push(row)
@@ -201,7 +219,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
       c.callerList = Object.values(c.callers).map((k) => ({ ...k, rate: k.contacted ? Math.round((k.responded / k.contacted) * 100) + '%' : '—' }))
     }
     return map
-  }, [campaigns, journeys, logsByJourney, callerNames, callerPools])
+  }, [campaigns, journeys, logsByJourney, callerNames, callerPools, splitsByCampaign])
 
   const loading = !campaigns && !err
   const open = openId ? enriched[openId] : null
@@ -225,10 +243,12 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
         logsByJourney={logsByJourney}
         actorNames={actorNames}
         eventNames={eventNames}
+        splits={splitsByCampaign[openId] || []}
         reload={load}
         onBack={() => setOpenId(null)}
         callFilter={callFilter}
         setCallFilter={setCallFilter}
+        onAddRecipients={onAddRecipients}
         onToast={onToast}
       />
     )
@@ -265,10 +285,14 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
                   <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.25 }}>{c.name}</div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>{c.audience || c.goal || '—'}</div>
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
+                  <span className="pill" style={{ background: TYPE_PILL[typeOf(c)].background, color: TYPE_PILL[typeOf(c)].color }}>{TYPE_PILL[typeOf(c)].label}</span>
                   {c.is_test && <span className="pill" style={{ background: '#F6E0CE', color: '#B5532F' }}>test</span>}
                   {c.event_id && <span className="pill" title={eventNames[c.event_id]?.name || 'Linked event'} style={{ background: '#F6E8D8', color: '#C2691F' }}>↻ event</span>}
                   <span className="pill" style={CAMP_STATUS_PILL[c.status] || CAMP_STATUS_PILL.active}>{c.status}</span>
+                  {isCoordinator && (
+                    <button title="Edit campaign" onClick={(ev) => { ev.stopPropagation(); setEditId(c.id) }} style={{ padding: '4px 9px', fontSize: 12, fontWeight: 600, borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }}>Edit</button>
+                  )}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 22, padding: '13px 0', borderTop: '1px solid #F2EBDD', borderBottom: '1px solid #F2EBDD', marginBottom: 13 }}>
@@ -284,6 +308,9 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
           )
         })}
       </div>
+      {editId && enriched[editId] && (
+        <EditCampaignDialog campaign={enriched[editId]} me={me} onClose={() => setEditId(null)} onSaved={load} onToast={onToast} />
+      )}
     </Pad>
   )
 }
@@ -339,6 +366,104 @@ function EventLinkControl({ campaign, eventName, isCoordinator, reload, onToast 
   )
 }
 
+// Divide the campaign's active recipients into N groups (random order, remainder to
+// the first groups) and give each group a shareable, revocable link to the volunteer
+// portal. Splitting only offered while none exist yet — re-splitting a live campaign
+// would silently reshuffle links already handed out, so that's a distinct action we
+// haven't built (existing splits can only be regenerated/shared, not redivided).
+function CampaignSplits({ campaignId, contacts, splits, reload, onToast }) {
+  const [n, setN] = useState(2)
+  const [busy, setBusy] = useState(false)
+
+  const portalLink = (token) => `${window.location.origin}${window.location.pathname}#volunteer=${token}`
+  async function copyLink(token) {
+    try {
+      await navigator.clipboard.writeText(portalLink(token))
+      onToast('Link copied.')
+    } catch {
+      onToast('Could not copy — link: ' + portalLink(token))
+    }
+  }
+  async function regenerate(split) {
+    if (!window.confirm(`Regenerate the link for Split ${split.split_number}? The current link will stop working immediately — anyone still using it loses access.`)) return
+    setBusy(true)
+    try {
+      const token = crypto.randomUUID().replace(/-/g, '')
+      const { error } = await supabase.from('campaign_splits').update({ share_token: token }).eq('id', split.id)
+      if (error) throw error
+      onToast(`Split ${split.split_number} link regenerated.`)
+      reload()
+    } catch (e) { onToast('Could not regenerate: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  async function createSplits() {
+    const total = contacts.length
+    if (n < 2 || n > total) return onToast(`Enter a number between 2 and ${total}.`)
+    setBusy(true)
+    try {
+      const shuffled = [...contacts]
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+      }
+      const base = Math.floor(total / n)
+      const remainder = total % n
+      const { data: rows, error: e1 } = await supabase
+        .from('campaign_splits')
+        .insert(Array.from({ length: n }, (_, i) => ({ campaign_id: campaignId, split_number: i + 1 })))
+        .select('id, split_number')
+      if (e1) throw e1
+      const bySplit = Object.fromEntries(rows.map((r) => [r.split_number, r.id]))
+      let cursor = 0
+      for (let s = 1; s <= n; s++) {
+        const size = base + (s <= remainder ? 1 : 0)
+        const chunk = shuffled.slice(cursor, cursor + size)
+        cursor += size
+        if (chunk.length) {
+          const { error: e2 } = await supabase.from('journeys').update({ split_number: s }).in('id', chunk.map((r) => r.journeyId))
+          if (e2) throw e2
+        }
+      }
+      onToast(`Split into ${n} groups.`)
+      reload()
+    } catch (e) { onToast('Could not split: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  if (splits.length === 0) {
+    return (
+      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #F2EBDD' }}>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>Split the call list into groups, each with its own volunteer-portal link.</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input type="number" min={2} max={contacts.length} value={n} onChange={(e) => setN(Number(e.target.value))}
+            style={{ width: 70, padding: '7px 9px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontFamily: 'inherit' }} />
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>groups from {contacts.length} people</span>
+          <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: '6px 12px' }} disabled={busy || contacts.length < 2} onClick={createSplits}>{busy ? 'Splitting…' : 'Split into groups'}</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #F2EBDD' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', marginBottom: 10 }}>Splits</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {splits.map((s) => {
+          const rows = contacts.filter((c) => c.splitNumber === s.split_number)
+          const called = rows.filter((c) => c.logs.length > 0).length
+          return (
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12.5 }}>
+              <span style={{ fontWeight: 600 }}>Split {s.split_number}</span>
+              <span style={{ color: 'var(--muted)' }}>{rows.length} people · {called} called</span>
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} disabled={busy} onClick={() => copyLink(s.share_token)}>Copy link</button>
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} disabled={busy} onClick={() => regenerate(s)}>Regenerate token</button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function Metric({ v, label, color }) {
   return (
     <div>
@@ -363,16 +488,19 @@ function CallerStat({ v, label, color }) {
   )
 }
 
-function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = {}, reload, onBack, callFilter, setCallFilter, onToast }) {
+function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = {}, splits = [], reload, onBack, callFilter, setCallFilter, onAddRecipients, onToast }) {
   const { isPhone } = useBreakpoint()
   const [logFor, setLogFor] = useState(null) // {journeyId, personId, name, phone}
   const [showRemoved, setShowRemoved] = useState(false)
   const [busyId, setBusyId] = useState(null)
-  const [addRecipients, setAddRecipients] = useState(false)
+  const [addOpen, setAddOpen] = useState(false) // source-chooser popover
   const [addCaller, setAddCaller] = useState(false)
+  const [detailTab, setDetailTab] = useState('calls') // 'calls' | 'callers'
+  const [editing, setEditing] = useState(false)
   const [busyDel, setBusyDel] = useState(false)
   const myId = me?.id
   const myName = me?.full_name || ''
+  const messaging = c.campaign_type === 'messaging' // WhatsApp/SMS only — no call button, script or log
 
   // Test campaigns are hard-deletable regardless of activity (their activity was never
   // real). Delete the journeys first (SET NULL would orphan them) — that CASCADES their
@@ -392,11 +520,6 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
     } catch (e) { onToast('Could not delete: ' + (e.message || e)) } finally { setBusyDel(false) }
   }
 
-  // Every person already in the campaign (active or removed) — so Add can't duplicate.
-  const existingPersonIds = useMemo(
-    () => new Set([...c.contacts, ...c.removed].map((x) => x.personId).filter(Boolean)),
-    [c.contacts, c.removed],
-  )
   const existingCallerKeys = useMemo(() => new Set(c.callerPool.map((x) => x.key)), [c.callerPool])
 
   const chips = [
@@ -478,8 +601,12 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             <div style={{ fontSize: 13, color: 'var(--muted)' }}>{c.audience || c.goal || '—'}</div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className="pill" style={{ background: TYPE_PILL[typeOf(c)].background, color: TYPE_PILL[typeOf(c)].color }}>{TYPE_PILL[typeOf(c)].label}</span>
             {c.is_test && <span className="pill" style={{ background: '#F6E0CE', color: '#B5532F' }}>test</span>}
             <span className="pill" style={CAMP_STATUS_PILL[c.status] || CAMP_STATUS_PILL.active}>{c.status}</span>
+            {isCoordinator && (
+              <button onClick={() => setEditing(true)} className="btn btn-ghost" style={{ fontSize: 12.5, padding: '7px 12px' }}>Edit</button>
+            )}
             {isCoordinator && c.is_test && (
               <button disabled={busyDel} onClick={deleteTestCampaign} style={{ fontSize: 12.5, padding: '7px 12px', fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: busyDel ? 'default' : 'pointer' }}>Delete test campaign</button>
             )}
@@ -492,11 +619,27 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           <Metric v={c.callerList.length} label="callers" />
         </div>
         <EventLinkControl campaign={c} eventName={eventNames[c.event_id]?.name} isCoordinator={isCoordinator} reload={reload} onToast={onToast} />
+        {isCoordinator && <CampaignSplits campaignId={c.id} contacts={c.contacts} splits={splits} reload={reload} onToast={onToast} />}
+        {c.edited_at && (
+          <div style={{ marginTop: 12, fontSize: 11.5, color: 'var(--muted-2)' }}>
+            Last edited {new Date(c.edited_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}
+            {actorNames[c.edited_by] ? ` by ${actorNames[c.edited_by]}` : ''}
+          </div>
+        )}
       </div>
 
       {/* script + templates (coordinator can edit; callers see the same) */}
-      <CampaignScriptPanel campaign={c} canEdit={isCoordinator} onSaved={reload} onToast={onToast} />
+      <CampaignScriptPanel campaign={c} canEdit={isCoordinator} onSaved={reload} onToast={onToast} hideScript={messaging} />
 
+      {/* Two tabs: the recipient call list and the caller roster. */}
+      <div className="scroll-tabs" style={{ display: 'flex', gap: 18, marginBottom: 16, borderBottom: '1px solid var(--border)' }}>
+        {[{ k: 'calls', label: `Call List (${c.contacts.length})` }, { k: 'callers', label: `Callers (${c.callerList.length})` }].map((t) => (
+          <button key={t.k} onClick={() => setDetailTab(t.k)}
+            style={{ padding: '10px 2px', marginBottom: -1, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', border: 'none', borderBottom: '2px solid ' + (detailTab === t.k ? 'var(--orange)' : 'transparent'), background: 'transparent', color: detailTab === t.k ? 'var(--ink)' : 'var(--muted)', cursor: 'pointer' }}>{t.label}</button>
+        ))}
+      </div>
+
+      {detailTab === 'calls' && (<>
       {/* call list */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
         <div>
@@ -507,7 +650,26 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           </p>
         </div>
         {isCoordinator && (
-          <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setAddRecipients(true)}>+ Add recipients</button>
+          <div style={{ position: 'relative' }}>
+            <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setAddOpen((v) => !v)}>+ Add recipients</button>
+            {addOpen && (
+              <>
+                <div onClick={() => setAddOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+                <div className="card" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 41, minWidth: 210, padding: 6, boxShadow: 'var(--shadow-lg)' }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', padding: '8px 10px 4px' }}>Add from…</div>
+                  {[
+                    { src: 'interest', label: c.event_id ? 'Volunteer Interests (this event)' : 'Volunteer Interests' },
+                    { src: 'volunteers', label: 'Volunteers' },
+                    { src: 'meditators', label: 'Meditators' },
+                  ].map((o) => (
+                    <button key={o.src} onClick={() => { setAddOpen(false); onAddRecipients?.(c.id, c.name, o.src) }}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 10px', fontSize: 13, fontWeight: 500, border: 'none', background: 'transparent', color: 'var(--ink)', cursor: 'pointer', borderRadius: 8 }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = '#F6EFE2')} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>{o.label}</button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
@@ -564,8 +726,8 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             </div>
             {isCoordinator && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-                <ReachButtons phone={p.phone} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
-                <button className="btn btn-ghost" style={{ padding: '9px 14px', fontSize: 12.5, minHeight: 40 }} onClick={() => setLogFor(p)}>Log</button>
+                <ReachButtons phone={p.phone} messaging={messaging} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
+                {!messaging && <button className="btn btn-ghost" style={{ padding: '9px 14px', fontSize: 12.5, minHeight: 40 }} onClick={() => setLogFor(p)}>Log</button>}
                 <button title="Remove from campaign" disabled={busyId === p.journeyId} onClick={() => removeRecipient(p)} style={{ padding: '9px 12px', fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer', marginLeft: 'auto', minHeight: 40 }}>✕ Remove</button>
               </div>
             )}
@@ -599,8 +761,8 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             </div>
             {isCoordinator && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <ReachButtons phone={p.phone} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
-                <button className="btn btn-ghost" style={{ padding: '6px 9px', fontSize: 12 }} onClick={() => setLogFor(p)}>Log</button>
+                <ReachButtons phone={p.phone} messaging={messaging} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
+                {!messaging && <button className="btn btn-ghost" style={{ padding: '6px 9px', fontSize: 12 }} onClick={() => setLogFor(p)}>Log</button>}
                 <button title="Remove from campaign" disabled={busyId === p.journeyId} onClick={() => removeRecipient(p)} style={{ padding: '6px 8px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>✕</button>
               </div>
             )}
@@ -626,7 +788,9 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           )}
         </div>
       )}
+      </>)}
 
+      {detailTab === 'callers' && (<>
       {/* callers */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
         <div>
@@ -684,6 +848,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           </div>
         ))}
       </div>
+      </>)}
 
       {logFor && (
         <CallLogDialog
@@ -697,15 +862,6 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
         />
       )}
 
-      {addRecipients && (
-        <AddRecipientsDialog
-          campaign={c}
-          existingPersonIds={existingPersonIds}
-          onClose={() => setAddRecipients(false)}
-          onAdded={reload}
-          onToast={onToast}
-        />
-      )}
       {addCaller && (
         <AddCallerDialog
           campaign={c}
@@ -714,6 +870,9 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           onAdded={reload}
           onToast={onToast}
         />
+      )}
+      {editing && (
+        <EditCampaignDialog campaign={c} me={me} onClose={() => setEditing(false)} onSaved={reload} onToast={onToast} />
       )}
     </Pad>
   )

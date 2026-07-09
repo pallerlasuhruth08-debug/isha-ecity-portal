@@ -134,7 +134,7 @@ export function PagerBar({ page, pageCount, total, pageSize, onPage, onPageSize,
 // `isFullySelected` (mode 'all' with zero exclusions) shows "All N selected"; any
 // partial state (current-page-only, or an "all" selection with some rows excluded)
 // shows "{count} selected" plus a "Select all {total}" prompt to promote to full.
-export function SelectionBar({ isFullySelected, count, total, onSelectAll, onCreate, onAssign, onClear }) {
+export function SelectionBar({ isFullySelected, count, total, onSelectAll, onCreate, createLabel = 'Create campaign', onAssign, onClear }) {
   if (count <= 0) return null
   return (
     <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', marginBottom: 14, background: '#FBF1E6', borderColor: '#EBD9C2', flexWrap: 'wrap' }}>
@@ -146,7 +146,7 @@ export function SelectionBar({ isFullySelected, count, total, onSelectAll, onCre
       )}
       <div style={{ flex: 1 }} />
       {onAssign && <button className="btn btn-ghost" onClick={onAssign}>Assign to nurturer</button>}
-      {onCreate && <button className="btn btn-primary" onClick={onCreate}>Create campaign</button>}
+      {onCreate && <button className="btn btn-primary" onClick={onCreate}>{createLabel}</button>}
       <button className="btn btn-ghost" onClick={onClear}>✕ Clear selection</button>
     </div>
   )
