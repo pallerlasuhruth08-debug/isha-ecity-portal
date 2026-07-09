@@ -48,6 +48,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
   const [advItems, setAdvItems] = useState([]) // advanced grouped-by-person (small, bounded)
   const [vpCount, setVpCount] = useState(0)
   const [ieCount, setIeCount] = useState(0)
+  const [eiCount, setEiCount] = useState(0) // event_interest rows — drives the Event Interests tab badge
   const [pageItems, setPageItems] = useState([]) // current page (server-side window)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(25)
@@ -71,10 +72,11 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
 
   const loadStatic = useCallback(async () => {
     try {
-      const [advRes, vpc, iec] = await Promise.all([
+      const [advRes, vpc, iec, eic] = await Promise.all([
         supabase.from('advanced_interest').select('id, program, status, interest_date, source, notes, person:people!advanced_interest_person_id_fkey(id, full_name, phone)').order('interest_date', { ascending: false }).limit(2000),
         supabase.from('volunteer_profiles').select('person_id', { count: 'exact', head: true }).eq('status', 'new'),
         supabase.from('ie_completion_volunteer').select('id', { count: 'exact', head: true }),
+        supabase.from('event_interest').select('id', { count: 'exact', head: true }),
       ])
       if (advRes.error) throw advRes.error
       const byPerson = {}
@@ -87,6 +89,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       setAdvItems(Object.values(byPerson))
       setVpCount(vpc.count || 0)
       setIeCount(iec.count || 0)
+      setEiCount(eic.count || 0)
       setReady(true)
     } catch (e) { setErr(e.message || String(e)) }
   }, [])
@@ -111,7 +114,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
   }, [tab, ieoOnly, vpCount, ieCount, advItems])
 
   const total = sources.reduce((s, x) => s + x.count, 0)
-  const counts = { all: vpCount + ieCount + advItems.length, volunteering: vpCount + ieCount, advanced: advItems.length }
+  const counts = { all: vpCount + ieCount + advItems.length, volunteering: vpCount + ieCount, advanced: advItems.length, events: eiCount }
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
 
   useEffect(() => {
