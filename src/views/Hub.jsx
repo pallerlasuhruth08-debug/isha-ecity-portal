@@ -11,6 +11,7 @@ import { Detail as AttendanceDetail, EventActions } from './Events'
 import CommentThread from '../components/CommentThread'
 import CreateTeamForm from '../components/CreateTeamForm'
 import { AddImport } from './Interest'
+import { buildTeamRoster, teamsToCSV, downloadCSV, teamsToPDF } from '../lib/teamExport'
 
 // EVENT HUB — the home for events. The list surfaces overdue/at-risk phases across
 // all events; opening one shows four LENSES over four separate tables joined by the
@@ -133,11 +134,11 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
     <Pad>
       <button className="btn btn-ghost" style={{ fontSize: 13, marginBottom: 14 }} onClick={onBack}>← All events</button>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-        <div style={{ minWidth: 0 }}>
-          <h2 style={{ fontSize: 22, fontWeight: 600, margin: 0, fontFamily: "'Newsreader',serif" }}>
+        <div style={{ minWidth: 0, flex: '1 1 240px', overflow: 'hidden' }}>
+          <h2 style={{ fontSize: 22, fontWeight: 600, margin: 0, fontFamily: "'Newsreader',serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {ev.name}{ev.series_id && <span title="Recurring occurrence" style={{ marginLeft: 8, fontSize: 15, color: 'var(--muted-2)' }}>↻</span>}
           </h2>
-          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>{rangeLabel(ev.start_date || ev.activity_date, ev.end_date)} · {ev.center_id}</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rangeLabel(ev.start_date || ev.activity_date, ev.end_date)} · {ev.center_id}</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
           {(() => {
@@ -149,10 +150,10 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
+      <div className="scroll-tabs" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
         {TABS.map((t) => (
-          <button key={t.k} onClick={() => setTab(t.k)}
-            style={{ padding: '9px 14px', fontSize: 13, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', color: tab === t.k ? 'var(--ink)' : 'var(--muted)', borderBottom: tab === t.k ? '2px solid var(--orange)' : '2px solid transparent', marginBottom: -1 }}>
+          <button key={t.k} className="tap44" onClick={() => setTab(t.k)}
+            style={{ padding: '9px 14px', fontSize: 13, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', color: tab === t.k ? 'var(--ink)' : 'var(--muted)', borderBottom: tab === t.k ? '2px solid var(--orange)' : '2px solid transparent', marginBottom: -1, whiteSpace: 'nowrap' }}>
             {t.label}
           </button>
         ))}
@@ -187,7 +188,7 @@ function EventInterestTab({ ev, isCoordinator, onToast }) {
     <div>
       {isCoordinator && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setAddOpen(true)}>＋ Add / Import Interest</button>
+          <button className="btn btn-primary tap44" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setAddOpen(true)}>＋ Add / Import Interest</button>
           <span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>Add or import against this event — stays right here.</span>
         </div>
       )}
@@ -222,7 +223,7 @@ function EventCampaignsTab({ ev, isCoordinator, onOpenCampaign, onStartCampaign 
     <div>
       {isCoordinator && (
         <div style={{ position: 'relative', marginBottom: 14 }}>
-          <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setMenu((m) => !m)}>＋ Create campaign</button>
+          <button className="btn btn-primary tap44" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setMenu((m) => !m)}>＋ Create campaign</button>
           {menu && (
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setMenu(false)} />
@@ -262,6 +263,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   const [err, setErr] = useState(null)
   const [creating, setCreating] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -276,7 +278,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
       const { data: asg } = await supabase.from('block_assignments').select('id, block_id, person_id, status, is_poc').in('block_id', ids)
       setAssigns(asg || [])
       const pids = [...new Set((asg || []).map((a) => a.person_id))]
-      if (pids.length) { const { data: pp } = await supabase.from('people').select('id, full_name, phone').in('id', pids); setPeople(Object.fromEntries((pp || []).map((p) => [p.id, p]))) }
+      if (pids.length) { const { data: pp } = await supabase.from('people').select('id, full_name, phone, email').in('id', pids); setPeople(Object.fromEntries((pp || []).map((p) => [p.id, p]))) }
       else setPeople({})
     } else setAssigns([])
   }, [ev.id])
@@ -285,15 +287,45 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   const typeLabel = (id) => types.find((t) => t.id === id)?.label
   const firstDay = ev.start_date || ev.activity_date
 
+  // Export = the SAME data already on screen (blocks/assignments/people), plus two
+  // extra reads for fields the roster needs but this view doesn't otherwise load:
+  // each team's phase span (execution period) and per-person comments for this event.
+  async function exportRoster(kind) {
+    setExporting(true)
+    try {
+      const ids = blocks.map((b) => b.id)
+      const [bp, ep, cm] = await Promise.all([
+        ids.length ? supabase.from('block_phases').select('block_id, phase_id').in('block_id', ids) : Promise.resolve({ data: [] }),
+        supabase.from('event_phases').select('id, start_by, finish_by').eq('activity_id', ev.id),
+        supabase.from('comments').select('subject_person_id, body').eq('activity_id', ev.id).not('subject_person_id', 'is', null),
+      ])
+      const blockPhases = {}
+      for (const r of bp.data || []) (blockPhases[r.block_id] ||= []).push(r.phase_id)
+      const commentsByPerson = {}
+      for (const c of cm.data || []) (commentsByPerson[c.subject_person_id] ||= []).push(c.body)
+
+      const teams = buildTeamRoster({ ev, blocks, assigns, people, blockPhases, eventPhases: ep.data || [], commentsByPerson })
+      const safeName = ev.name.replace(/[^\w\- ]/g, '').trim() || 'event'
+      if (kind === 'csv') downloadCSV(`${safeName} - teams.csv`, teamsToCSV(teams))
+      else teamsToPDF(ev.name, teams).save(`${safeName} - teams.pdf`)
+    } catch (e) { onToast('Could not export: ' + (e.message || e)) } finally { setExporting(false) }
+  }
+
   if (err) return <ErrorCard>{err}</ErrorCard>
   if (!blocks) return <Loading label="Loading teams…" />
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: -2 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: -2, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>Teams</span>
         <button onClick={() => setShowInfo((s) => !s)} title="Teams are this event's activity blocks — create teams, set members &amp; POCs here; a team's dates &amp; attendance mode are set in Planning (same block)."
           style={{ width: 18, height: 18, borderRadius: '50%', border: '1px solid var(--border)', background: showInfo ? '#EDE4D6' : '#fff', color: 'var(--muted)', fontSize: 11, cursor: 'pointer', lineHeight: 1, padding: 0 }}>ⓘ</button>
+        {blocks.length > 0 && (
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <button className="btn btn-ghost tap44" disabled={exporting} onClick={() => exportRoster('csv')} style={{ fontSize: 12, padding: '6px 11px', opacity: exporting ? 0.6 : 1 }}>⬇ CSV</button>
+            <button className="btn btn-ghost tap44" disabled={exporting} onClick={() => exportRoster('pdf')} style={{ fontSize: 12, padding: '6px 11px', opacity: exporting ? 0.6 : 1 }}>⬇ PDF</button>
+          </div>
+        )}
       </div>
       {showInfo && (
         <div style={{ fontSize: 12, color: 'var(--muted-2)', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 9, padding: '9px 11px' }}>
@@ -305,7 +337,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
           assigns={assigns.filter((a) => a.block_id === b.id)} people={people} onToast={onToast} onChanged={load} />
       ))}
       {isCoordinator && (
-        <button className="btn btn-primary" style={{ padding: '11px', fontSize: 14 }} onClick={() => setCreating(true)}>＋ Create team</button>
+        <button className="btn btn-primary tap44" style={{ padding: '11px', fontSize: 14 }} onClick={() => setCreating(true)}>＋ Create team</button>
       )}
       {creating && <CreateTeamForm ev={ev} types={types} firstDay={firstDay} me={me} onClose={() => setCreating(false)} onCreated={() => { setCreating(false); load() }} onToast={onToast} />}
     </div>
@@ -406,15 +438,15 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
         </div>
         <span className="pill" style={full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
         {isCoordinator && (
-          <button onClick={() => setAdding((a) => !a)} title="Add member" style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? '#C2691F' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
+          <button className="tap44" onClick={() => setAdding((a) => !a)} title="Add member" style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? '#C2691F' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
         )}
         {isCoordinator && (
-          <button onClick={() => setEditing(true)} title="Edit team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
+          <button className="tap44" onClick={() => setEditing(true)} title="Edit team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
         )}
         {isCoordinator && (
-          <button disabled={busy} onClick={removeTeam} title="Delete / archive team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>🗑</button>
+          <button className="tap44" disabled={busy} onClick={removeTeam} title="Delete / archive team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>🗑</button>
         )}
-        <button onClick={() => setShowComments((s) => !s)} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: showComments ? '#EDE4D6' : '#fff', cursor: 'pointer' }}>💬</button>
+        <button className="tap44" onClick={() => setShowComments((s) => !s)} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: showComments ? '#EDE4D6' : '#fff', cursor: 'pointer' }}>💬</button>
       </div>
       {editing && (
         <CreateTeamForm ev={ev} types={types} firstDay={firstDay} me={me} block={block}
@@ -432,8 +464,8 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
                 {m.poc && <span className="pill" style={{ ...pill('#F3E3D2', '#9C4A14'), fontSize: 10 }}>POC</span>}
                 {isCoordinator && (
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                    <button disabled={busy} onClick={() => togglePoc(m.person_id, p?.full_name, m.poc)} style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: m.poc ? '#9C4A14' : 'var(--muted)', cursor: 'pointer' }}>{m.poc ? '★ POC' : '☆ POC'}</button>
-                    <button disabled={busy} onClick={() => removeMember(m.person_id, p?.full_name)} style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Remove</button>
+                    <button className="tap44" disabled={busy} onClick={() => togglePoc(m.person_id, p?.full_name, m.poc)} style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: m.poc ? '#9C4A14' : 'var(--muted)', cursor: 'pointer' }}>{m.poc ? '★ POC' : '☆ POC'}</button>
+                    <button className="tap44" disabled={busy} onClick={() => removeMember(m.person_id, p?.full_name)} style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Remove</button>
                   </div>
                 )}
               </div>

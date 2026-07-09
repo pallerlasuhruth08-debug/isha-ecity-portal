@@ -653,8 +653,8 @@ export function ScanMatch({ onClose, onToast, onDone, lockEventId = null }) {
 
 function Modal({ title, children, onClose }) {
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 120, padding: 20 }} onClick={onClose}>
-      <div className="card" style={{ width: 480, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 24 }} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 120, padding: 20 }} onClick={onClose}>
+      <div className="card modal-sheet" style={{ width: 480, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 24 }} onClick={(e) => e.stopPropagation()}>
         <h2 style={{ fontSize: 19, fontWeight: 600, margin: '0 0 14px' }}>{title}</h2>
         {children}
       </div>

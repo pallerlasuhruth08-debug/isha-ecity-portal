@@ -187,8 +187,8 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
 
       {/* Type-change keep-vs-propagate prompt (attendance present). */}
       {typeChange && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={() => setTypeChange(null)}>
-          <div className="card" style={{ width: 440, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={() => setTypeChange(null)}>
+          <div className="card modal-sheet" style={{ width: 440, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 8px' }}>Change event type?</h3>
             <div style={{ fontSize: 13.5, color: 'var(--ink-soft)', lineHeight: 1.55, marginBottom: 16 }}>
               This event has <strong>{totalAtt}</strong> attendance record(s) captured under <strong>{typeLabel(activity.activity_type_id)}</strong>. Changing the event to <strong>{typeLabel(typeChange.newId)}</strong> — what should happen to those already-captured records?
@@ -391,8 +391,8 @@ export function CreateSessionForm({ activity, session = null, attnCount = 0, typ
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
-      <div className="card" style={{ width: 520, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 22, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
+      <div className="card modal-sheet" style={{ width: 520, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 22, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>{editing ? 'Edit attendance session' : 'Create attendance session'}</h3>
           <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={onClose}>✕ Close</button>
@@ -832,8 +832,8 @@ function EditEventForm({ activity, me, onClose, onSaved, onToast }) {
   const inputStyle = { width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 12px', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', background: '#fff', color: 'var(--ink)' }
   const label = { display: 'block', fontSize: 12, fontWeight: 600, color: '#5C5142', marginBottom: 5, marginTop: 12 }
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
-      <div className="card" style={{ width: 460, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)', maxHeight: '88vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
+      <div className="card modal-sheet" style={{ width: 460, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)', maxHeight: '88vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 2px' }}>Edit event</h3>
         <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>To change the type, use the Activity type selector on the event (it handles captured attendance).</div>
         <label style={{ ...label, marginTop: 16 }}>Name</label>

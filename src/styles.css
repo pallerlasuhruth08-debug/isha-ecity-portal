@@ -6,6 +6,36 @@
 /* Date inputs read as clickable everywhere (event forms and beyond). */
 input[type="date"] { cursor: pointer; }
 
+/* Mobile: modal dialogs become full-screen sheets (edge-to-edge, no corners) so
+   their existing "✕ Close" header reads as a back control, not a floating card. */
+@media (max-width: 640px) {
+  .modal-backdrop {
+    align-items: stretch !important;
+    justify-content: stretch !important;
+    padding: 0 !important;
+  }
+  .modal-sheet {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    border-radius: 0 !important;
+  }
+  /* Any interactive control opted into this class gets a real tap target. */
+  .tap44 {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Horizontally-scrolling tab rows never wrap on mobile — swipe to reveal. */
+  .scroll-tabs {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .scroll-tabs::-webkit-scrollbar { display: none; }
+  .scroll-tabs > * { flex-shrink: 0; }
+}
+
 :root {
   --bg: #f4ede1;
   --panel: #fbf6ec;
