@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { Loading, Empty } from './View'
+import { Loading, Empty, Checkbox, PagerBar, SelectionBar } from './View'
 import SidePanel, { PanelHeader } from './SidePanel'
 import { eventDays, fmtDay } from '../lib/planning'
+import { useTableSelection } from '../lib/useTableSelection'
+import { useBreakpoint } from '../lib/useBreakpoint'
+import CampaignForm from './CampaignForm'
 
-// Event-interest status state machine (all reversible; Contacted is optional, so
-// Interested → Approved is a single step). Stored values are snake_case; labels below.
-// Colors per spec: Interested=grey, Contacted=yellow, Approved=green, Declined=red, No Response=orange.
 export const EI_STATUS = [
   { v: 'interested', label: 'Interested', pill: pill('#F1EADD', '#8C7E6B') },
   { v: 'contacted', label: 'Contacted', pill: pill('#FCF4CB', '#8A6D1B') },
@@ -27,8 +27,6 @@ const ago = (d) => {
 }
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 
-// Contextual actions per current status (the pipeline). Each entry moves the record
-// to `to`; the patch (who/when stamps) is computed in changeStatus below.
 function actionsFor(status, contactedAt) {
   const s = status || 'interested'
   if (s === 'interested') return [{ label: 'Mark Contacted', to: 'contacted' }, { label: 'Approve', to: 'approved', primary: true }]
@@ -38,33 +36,98 @@ function actionsFor(status, contactedAt) {
   return []
 }
 
-// Shared Event-Interest list. Two modes:
+function availLabel(r, daysByEvent) {
+  const days = daysByEvent[r.activity?.id] || []
+  const avail = r.availability_dates || []
+  if (!days.length) return '—'
+  if (!avail.length) return 'Not set'
+  const matching = avail.filter((d) => days.includes(d))
+  if (matching.length === days.length) return 'All days'
+  return `${matching.length}/${days.length} days`
+}
+
+// Shared Event-Interest table view. Two modes:
 //  - lockEventId set → single event, no event filter pill row (Event Hub tab).
 //  - lockEventId null → all events with an "Event" pill row; scopeEventId presets it.
 export default function EventInterestPanel({ uid, lockEventId = null, scopeEventId = null, onScopeConsumed, reloadKey = 0, onToast, isCoordinator = true }) {
+  const { isPhone } = useBreakpoint()
+
+  // Server-side pagination
   const [rows, setRows] = useState(null)
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(25)
+  const [loading, setLoading] = useState(true)
+
+  // Filters: status + event pushed server-side; availability client-side
   const [statusFilter, setStatusFilter] = useState('all')
   const [evFilter, setEvFilter] = useState('all')
   const [availFilter, setAvailFilter] = useState('all')
-  const [selected, setSelected] = useState(null) // the row open in the detail panel
 
-  const load = useCallback(async () => {
+  const [selected, setSelected] = useState(null)
+  const [showCampaign, setShowCampaign] = useState(false)
+  const [campaignIds, setCampaignIds] = useState([])
+  const [resolving, setResolving] = useState(false)
+
+  // Event list for filter pills — loaded separately so it spans all pages
+  const [evList, setEvList] = useState([])
+
+  const sel = useTableSelection()
+  const reqSeq = useRef(0)
+
+  // Distinct events for the pill row
+  useEffect(() => {
     let q = supabase.from('event_interest')
-      .select('id, created_at, status, contacted_at, approved_at, availability_dates, note, activity:activities!event_interest_activity_id_fkey(id, name, activity_date, start_date, end_date), person:people!event_interest_person_id_fkey(id, full_name, phone, email)')
-      .order('created_at', { ascending: false })
+      .select('activity:activities!event_interest_activity_id_fkey(id, name, activity_date, start_date, end_date)')
     if (lockEventId) q = q.eq('activity_id', lockEventId)
-    const { data } = await q
-    setRows(data || [])
-  }, [lockEventId])
-  useEffect(() => { load() }, [load, reloadKey])
+    q.limit(5000).then(({ data }) => {
+      const m = new Map()
+      for (const r of data || []) if (r.activity) m.set(r.activity.id, r.activity)
+      setEvList([...m.values()])
+    })
+  }, [lockEventId, reloadKey])
 
-  // Preset the event filter to the event we arrived from (Interest Inbox from a hub).
+  // Reset page + clear selection when server-side filters change
+  useEffect(() => {
+    setPage(0)
+    sel.clear() // eslint-disable-line react-hooks/exhaustive-deps
+  }, [statusFilter, evFilter, pageSize])
+
+  // Preset event filter from Interest Inbox scope jump
   useEffect(() => {
     if (scopeEventId && !lockEventId) { setEvFilter(scopeEventId); onScopeConsumed?.() }
   }, [scopeEventId, lockEventId, onScopeConsumed])
 
+  const loadPage = useCallback(async () => {
+    setLoading(true)
+    const seq = ++reqSeq.current
+    try {
+      let q = supabase.from('event_interest').select(
+        'id, created_at, status, contacted_at, approved_at, availability_dates, note, activity:activities!event_interest_activity_id_fkey(id, name, activity_date, start_date, end_date), person:people!event_interest_person_id_fkey(id, full_name, phone, email)',
+        { count: 'exact' }
+      )
+      if (lockEventId) q = q.eq('activity_id', lockEventId)
+      else if (evFilter !== 'all') q = q.eq('activity_id', evFilter)
+      if (statusFilter !== 'all') q = q.eq('status', statusFilter)
+      q = q.order('created_at', { ascending: false }).range(page * pageSize, page * pageSize + pageSize - 1)
+      const { data, count, error } = await q
+      if (error) throw error
+      if (seq !== reqSeq.current) return
+      setRows(data || [])
+      setTotal(count ?? 0)
+    } catch (e) {
+      if (seq !== reqSeq.current) return
+      onToast?.('Could not load event interests: ' + (e.message || e))
+      setRows([])
+    } finally {
+      if (seq === reqSeq.current) setLoading(false)
+    }
+  }, [lockEventId, evFilter, statusFilter, page, pageSize, onToast])
+
+  useEffect(() => { loadPage() }, [loadPage, reloadKey])
+
   const patchRow = (id, fields) => {
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...fields } : r)))
+    setRows((prev) => (prev || []).map((r) => (r.id === id ? { ...r, ...fields } : r)))
     setSelected((s) => (s && s.id === id ? { ...s, ...fields } : s))
   }
 
@@ -73,7 +136,6 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
     if (to === 'contacted') { patch.contacted_at = new Date().toISOString(); patch.contacted_by = uid || null; patch.approved_at = null; patch.approved_by = null }
     else if (to === 'approved') { patch.approved_at = new Date().toISOString(); patch.approved_by = uid || null }
     else if (to === 'interested') { patch.contacted_at = null; patch.contacted_by = null; patch.approved_at = null; patch.approved_by = null }
-    // declined / no_response: status only
     try {
       const { error } = await supabase.from('event_interest').update(patch).eq('id', r.id)
       if (error) throw error
@@ -99,30 +161,71 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
     } catch (e) { onToast?.('Could not save comment: ' + (e.message || e)) }
   }
 
-  if (!rows) return <Loading label="Loading event interests…" />
+  // Fetch all person_ids matching current server-side filters (for Stage 2 "select all")
+  const fetchAllIds = useCallback(async () => {
+    const ids = []
+    let from = 0
+    const CHUNK = 1000
+    for (let g = 0; g < 50; g++) {
+      let q = supabase.from('event_interest').select('person_id')
+      if (lockEventId) q = q.eq('activity_id', lockEventId)
+      else if (evFilter !== 'all') q = q.eq('activity_id', evFilter)
+      if (statusFilter !== 'all') q = q.eq('status', statusFilter)
+      q = q.order('person_id', { ascending: true }).range(from, from + CHUNK - 1)
+      const { data, error } = await q
+      if (error) throw error
+      const batch = (data || []).map((r) => r.person_id).filter(Boolean)
+      ids.push(...batch)
+      if (batch.length < CHUNK) break
+      from += CHUNK
+    }
+    return [...new Set(ids)]
+  }, [lockEventId, evFilter, statusFilter])
 
-  // Every event that has at least one interest record — the Event pill row + the
-  // per-record day-list lookup (each record's availability is scoped to its own event).
-  const events = [...new Map(rows.map((r) => [r.activity?.id, r.activity])).values()].filter(Boolean)
-  const daysByEvent = Object.fromEntries(events.map((e) => [e.id, eventDays(e.start_date || e.activity_date, e.end_date)]))
-  const maxDays = Math.max(1, ...events.map((e) => (daysByEvent[e.id] || []).length))
+  async function openCampaign() {
+    if (selCount === 0) { setCampaignIds([]); setShowCampaign(true); return }
+    setResolving(true)
+    try {
+      setCampaignIds(await sel.resolveIds(fetchAllIds))
+      setShowCampaign(true)
+    } catch (e) {
+      onToast?.('Could not resolve selection: ' + (e.message || e))
+    } finally { setResolving(false) }
+  }
+
+  // Availability filter — client-side on current page rows
+  const daysByEvent = Object.fromEntries(evList.map((e) => [e.id, eventDays(e.start_date || e.activity_date, e.end_date)]))
+  const maxDays = Math.max(1, ...evList.map((e) => (daysByEvent[e.id] || []).length))
 
   const matchesAvail = (r) => {
     if (availFilter === 'all') return true
     const days = daysByEvent[r.activity?.id] || []
     const avail = r.availability_dates || []
     if (availFilter === 'all_days') return days.length > 0 && days.every((d) => avail.includes(d))
-    const idx = Number(availFilter.slice(3)) - 1 // 'day2' -> 1
+    const idx = Number(availFilter.slice(3)) - 1
     const d = days[idx]
     return d ? avail.includes(d) : false
   }
+  const shown = (rows || []).filter(matchesAvail)
 
-  // AND filters: status, then event, then availability.
-  const statusScoped = statusFilter === 'all' ? rows : rows.filter((r) => (r.status || 'interested') === statusFilter)
-  const evScoped = (lockEventId || evFilter === 'all') ? statusScoped : statusScoped.filter((r) => r.activity?.id === evFilter)
-  const shown = evScoped.filter(matchesAvail)
+  // Two-stage selection: keys = person_id
+  const pageIds = (rows || []).map((r) => r.person?.id).filter(Boolean)
+  const pageSelectedCount = pageIds.filter((id) => sel.isSelected(id)).length
+  const pageHeaderState = pageIds.length === 0 ? 'none' : pageSelectedCount === 0 ? 'none' : pageSelectedCount === pageIds.length ? 'all' : 'partial'
+  const togglePage = () => (pageSelectedCount === pageIds.length && pageIds.length > 0 ? sel.deselectIds(pageIds) : sel.selectIds(pageIds))
+  const selCount = sel.count(total)
+  const isFullySelected = sel.headerState(total) === 'all'
 
-  const statusCounts = rows.reduce((m, r) => { const s = r.status || 'interested'; m[s] = (m[s] || 0) + 1; return m }, {})
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+
+  // Campaign: attach event_id when a specific event is in scope
+  const campaignEventId = lockEventId || (evFilter !== 'all' ? evFilter : null)
+  const activeEvent = evList.find((e) => e.id === campaignEventId)
+
+  const showEventCol = !lockEventId
+  const grid = showEventCol
+    ? '34px 2fr 1.2fr 0.85fr 1.4fr 0.9fr'
+    : '34px 2fr 1.3fr 0.9fr 1fr'
 
   const filterChip = (on) => ({ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 20, cursor: 'pointer', border: on ? 'none' : '1px solid var(--border)', background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', whiteSpace: 'nowrap', flexShrink: 0 })
   const pillRow = { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }
@@ -131,23 +234,23 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
     <>
       {/* Status pills */}
       <div className="scroll-tabs" style={pillRow}>
-        <button className="tap44" onClick={() => setStatusFilter('all')} style={filterChip(statusFilter === 'all')}>All <span style={{ opacity: 0.6 }}>{rows.length}</span></button>
+        <button className="tap44" onClick={() => setStatusFilter('all')} style={filterChip(statusFilter === 'all')}>All</button>
         {EI_STATUS.map((s) => (
-          <button key={s.v} className="tap44" onClick={() => setStatusFilter(s.v)} style={filterChip(statusFilter === s.v)}>{s.label} <span style={{ opacity: 0.6 }}>{statusCounts[s.v] || 0}</span></button>
+          <button key={s.v} className="tap44" onClick={() => setStatusFilter(s.v)} style={filterChip(statusFilter === s.v)}>{s.label}</button>
         ))}
       </div>
 
-      {/* Event pills — one per event that has interest records (skipped when locked to a single event). */}
-      {!lockEventId && events.length > 0 && (
+      {/* Event pills — skipped when locked to a single event */}
+      {!lockEventId && evList.length > 0 && (
         <div className="scroll-tabs" style={pillRow}>
           <button className="tap44" onClick={() => setEvFilter('all')} style={filterChip(evFilter === 'all')}>All Events</button>
-          {events.map((e) => (
+          {evList.map((e) => (
             <button key={e.id} className="tap44" onClick={() => setEvFilter(e.id)} style={filterChip(evFilter === e.id)}>{e.name}</button>
           ))}
         </div>
       )}
 
-      {/* Availability pills */}
+      {/* Availability pills — client-side filter on current page */}
       <div className="scroll-tabs" style={{ ...pillRow, marginBottom: 12 }}>
         <button className="tap44" onClick={() => setAvailFilter('all')} style={filterChip(availFilter === 'all')}>All</button>
         {Array.from({ length: maxDays }, (_, i) => `day${i + 1}`).map((k, i) => (
@@ -156,40 +259,114 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
         <button className="tap44" onClick={() => setAvailFilter('all_days')} style={filterChip(availFilter === 'all_days')}>All Days</button>
       </div>
 
+      <SelectionBar
+        isFullySelected={isFullySelected}
+        count={selCount}
+        total={total}
+        onSelectAll={sel.selectAllMatching}
+        onCreate={resolving ? undefined : openCampaign}
+        onClear={sel.clear}
+      />
+
       <div className="card" style={{ overflow: 'hidden' }}>
-        {shown.length === 0 ? (
-          <Empty label="No interests match these filters." />
-        ) : shown.map((r, i) => (
-          <InterestListRow key={r.id} r={r} i={i} onOpen={() => setSelected(r)} />
+        {!loading && total > 0 && (
+          <PagerBar position="top" page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
+        )}
+
+        {/* Table header */}
+        {isPhone ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
+            <Checkbox state={pageHeaderState} onClick={togglePage} />
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select this page'}</span>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, background: 'var(--panel)', alignItems: 'center' }}>
+            <Checkbox state={pageHeaderState} onClick={togglePage} />
+            <span>Volunteer</span>
+            <span>Phone</span>
+            <span>Status</span>
+            {showEventCol && <span>Event</span>}
+            <span>Availability</span>
+          </div>
+        )}
+
+        {loading && <Loading label="Loading event interests…" />}
+        {!loading && shown.length === 0 && <Empty label="No interests match these filters." />}
+
+        {/* Mobile card rows */}
+        {!loading && isPhone && shown.map((r, i) => (
+          <div key={r.id} className="rowhover tap44" onClick={() => setSelected(r)}
+            style={{ display: 'flex', gap: 12, padding: 14, borderBottom: '1px solid #F1E9DB', alignItems: 'flex-start', cursor: 'pointer', background: selected?.id === r.id ? '#FBF1E6' : undefined }}>
+            <div style={{ paddingTop: 2, minHeight: 44, display: 'flex', alignItems: 'center' }} onClick={(e) => { e.stopPropagation(); r.person?.id && sel.toggle(r.person.id) }}>
+              <Checkbox state={r.person?.id ? sel.isSelected(r.person.id) : 'none'} />
+            </div>
+            <div style={{ width: 38, height: 38, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(r.person?.full_name || '?')}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person?.full_name || 'Unknown'}</div>
+                <span className="pill" style={EI_STATUS_MAP[r.status || 'interested']?.pill}>{EI_STATUS_MAP[r.status || 'interested']?.label}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: r.person?.phone ? 'var(--muted)' : '#B5532F', marginTop: 2 }}>{r.person?.phone || 'no phone'}</div>
+              {showEventCol && r.activity && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{r.activity.name}</div>}
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{availLabel(r, daysByEvent)}</div>
+            </div>
+          </div>
         ))}
+
+        {/* Desktop grid rows */}
+        {!loading && !isPhone && shown.map((r, i) => (
+          <div key={r.id} className="rowhover" onClick={() => setSelected(r)}
+            style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '12px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', cursor: 'pointer', background: selected?.id === r.id ? '#FBF1E6' : undefined }}>
+            <div onClick={(e) => { e.stopPropagation(); r.person?.id && sel.toggle(r.person.id) }}>
+              <Checkbox state={r.person?.id ? sel.isSelected(r.person.id) : 'none'} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
+              <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(r.person?.full_name || '?')}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person?.full_name || 'Unknown'}</div>
+            </div>
+            <div style={{ fontSize: 12.5, color: r.person?.phone ? 'var(--ink-soft)' : '#B5532F' }}>{r.person?.phone || 'no phone'}</div>
+            <div><span className="pill" style={EI_STATUS_MAP[r.status || 'interested']?.pill}>{EI_STATUS_MAP[r.status || 'interested']?.label}</span></div>
+            {showEventCol && <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.activity?.name || '—'}</div>}
+            <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{availLabel(r, daysByEvent)}</div>
+          </div>
+        ))}
+
+        {!loading && total > 0 && (
+          <PagerBar page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
+        )}
       </div>
 
       {selected && (
-        <InterestDetail r={selected} isCoordinator={isCoordinator} days={daysByEvent[selected.activity?.id] || []}
-          onClose={() => setSelected(null)} onAction={(to) => changeStatus(selected, to)}
-          onAvailability={(d) => saveAvailability(selected, d)} onSaveNote={(n) => saveNote(selected, n)} />
+        <InterestDetail
+          r={selected}
+          isCoordinator={isCoordinator}
+          days={daysByEvent[selected.activity?.id] || []}
+          onClose={() => setSelected(null)}
+          onAction={(to) => changeStatus(selected, to)}
+          onAvailability={(d) => saveAvailability(selected, d)}
+          onSaveNote={(n) => saveNote(selected, n)}
+        />
+      )}
+
+      {showCampaign && (
+        <CampaignForm
+          audience="volunteer"
+          personIds={campaignIds}
+          eventId={campaignEventId}
+          segmentLabel={
+            campaignIds.length
+              ? `${campaignIds.length} interest${campaignIds.length !== 1 ? 's' : ''}${activeEvent ? ` · ${activeEvent.name}` : ''}`
+              : activeEvent ? `${activeEvent.name} — all interests` : 'Event interests'
+          }
+          onClose={() => setShowCampaign(false)}
+          onToast={onToast}
+          onCreated={() => sel.clear()}
+        />
       )}
     </>
   )
 }
 
-// List row — name, phone, status badge. Nothing else. Tap opens the detail panel.
-function InterestListRow({ r, i, onOpen }) {
-  const status = r.status || 'interested'
-  return (
-    <div className="rowhover tap44" onClick={onOpen} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderBottom: '1px solid #F1E9DB', cursor: 'pointer' }}>
-      <div style={{ width: 32, height: 32, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(r.person?.full_name || '?')}</div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.person?.full_name || 'Unknown'}</div>
-        <div style={{ fontSize: 11.5, color: r.person?.phone ? 'var(--muted)' : '#B5532F' }}>{r.person?.phone || 'no phone'}</div>
-      </div>
-      <span className="pill" style={{ ...EI_STATUS_MAP[status]?.pill, flexShrink: 0 }}>{EI_STATUS_MAP[status]?.label}</span>
-    </div>
-  )
-}
-
-// Detail panel — full record: contact info, event, status actions, availability
-// multi-select, comments. Every status change and edit happens here, not on the row.
 function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailability, onSaveNote }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState(r.note || '')
