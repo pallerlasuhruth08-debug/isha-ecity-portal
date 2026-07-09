@@ -33,6 +33,7 @@ export default function Admin({ me, onToast }) {
   const tabs = [
     { k: 'users', label: 'Users & Roles' },
     { k: 'roles', label: 'Roles' },
+    { k: 'todos', label: 'To-do Templates' },
     { k: 'centres', label: 'Centres' },
     { k: 'pincodes', label: 'Pincode → Centre' },
   ]
@@ -52,9 +53,89 @@ export default function Admin({ me, onToast }) {
       </div>
       {tab === 'users' && <UsersRoles onToast={onToast} />}
       {tab === 'roles' && <RolesManager onToast={onToast} />}
+      {tab === 'todos' && <TodoTemplates onToast={onToast} />}
       {tab === 'centres' && <Centres onToast={onToast} />}
       {tab === 'pincodes' && <Pincodes onToast={onToast} />}
     </Pad>
+  )
+}
+
+// Per event-TYPE to-do checklist. Seeded onto each new event of that type (due date =
+// event day + offset), then editable per event. Admin-managed (RLS: admin-only write).
+const TT_ACTIONS = [['', '— none —'], ['campaign', 'Campaign'], ['interest', 'Interest'], ['attendance', 'Attendance'], ['team', 'Team']]
+function TodoTemplates({ onToast }) {
+  const [types, setTypes] = useState(null)
+  const [typeId, setTypeId] = useState('')
+  const [rows, setRows] = useState([])
+  const [text, setText] = useState('')
+  const [offset, setOffset] = useState(0)
+  const [action, setAction] = useState('')
+  const [busy, setBusy] = useState(false)
+  const fld = { fontSize: 13, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)' }
+
+  useEffect(() => {
+    supabase.from('activity_types').select('id, label, kind, active').order('label')
+      .then(({ data }) => { const t = (data || []).filter((x) => x.active !== false); setTypes(t); setTypeId((cur) => cur || t[0]?.id || '') })
+  }, [])
+
+  const load = useCallback(async () => {
+    if (!typeId) { setRows([]); return }
+    const { data } = await supabase.from('todo_templates').select('*').eq('activity_type_id', typeId).order('sort_order').order('created_at')
+    setRows(data || [])
+  }, [typeId])
+  useEffect(() => { load() }, [load])
+
+  async function add() {
+    const t = text.trim(); if (!t || !typeId) return
+    setBusy(true)
+    const nextOrder = rows.length ? Math.max(...rows.map((r) => r.sort_order || 0)) + 1 : 0
+    const { error } = await supabase.from('todo_templates').insert({ activity_type_id: typeId, text: t, day_offset: Number(offset) || 0, action_kind: action || null, sort_order: nextOrder })
+    setBusy(false)
+    if (error) return onToast('Could not add: ' + error.message)
+    setText(''); setOffset(0); setAction(''); load()
+  }
+  async function patch(id, p) { const { error } = await supabase.from('todo_templates').update(p).eq('id', id); if (error) return onToast('Could not update: ' + error.message); load() }
+  async function del(r) { if (!window.confirm(`Delete template item “${r.text}”?`)) return; const { error } = await supabase.from('todo_templates').delete().eq('id', r.id); if (error) return onToast('Could not delete: ' + error.message); load() }
+
+  if (types === null) return <Loading label="Loading…" />
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
+        Per event-type checklist. When an event of this type is created, these items are copied onto its Planning to-do list (due date = event day + offset), then editable per event.
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#5C5142', display: 'block', marginBottom: 5 }}>Event type</span>
+        <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={{ ...fld, minWidth: 240 }}>
+          {types.length === 0 && <option value="">— no activity types —</option>}
+          {types.map((t) => <option key={t.id} value={t.id}>{t.label}{t.kind === 'meditator' ? ' · participant' : ''}</option>)}
+        </select>
+      </div>
+      {rows.length === 0 ? <Empty label="No template items for this type yet." /> : (
+        <div className="card" style={{ padding: 12, marginBottom: 14 }}>
+          {rows.map((r) => (
+            <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid #F4EEE2', flexWrap: 'wrap' }}>
+              <input defaultValue={r.text} key={r.text} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== r.text) patch(r.id, { text: v }) }} style={{ flex: 1, minWidth: 140, border: 'none', outline: 'none', fontSize: 13.5, background: 'transparent', color: 'var(--ink)', fontFamily: 'inherit' }} />
+              <label style={{ fontSize: 11.5, color: 'var(--muted)' }}>day <input type="number" defaultValue={r.day_offset} key={'o' + r.day_offset} onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== r.day_offset) patch(r.id, { day_offset: v }) }} style={{ width: 58, ...fld, padding: '3px 6px', marginLeft: 4 }} /></label>
+              <select value={r.action_kind || ''} onChange={(e) => patch(r.id, { action_kind: e.target.value || null })} style={{ ...fld, padding: '4px 7px', fontSize: 11.5 }}>
+                {TT_ACTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              <button onClick={() => del(r)} style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Delete</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#5C5142', display: 'block', marginBottom: 5 }}>New template item</span>
+          <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder="e.g. Confirm hall booking" style={{ ...fld, width: '100%' }} />
+        </div>
+        <label style={{ fontSize: 11.5, color: 'var(--muted)' }}>Day offset<br /><input type="number" value={offset} onChange={(e) => setOffset(e.target.value)} title="Days relative to the event day (negative = before)" style={{ width: 84, ...fld }} /></label>
+        <select value={action} onChange={(e) => setAction(e.target.value)} style={fld}>
+          {TT_ACTIONS.map(([v, l]) => <option key={v} value={v}>{v ? `Action: ${l}` : 'No action'}</option>)}
+        </select>
+        <button className="btn btn-primary" disabled={busy || !text.trim() || !typeId} onClick={add} style={{ fontSize: 13, padding: '9px 16px' }}>Add</button>
+      </div>
+    </div>
   )
 }
 

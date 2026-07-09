@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { pill } from '../lib/ui'
-import { eventDays, currentPhase, phaseTone, rangeLabel, todayISO } from '../lib/planning'
+import { eventDays, currentPhase, phaseTone, rangeLabel, todayISO, seriesDatesUpTo, addDaysISO } from '../lib/planning'
 
 // Shared event-list UI used by BOTH the Attendance and Planning pages. Identical
 // layout; the PAGE supplies onOpen (its own detail) — the two never share a detail.
@@ -75,7 +75,7 @@ export default function EventList({ events, phasesByEvent = {}, onOpen, right = 
 // Bare month grid (no overlay) — reused by the page-level calendar panel AND the
 // utility drawer's Calendar tab. Clicking an event calls onOpen; clicking a day
 // (when onCreateDay is provided) calls onCreateDay(dayISO).
-export function MonthGrid({ events, phasesByEvent = {}, onOpen, onCreateDay, compact = false, headerRight = null }) {
+export function MonthGrid({ events, phasesByEvent = {}, series = [], onOpen, onOpenProjected, onCreateDay, compact = false, headerRight = null }) {
   const now = new Date()
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() })
   const first = new Date(ym.y, ym.m, 1)
@@ -84,11 +84,33 @@ export function MonthGrid({ events, phasesByEvent = {}, onOpen, onCreateDay, com
   const monthLabel = first.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
   const t = todayISO()
 
+  const monthStart = `${ym.y}-${String(ym.m + 1).padStart(2, '0')}-01`
+  const monthEnd = `${ym.y}-${String(ym.m + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
+
   const byDay = useMemo(() => {
     const map = {}
     for (const e of events) for (const d of eventDays(e.start_date || e.activity_date, e.end_date)) (map[d] ||= []).push(e)
     return map
   }, [events])
+
+  // Project occurrences of recurring series that are NOT yet materialized as rows,
+  // within the visible month. These render as lighter "ghost" entries; opening one
+  // materializes it on demand (onOpenProjected). Skip dates that already have a real row.
+  const projectedByDay = useMemo(() => {
+    if (!series?.length) return {}
+    const have = new Set(events.filter((e) => e.series_id).map((e) => `${e.series_id}|${e.activity_date}`))
+    const map = {}
+    for (const s of series) {
+      for (const d of seriesDatesUpTo(s, monthEnd)) {
+        if (d < monthStart || d > monthEnd || have.has(`${s.id}|${d}`)) continue
+        for (const day of eventDays(d, addDaysISO(d, s.span_days || 0))) {
+          if (day < monthStart || day > monthEnd) continue
+          ;(map[day] ||= []).push({ id: `ghost:${s.id}:${d}`, name: s.name, _series: s, _date: d, projected: true })
+        }
+      }
+    }
+    return map
+  }, [series, events, monthStart, monthEnd])
 
   const cells = []
   for (let i = 0; i < startWeekday; i++) cells.push(null)
@@ -113,13 +135,25 @@ export function MonthGrid({ events, phasesByEvent = {}, onOpen, onCreateDay, com
         {cells.map((d, i) => (
           <div key={i} onClick={() => d && onCreateDay && onCreateDay(d)} style={{ background: d === t ? '#FBF1E6' : '#fff', minHeight: compact ? 58 : 84, padding: 4, cursor: d && onCreateDay ? 'pointer' : 'default', display: 'flex', flexDirection: 'column', gap: 2 }}>
             {d && <div style={{ fontSize: 10, fontWeight: d === t ? 700 : 500, color: d === t ? 'var(--orange)' : 'var(--muted-2)' }}>{Number(d.slice(-2))}</div>}
-            {(byDay[d] || []).slice(0, cap).map((e) => {
-              const tone = phaseTone(currentPhase(e, phasesByEvent[e.id]).kind)
+            {(() => {
+              const items = [...(byDay[d] || []), ...(projectedByDay[d] || [])]
               return (
-                <div key={e.id} onClick={(ev) => { ev.stopPropagation(); onOpen && onOpen(e.id) }} title={e.name} style={{ fontSize: 9.5, fontWeight: 600, background: tone.bg, color: tone.fg, borderRadius: 4, padding: '1px 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>{e.name}</div>
+                <>
+                  {items.slice(0, cap).map((e) => {
+                    if (e.projected) {
+                      return (
+                        <div key={e.id} onClick={(ev) => { ev.stopPropagation(); onOpenProjected && onOpenProjected(e._series, e._date) }} title={`${e.name} · repeats (click to open)`} style={{ fontSize: 9.5, fontWeight: 600, background: 'transparent', color: 'var(--muted-2)', border: '1px dashed var(--border)', borderRadius: 4, padding: '0px 3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>↻ {e.name}</div>
+                      )
+                    }
+                    const tone = phaseTone(currentPhase(e, phasesByEvent[e.id]).kind)
+                    return (
+                      <div key={e.id} onClick={(ev) => { ev.stopPropagation(); onOpen && onOpen(e.id) }} title={e.name} style={{ fontSize: 9.5, fontWeight: 600, background: tone.bg, color: tone.fg, borderRadius: 4, padding: '1px 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>{e.name}</div>
+                    )
+                  })}
+                  {items.length > cap && <div style={{ fontSize: 9, color: 'var(--muted-2)' }}>+{items.length - cap}</div>}
+                </>
               )
-            })}
-            {(byDay[d] || []).length > cap && <div style={{ fontSize: 9, color: 'var(--muted-2)' }}>+{byDay[d].length - cap}</div>}
+            })()}
           </div>
         ))}
       </div>

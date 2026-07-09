@@ -3,8 +3,8 @@ import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
-import WalkinCapture from '../components/WalkinCapture'
 import { ensureParticipation } from '../lib/volunteers'
+import CommentThread from '../components/CommentThread'
 import { fetchActivityTypes } from '../lib/activityTypes'
 import { fmtDay, groupPhases } from '../lib/planning'
 import { ensureSeriesWindow } from '../lib/series'
@@ -90,75 +90,21 @@ export default function Events({ me, isCoordinator = false, onToast, openEventId
 
 export function Detail({ activity, onBack, me, isCoordinator, types = [], onActivityChanged, onToast, embedded = false }) {
   const [attendees, setAttendees] = useState(null)
-  const [blocks, setBlocks] = useState([]) // this event's blocks — attendance inherits the block's type
   const [err, setErr] = useState(null)
-  const [q, setQ] = useState('')
-  const [debouncedQ, setDebouncedQ] = useState('')
-  const [results, setResults] = useState([])
-  const [markBlockId, setMarkBlockId] = useState('') // which block the walk-in attended (its type is inherited)
-  const [busy, setBusy] = useState(false)
-  const [capturing, setCapturing] = useState(false)
-  const [creating, setCreating] = useState(false) // Create Attendance (date + centre + type) form
   const [typeChange, setTypeChange] = useState(null) // { newId } — keep-vs-propagate prompt
   const [busyAction, setBusyAction] = useState(false)
-  const searchSeq = useRef(0)
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
-      const [att, bl] = await Promise.all([
-        supabase.from('attendance')
-          .select('id, person_id, time_in, activity_type_id, block_id, person:people!attendance_person_id_fkey(full_name)')
-          .eq('activity_id', activity.id).order('time_in', { ascending: false }),
-        supabase.from('activity_blocks').select('id, heading, activity_type_id').eq('activity_id', activity.id).order('created_at'),
-      ])
-      if (att.error) throw att.error
-      setAttendees(att.data || [])
-      setBlocks(bl.data || [])
+      const { data, error } = await supabase.from('attendance')
+        .select('id, person_id').eq('activity_id', activity.id)
+      if (error) throw error
+      setAttendees(data || [])
     } catch (e) {
       setErr(e.message || String(e))
     }
-  }
-  useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity.id])
-
-  // Debounce the mark-present search (~300ms) + cancel stale responses.
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim()), 300)
-    return () => clearTimeout(t)
-  }, [q])
-  useEffect(() => {
-    if (debouncedQ.length < 2) { setResults([]); return }
-    const seq = ++searchSeq.current
-    supabase.from('people').select('id, full_name, phone').ilike('full_name', `%${debouncedQ}%`).limit(8)
-      .then(({ data }) => { if (seq === searchSeq.current) setResults(data || []) })
-  }, [debouncedQ])
-
-  // The attendee's activity type is INHERITED from the chosen block (or the event
-  // type when no blocks). It is never picked independently.
-  const markBlock = blocks.find((b) => b.id === markBlockId) || null
-  const markTypeId = markBlock ? (markBlock.activity_type_id || null) : (activity.activity_type_id || null)
-
-  async function addAttendee(p) {
-    setBusy(true)
-    try {
-      const typeId = markTypeId
-      const { error } = await supabase.from('attendance').insert({ activity_id: activity.id, person_id: p.id, activity_type_id: typeId, block_id: markBlockId || null })
-      if (error) throw error
-      const kind = types.find((t) => t.id === typeId)?.kind || 'volunteer'
-      await ensureParticipation(p.id, kind, { source: 'event_attendance' })
-      setQ('')
-      setResults([])
-      onToast(`${p.full_name} marked present — confirmed as ${kind}.`)
-      load()
-    } catch (e) {
-      onToast('Could not mark present: ' + (e.message || e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
+  useEffect(() => { load() }, [load])
 
   const resolved = (attendees || []).filter((r) => r.person_id)
   const unresolvedCount = (attendees || []).filter((r) => !r.person_id).length
@@ -200,129 +146,44 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
         </div>
       )}
 
-      <div className="card" style={{ padding: 24, marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ minWidth: 0 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>{activity.name}{activity.archived_at && <span className="pill" style={{ ...pill('#F1EADD', '#8C7E6B'), marginLeft: 10, verticalAlign: 'middle' }}>archived</span>}</h2>
-            <div style={{ fontSize: 13, color: 'var(--muted)' }}>{fmtDate(activity.activity_date)} · {activity.center_id}</div>
+      {/* Header (name/date/event-type) only on the standalone page — in the Event
+          Hub the hub header already shows all this, so it's redundant there. */}
+      {!embedded && (
+        <div className="card" style={{ padding: 24, marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 0 }}>
+              <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>{activity.name}{activity.archived_at && <span className="pill" style={{ ...pill('#F1EADD', '#8C7E6B'), marginLeft: 10, verticalAlign: 'middle' }}>archived</span>}</h2>
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>{fmtDate(activity.activity_date)} · {activity.center_id}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#5C5142' }}>Activity type</span>
+            <select value={activity.activity_type_id || ''} disabled={!isCoordinator || busyAction} onChange={(e) => onTypeSelect(e.target.value)}
+              style={{ fontSize: 13, padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)' }}>
+              <option value="">— none —</option>
+              {types.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
           </div>
         </div>
-
-        {/* activity type — the shared vocabulary; attendees inherit this id.
-            Changing it while attendance exists prompts keep-vs-propagate. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#5C5142' }}>Activity type</span>
-          <select
-            value={activity.activity_type_id || ''}
-            disabled={!isCoordinator || busyAction}
-            onChange={(e) => onTypeSelect(e.target.value)}
-            style={{ fontSize: 13, padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)' }}
-          >
-            <option value="">— none —</option>
-            {types.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-          </select>
-        </div>
-      </div>
+      )}
 
       {err && <ErrorCard>{err}</ErrorCard>}
 
       <div>
         {/* attendance (show/no-show + walk-ins only — no to-dos here) */}
         <div className="card" style={{ padding: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Attendance</h3>
-            <span className="pill" style={pill('#EAF2E5', '#4E7C3F')}>{attCount} present</span>
-          </div>
-
-          {isCoordinator && (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-              <button className="btn btn-primary" style={{ flex: 1, minWidth: 150, padding: '11px', fontSize: 14 }} onClick={() => setCreating(true)}>
-                ＋ Create attendance
-              </button>
-              <button className="btn btn-ghost" style={{ flex: 1, minWidth: 150, padding: '11px', fontSize: 14 }} onClick={() => setCapturing(true)}>
-                + Capture walk-in
-              </button>
-            </div>
-          )}
           {unresolvedCount > 0 && (
             <div style={{ fontSize: 12.5, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 9, padding: '8px 11px', marginBottom: 12 }}>
               {unresolvedCount} unresolved walk-in{unresolvedCount > 1 ? 's' : ''} — resolve in the <strong>Unresolved</strong> queue.
             </div>
           )}
-
-          {/* The attendee's activity type is INHERITED from the block they attended
-              (setup block → setup, etc.) — never picked independently. */}
-          {blocks.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Attending</span>
-              <select value={markBlockId} onChange={(e) => setMarkBlockId(e.target.value)} style={{ fontSize: 12.5, padding: '6px 9px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: 'var(--ink)', cursor: 'pointer' }}>
-                <option value="">— event (no block) —</option>
-                {blocks.map((b) => <option key={b.id} value={b.id}>{b.heading}{b.activity_type_id ? ` · ${typeLabel(b.activity_type_id)}` : ''}</option>)}
-              </select>
-              <span style={{ fontSize: 11, color: 'var(--muted-2)' }}>type: <TypeBadge typeId={markTypeId} types={types} /></span>
-            </div>
-          )}
-          <div style={{ position: 'relative', marginBottom: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: '8px 12px' }}>
-              {Icon.search(15)}
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a person to mark present…" style={{ border: 'none', outline: 'none', fontSize: 13, fontFamily: 'inherit', background: 'transparent', width: '100%' }} />
-            </div>
-            {results.length > 0 && (
-              <div className="card" style={{ position: 'absolute', top: 44, left: 0, right: 0, zIndex: 20, boxShadow: 'var(--shadow-lg)', padding: 6 }}>
-                {results.map((p) => (
-                  <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', borderRadius: 8, cursor: 'pointer' }} onClick={() => addAttendee(p)}>
-                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>{initials(p.full_name)}</div>
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>{p.full_name}</div>
-                    <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--orange)', fontWeight: 600 }}>{busy ? '…' : '+ present'}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {attendees === null ? (
-            <Loading label="Loading attendance…" />
-          ) : resolved.length === 0 ? (
-            <Empty label="No one marked present yet." />
-          ) : (
-            resolved.map((r, i) => (
-              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid #F4EEE2' }}>
-                <div style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>{initials(r.person?.full_name || '?')}</div>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{r.person?.full_name || 'Unknown'}</div>
-                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <TypeBadge typeId={r.activity_type_id} types={types} />
-                  <span className="pill" style={pill('#EAF2E5', '#4E7C3F')}>Present</span>
-                </div>
-              </div>
-            ))
-          )}
+          <AttendanceSessions activity={activity} types={types} me={me} onToast={onToast} onChanged={load} />
         </div>
       </div>
 
       {/* Attendance for planned volunteers — marked HERE (show/no-show). The
           staffing/vacate/backfill logic lives on Planning, which reflects these marks. */}
-      <PlannedVolunteers activityId={activity.id} isCoordinator={isCoordinator} me={me} onToast={onToast} />
-
-      {capturing && (
-        <WalkinCapture
-          activity={activity}
-          me={me}
-          onClose={() => setCapturing(false)}
-          onChanged={load}
-          onToast={onToast}
-        />
-      )}
-
-      {creating && (
-        <CreateAttendanceForm
-          activity={activity}
-          types={types}
-          me={me}
-          onClose={() => setCreating(false)}
-          onChanged={load}
-          onToast={onToast}
-        />
-      )}
+      <PlannedVolunteers activityId={activity.id} eventDate={activity.start_date || activity.activity_date} isCoordinator={isCoordinator} me={me} onToast={onToast} />
 
       {/* Type-change keep-vs-propagate prompt (attendance present). */}
       {typeChange && (
@@ -345,16 +206,76 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
   )
 }
 
-// Create Attendance — capture presence on a specific DATE (within the event span)
-// at a CENTRE (location only, never reassigns the person's owning centre), tagged
-// with a SHARED activity_type. Add multiple people under one context; run again
-// for another date. The activity_type_id flows to each volunteer's history +
-// drives the Volunteers activity-type filter (same-activity targeting).
-function CreateAttendanceForm({ activity, types = [], me, onClose, onChanged, onToast }) {
+// ATTENDANCE SESSIONS — an event has many. Each session is one (type, date, centre,
+// activity_type); it lists on the event's Attendance tab and opens to capture people.
+const daysBetween = (a, b) => Math.round((new Date(a) - new Date(b)) / 86400000)
+const addDays = (iso, n) => { const d = new Date(iso); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
+
+function AttendanceSessions({ activity, types = [], me, onToast, onChanged }) {
+  const [sessions, setSessions] = useState(null)
+  const [counts, setCounts] = useState({})
+  const [openId, setOpenId] = useState(null)
+  const [creating, setCreating] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const load = useCallback(async () => {
+    setErr(null)
+    const { data, error } = await supabase.from('attendance_sessions')
+      .select('id, title, type, session_date, center_id, activity_type_id')
+      .eq('activity_id', activity.id).order('session_date').order('created_at')
+    if (error) { setErr(error.message); setSessions([]); return }
+    setSessions(data || [])
+    const { data: att } = await supabase.from('attendance').select('session_id').eq('activity_id', activity.id).not('session_id', 'is', null)
+    const c = {}; (att || []).forEach((r) => { c[r.session_id] = (c[r.session_id] || 0) + 1 })
+    setCounts(c)
+    onChanged?.()
+  }, [activity.id, onChanged])
+  useEffect(() => { load() }, [load])
+
+  const typeLabel = (id) => types.find((t) => t.id === id)?.label
+
+  if (openId && sessions) {
+    const s = sessions.find((x) => x.id === openId)
+    if (s) return <SessionCapture session={s} activity={activity} types={types} me={me} typeLabel={typeLabel} onBack={() => { setOpenId(null); load() }} onToast={onToast} />
+  }
+
+  return (
+    <div>
+      {err && <ErrorCard>{err}</ErrorCard>}
+      {!sessions ? <Loading label="Loading sessions…" /> : sessions.length === 0 ? (
+        <Empty label="No attendance sessions yet — create one below." />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          {sessions.map((s) => (
+            <div key={s.id} className="rowhover" onClick={() => setOpenId(s.id)}
+              style={{ cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: '#fff' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{s.title || typeLabel(s.activity_type_id) || 'Attendance'}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtDay(s.session_date)} · {s.center_id || '—'}{s.activity_type_id ? ` · ${typeLabel(s.activity_type_id)}` : ''}</div>
+              </div>
+              <span className="pill" style={s.type === 'meditator' ? pill('#E9F0EF', '#2F6E5E') : pill('#F6E8D8', '#C2691F')}>{s.type === 'meditator' ? 'participant' : 'volunteer'}</span>
+              <span className="pill" style={pill('#EAF2E5', '#4E7C3F')}>{counts[s.id] || 0} present</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <button className="btn btn-primary" style={{ width: '100%', padding: '11px', fontSize: 14 }} onClick={() => setCreating(true)}>＋ Create Attendance</button>
+      {creating && (
+        <CreateSessionForm activity={activity} types={types} me={me} onClose={() => setCreating(false)}
+          onCreated={(id) => { setCreating(false); load(); setOpenId(id) }} onToast={onToast} />
+      )}
+    </div>
+  )
+}
+
+const _lbl = { fontSize: 12, fontWeight: 600, color: '#5C5142', display: 'block', marginBottom: 5 }
+const _fld = { fontSize: 13, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)', width: '100%' }
+
+export function CreateSessionForm({ activity, types = [], me, onClose, onCreated, onToast }) {
   const spanStart = activity.start_date || activity.activity_date
   const spanEnd = activity.end_date || activity.start_date || activity.activity_date
   const today = new Date().toISOString().slice(0, 10)
-  const [kind, setKind] = useState('volunteer') // volunteer | meditator (= participant)
+  const [kind, setKind] = useState('volunteer')
   const [date, setDate] = useState(today >= spanStart && today <= spanEnd ? today : spanStart)
   const [centre, setCentre] = useState(activity.center_id || '')
   const [centres, setCentres] = useState([])
@@ -362,33 +283,37 @@ function CreateAttendanceForm({ activity, types = [], me, onClose, onChanged, on
   const [typeId, setTypeId] = useState('')
   const [newType, setNewType] = useState('')
   const [addingType, setAddingType] = useState(false)
-  const [q, setQ] = useState('')
-  const [results, setResults] = useState([])
-  const [added, setAdded] = useState([])
+  const [title, setTitle] = useState('')
+  const [titleEdited, setTitleEdited] = useState(false)
+  const [earliestPhase, setEarliestPhase] = useState(null)
+  const [confirmedFar, setConfirmedFar] = useState(false)
+  const [confirmedFuture, setConfirmedFuture] = useState(false)
   const [busy, setBusy] = useState(false)
-  const seq = useRef(0)
 
   useEffect(() => {
     supabase.from('centers').select('id, name, active').order('name')
       .then(({ data }) => setCentres((data || []).filter((c) => c.active && !['all', 'unassigned'].includes(c.id))))
-  }, [])
+    supabase.from('event_phases').select('start_by').eq('activity_id', activity.id).not('start_by', 'is', null).order('start_by').limit(1)
+      .then(({ data }) => setEarliestPhase(data?.[0]?.start_by || null))
+  }, [activity.id])
 
   const allTypes = [...types, ...localTypes]
   const typeOpts = allTypes.filter((t) => (t.kind || 'volunteer') === kind && t.active !== false)
   useEffect(() => { if (typeId && !typeOpts.some((t) => t.id === typeId)) setTypeId('') }, [kind]) // eslint-disable-line
 
-  useEffect(() => {
-    const h = setTimeout(async () => {
-      const term = q.trim()
-      if (term.length < 2) { setResults([]); return }
-      const s = ++seq.current
-      const { data } = await supabase.from('people').select('id, full_name, phone').ilike('full_name', `%${term}%`).limit(8)
-      if (s === seq.current) setResults(data || [])
-    }, 300)
-    return () => clearTimeout(h)
-  }, [q])
+  const autoTitle = `${allTypes.find((t) => t.id === typeId)?.label || 'Attendance'} — ${fmtDay(date)}`
+  const effTitle = titleEdited && title.trim() ? title.trim() : autoTitle
 
-  const dateOk = date >= spanStart && date <= spanEnd
+  // Soft window: from 1 day before the event start (or the earliest planned phase,
+  // whichever is earlier) through the event end. Outside is allowed but warns.
+  const startMinus1 = addDays(spanStart, -1)
+  const windowStart = earliestPhase && earliestPhase < startMinus1 ? earliestPhase : startMinus1
+  const outside = date < windowStart || date > spanEnd
+  const nBefore = date < spanStart ? daysBetween(spanStart, date) : 0
+  const nAfter = date > spanEnd ? daysBetween(date, spanEnd) : 0
+  // The activity day hasn't arrived yet — soft-warn against recording attendance early.
+  const isFuture = date > today
+  const nFuture = isFuture ? daysBetween(date, today) : 0
 
   async function createType() {
     const label = newType.trim()
@@ -397,45 +322,38 @@ function CreateAttendanceForm({ activity, types = [], me, onClose, onChanged, on
     try {
       const { data, error } = await supabase.from('activity_types').insert({ label, kind }).select('id, label, kind, active').single()
       if (error) throw error
-      setLocalTypes((l) => [...l, data])
-      setTypeId(data.id); setNewType(''); setAddingType(false)
+      setLocalTypes((l) => [...l, data]); setTypeId(data.id); setNewType(''); setAddingType(false)
       onToast(`Activity type "${label}" added — reusable everywhere.`)
     } catch (e) { onToast('Could not add type: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
-  async function add(p) {
-    if (!typeId) return onToast('Pick an activity type first.')
-    if (!dateOk) return onToast(`Pick a date within ${fmtDay(spanStart)}–${fmtDay(spanEnd)}.`)
+  async function create() {
+    if (!typeId) return onToast('Pick an activity type.')
+    if (outside && !confirmedFar) return
+    if (isFuture && !confirmedFuture) return
     setBusy(true)
     try {
-      const { error } = await supabase.from('attendance').insert({
-        activity_id: activity.id, person_id: p.id, activity_type_id: typeId,
-        attended_on: date, center_id: centre || activity.center_id || null,
-      })
+      const { data, error } = await supabase.from('attendance_sessions').insert({
+        activity_id: activity.id, title: effTitle, type: kind, session_date: date,
+        center_id: centre || activity.center_id || null, activity_type_id: typeId, created_by: me?.id || null,
+      }).select('id').single()
       if (error) throw error
-      await ensureParticipation(p.id, kind, { source: 'event_attendance' })
-      setAdded((a) => [{ id: p.id, name: p.full_name }, ...a.filter((x) => x.id !== p.id)])
-      setQ(''); setResults([])
-      onToast(`${p.full_name} — present on ${fmtDay(date)}.`)
-      onChanged()
-    } catch (e) { onToast('Could not add: ' + (e.message || e)) } finally { setBusy(false) }
+      onToast('Session created — capture attendance.')
+      onCreated(data.id)
+    } catch (e) { onToast('Could not create session: ' + (e.message || e)) } finally { setBusy(false) }
   }
-
-  const lbl = { fontSize: 12, fontWeight: 600, color: '#5C5142', display: 'block', marginBottom: 5 }
-  const fld = { fontSize: 13, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)', width: '100%' }
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
       <div className="card" style={{ width: 520, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 22, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Create attendance</h3>
+          <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Create attendance session</h3>
           <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={onClose}>✕ Close</button>
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16 }}>{activity.name} · {fmtDay(spanStart)}{spanEnd !== spanStart ? `–${fmtDay(spanEnd)}` : ''}</div>
 
-        {/* Volunteer / Participant */}
         <div style={{ marginBottom: 14 }}>
-          <span style={lbl}>They attended as</span>
+          <span style={_lbl}>They attended as</span>
           <div style={{ display: 'flex', gap: 8 }}>
             {[['volunteer', 'Volunteer'], ['meditator', 'Participant']].map(([k, label]) => (
               <button key={k} onClick={() => setKind(k)} style={{ flex: 1, padding: '9px', fontSize: 13, fontWeight: 600, borderRadius: 9, cursor: 'pointer',
@@ -446,32 +364,46 @@ function CreateAttendanceForm({ activity, types = [], me, onClose, onChanged, on
 
         <div style={{ display: 'flex', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 150 }}>
-            <span style={lbl}>Date</span>
-            <input type="date" value={date} min={spanStart} max={spanEnd} onChange={(e) => setDate(e.target.value)} style={{ ...fld, borderColor: dateOk ? 'var(--border)' : '#E7A08A' }} />
-            {!dateOk && <div style={{ fontSize: 11, color: '#B5532F', marginTop: 3 }}>Must be within the event span.</div>}
+            <span style={_lbl}>Date</span>
+            <input type="date" value={date} onChange={(e) => { setDate(e.target.value); setConfirmedFar(false); setConfirmedFuture(false) }} style={{ ..._fld, borderColor: outside || isFuture ? '#E7A08A' : 'var(--border)' }} />
           </div>
           <div style={{ flex: 1, minWidth: 150 }}>
-            <span style={lbl}>Centre <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· where it happened</span></span>
-            <select value={centre} onChange={(e) => setCentre(e.target.value)} style={fld}>
+            <span style={_lbl}>Centre <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· where it happened</span></span>
+            <select value={centre} onChange={(e) => setCentre(e.target.value)} style={_fld}>
               {!centres.some((c) => c.id === centre) && centre && <option value={centre}>{centre}</option>}
               {centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
             </select>
           </div>
         </div>
 
-        {/* Activity type from the shared vocabulary + inline create */}
-        <div style={{ marginBottom: 16 }}>
-          <span style={lbl}>Activity type <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· shared list</span></span>
+        {outside && (
+          <div style={{ fontSize: 12.5, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 9, padding: '9px 11px', marginBottom: 14 }}>
+            This date is {nBefore ? `${nBefore} day${nBefore > 1 ? 's' : ''} before the event start` : `${nAfter} day${nAfter > 1 ? 's' : ''} after the event end`} — confirm this is correct.
+            <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 7, cursor: 'pointer', fontWeight: 600 }}>
+              <input type="checkbox" checked={confirmedFar} onChange={(e) => setConfirmedFar(e.target.checked)} /> Yes, this date is intentional
+            </label>
+          </div>
+        )}
+        {isFuture && (
+          <div style={{ fontSize: 12.5, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 9, padding: '9px 11px', marginBottom: 14 }}>
+            This day hasn’t arrived yet — it’s {nFuture} day{nFuture > 1 ? 's' : ''} away. Normally you record attendance on the activity day, not before.
+            <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 7, cursor: 'pointer', fontWeight: 600 }}>
+              <input type="checkbox" checked={confirmedFuture} onChange={(e) => setConfirmedFuture(e.target.checked)} /> Record attendance ahead of the day anyway
+            </label>
+          </div>
+        )}
+
+        <div style={{ marginBottom: 14 }}>
+          <span style={_lbl}>Activity type <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· shared list</span></span>
           {addingType ? (
             <div style={{ display: 'flex', gap: 8 }}>
-              <input autoFocus value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="New activity type (e.g. Kitchen)"
-                onKeyDown={(e) => e.key === 'Enter' && createType()} style={fld} />
+              <input autoFocus value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="New activity type (e.g. Kitchen)" onKeyDown={(e) => e.key === 'Enter' && createType()} style={_fld} />
               <button className="btn btn-primary" disabled={busy || !newType.trim()} onClick={createType} style={{ fontSize: 12.5, padding: '8px 12px' }}>Add</button>
               <button className="btn btn-ghost" onClick={() => { setAddingType(false); setNewType('') }} style={{ fontSize: 12.5, padding: '8px 10px' }}>Cancel</button>
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 8 }}>
-              <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={fld}>
+              <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={_fld}>
                 <option value="">— pick {kind === 'meditator' ? 'participant' : 'volunteer'} activity —</option>
                 {typeOpts.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
               </select>
@@ -480,35 +412,235 @@ function CreateAttendanceForm({ activity, types = [], me, onClose, onChanged, on
           )}
         </div>
 
-        {/* Person search — adds each under the context above */}
-        <div style={{ position: 'relative', marginBottom: 10 }}>
-          <span style={lbl}>Mark people present</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: '8px 12px' }}>
-            {Icon.search(15)}
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a person…" style={{ border: 'none', outline: 'none', fontSize: 13, background: 'transparent', width: '100%' }} />
-          </div>
-          {results.length > 0 && (
-            <div className="card" style={{ position: 'absolute', top: 66, left: 0, right: 0, zIndex: 20, boxShadow: 'var(--shadow-lg)', padding: 6 }}>
-              {results.map((p) => (
-                <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', borderRadius: 8, cursor: busy ? 'default' : 'pointer' }} onClick={() => !busy && add(p)}>
-                  <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>{initials(p.full_name)}</div>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{p.full_name}</div>
-                  <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--orange)', fontWeight: 600 }}>{busy ? '…' : '+ present'}</span>
-                </div>
-              ))}
-            </div>
-          )}
+        <div style={{ marginBottom: 18 }}>
+          <span style={_lbl}>Title <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· optional</span></span>
+          <input value={titleEdited ? title : autoTitle} onChange={(e) => { setTitle(e.target.value); setTitleEdited(true) }} placeholder={autoTitle} style={_fld} />
         </div>
 
-        {added.length > 0 && (
-          <div style={{ marginTop: 6 }}>
-            <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 6 }}>Added on {fmtDay(date)} · {added.length}</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {added.map((a) => <span key={a.id} className="pill" style={pill('#EAF2E5', '#4E7C3F')}>{a.name}</span>)}
-            </div>
+        <button className="btn btn-primary" disabled={busy || !typeId || (outside && !confirmedFar) || (isFuture && !confirmedFuture)} onClick={create}
+          style={{ width: '100%', padding: '12px', fontSize: 14, opacity: busy || !typeId || (outside && !confirmedFar) || (isFuture && !confirmedFuture) ? 0.55 : 1 }}>
+          {busy ? 'Creating…' : 'Create & capture →'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Capture people into a session — resolve by name/phone, mark present. Each row
+// saves to the person's history with the session's type + activity_type.
+function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, onToast }) {
+  const [present, setPresent] = useState(null)
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [newP, setNewP] = useState(null) // { name, phone } — create-new mini form
+  const [centres, setCentres] = useState([])
+  const [localTypes, setLocalTypes] = useState([])
+  const [ovrType, setOvrType] = useState(session.activity_type_id || '')
+  const [ovrCentre, setOvrCentre] = useState(session.center_id || '')
+  const [addingType, setAddingType] = useState(false)
+  const [newType, setNewType] = useState('')
+  const [openComment, setOpenComment] = useState(null) // person_id whose comments are open
+  const [futureAck, setFutureAck] = useState(false)
+  const seq = useRef(0)
+  // This session's own date hasn't arrived yet — soft-warn before recording early.
+  const isFuture = session.session_date > new Date().toISOString().slice(0, 10)
+
+  useEffect(() => {
+    supabase.from('centers').select('id, name, active').order('name')
+      .then(({ data }) => setCentres((data || []).filter((c) => c.active && !['all', 'unassigned'].includes(c.id))))
+  }, [])
+
+  const allTypes = [...types, ...localTypes]
+  const typeOpts = allTypes.filter((t) => (t.kind || 'volunteer') === session.type && t.active !== false)
+  const nameOf = (id) => allTypes.find((t) => t.id === id)?.label
+
+  const load = useCallback(async () => {
+    const { data } = await supabase.from('attendance')
+      .select('id, person_id, activity_type_id, center_id, person:people!attendance_person_id_fkey(full_name, phone)')
+      .eq('session_id', session.id).order('time_in', { ascending: false })
+    setPresent(data || [])
+  }, [session.id])
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    const h = setTimeout(async () => {
+      const term = q.trim()
+      if (term.length < 2) { setResults([]); return }
+      const s = ++seq.current
+      const digits = term.replace(/\D/g, '')
+      const query = digits.length >= 4
+        ? supabase.from('people').select('id, full_name, phone').ilike('phone', `%${digits}%`).limit(8)
+        : supabase.from('people').select('id, full_name, phone').ilike('full_name', `%${term}%`).limit(8)
+      const { data } = await query
+      if (s === seq.current) setResults(data || [])
+    }, 300)
+    return () => clearTimeout(h)
+  }, [q])
+
+  const presentIds = new Set((present || []).map((p) => p.person_id))
+
+  async function createType() {
+    const label = newType.trim()
+    if (!label) return
+    setBusy(true)
+    try {
+      const { data, error } = await supabase.from('activity_types').insert({ label, kind: session.type }).select('id, label, kind, active').single()
+      if (error) throw error
+      setLocalTypes((l) => [...l, data]); setOvrType(data.id); setNewType(''); setAddingType(false)
+      onToast(`Activity type "${label}" added — reusable everywhere.`)
+    } catch (e) { onToast('Could not add type: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  async function mark(person) {
+    if (presentIds.has(person.id)) { onToast(`${person.full_name} already present.`); setQ(''); setResults([]); return }
+    if (isFuture && !futureAck) {
+      if (!window.confirm(`This session is dated ${fmtDay(session.session_date)}, which hasn’t arrived yet. You’re recording attendance before the activity day — continue?`)) return
+      setFutureAck(true)
+    }
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('attendance').insert({
+        session_id: session.id, activity_id: activity.id, person_id: person.id,
+        activity_type_id: ovrType || session.activity_type_id, attended_on: session.session_date,
+        center_id: ovrCentre || session.center_id,
+      })
+      if (error) throw error
+      await ensureParticipation(person.id, session.type, { source: 'event_attendance' })
+      setQ(''); setResults([]); setNewP(null); load()
+      onToast(`${person.full_name} — present${ovrType && ovrType !== session.activity_type_id ? ` · ${nameOf(ovrType)}` : ''}.`)
+    } catch (e) { onToast('Could not mark present: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  async function createAndMark() {
+    const name = (newP?.name || '').trim()
+    const phone = (newP?.phone || '').replace(/\D/g, '')
+    if (!name) return onToast('Enter a name.')
+    setBusy(true)
+    try {
+      let person = null
+      if (phone) { const { data } = await supabase.from('people').select('id, full_name, phone').eq('phone', phone).maybeSingle(); person = data || null }
+      if (!person) {
+        const { data, error } = await supabase.from('people').insert({ full_name: name, phone: phone || null }).select('id, full_name, phone').single()
+        if (error) throw error
+        person = data
+      }
+      await mark(person)
+    } catch (e) { onToast('Could not add person: ' + (e.message || e)); setBusy(false) }
+  }
+
+  // Remove a mis-marked row. Credit is derived from attendance rows, so deleting the
+  // row reverses that person's activity credit — no orphaned counter.
+  async function removeRow(r) {
+    if (!window.confirm(`Remove ${r.person?.full_name || 'this person'} from this session? Their activity credit for this reverses. This cannot be undone.`)) return
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('attendance').delete().eq('id', r.id)
+      if (error) throw error
+      onToast(`${r.person?.full_name || 'Attendance'} removed.`); load()
+    } catch (e) { onToast('Could not remove: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  const ovrDiffers = (r) => r.activity_type_id && r.activity_type_id !== session.activity_type_id
+
+  return (
+    <div>
+      <button className="btn btn-ghost" style={{ fontSize: 13, marginBottom: 12 }} onClick={onBack}>← All sessions</button>
+      <div className="card" style={{ padding: 14, marginBottom: 12, background: 'var(--panel)' }}>
+        <div style={{ fontSize: 15, fontWeight: 600 }}>{session.title || typeLabel?.(session.activity_type_id) || 'Attendance'}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{fmtDay(session.session_date)} · {session.center_id || '—'} · {session.type === 'meditator' ? 'participant' : 'volunteer'}{session.activity_type_id ? ` · ${typeLabel?.(session.activity_type_id)}` : ''}</div>
+        {isFuture && (
+          <div style={{ fontSize: 12, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 8, padding: '7px 10px', marginTop: 8 }}>
+            ⚠ This day hasn’t arrived yet — attendance is normally recorded on the activity day, not in advance.
           </div>
         )}
       </div>
+
+      {/* Per-person override: activity + centre applied to whoever you mark next
+          (defaults to the session's — change it only when someone did something else). */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div style={{ flex: 1, minWidth: 150 }}>
+          <span style={{ ..._lbl, marginBottom: 3, fontSize: 11 }}>Activity for next person</span>
+          {addingType ? (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input autoFocus value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="New activity type" onKeyDown={(e) => e.key === 'Enter' && createType()} style={_fld} />
+              <button className="btn btn-primary" disabled={busy || !newType.trim()} onClick={createType} style={{ fontSize: 12, padding: '7px 10px' }}>Add</button>
+              <button className="btn btn-ghost" onClick={() => { setAddingType(false); setNewType('') }} style={{ fontSize: 12, padding: '7px 9px' }}>✕</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <select value={ovrType} onChange={(e) => setOvrType(e.target.value)} style={_fld}>
+                <option value="">— session default —</option>
+                {typeOpts.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+              <button className="btn btn-ghost" onClick={() => setAddingType(true)} style={{ fontSize: 12, padding: '7px 10px', whiteSpace: 'nowrap' }}>＋ New</button>
+            </div>
+          )}
+        </div>
+        <div style={{ flex: 1, minWidth: 130 }}>
+          <span style={{ ..._lbl, marginBottom: 3, fontSize: 11 }}>Centre</span>
+          <select value={ovrCentre} onChange={(e) => setOvrCentre(e.target.value)} style={_fld}>
+            {!centres.some((c) => c.id === ovrCentre) && ovrCentre && <option value={ovrCentre}>{ovrCentre}</option>}
+            {centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ position: 'relative', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: '9px 12px' }}>
+          {Icon.search(15)}
+          <input value={q} onChange={(e) => { setQ(e.target.value); setNewP(null) }} placeholder="Name or phone…" style={{ border: 'none', outline: 'none', fontSize: 13, background: 'transparent', width: '100%' }} />
+        </div>
+        {q.trim().length >= 2 && (
+          <div className="card" style={{ position: 'absolute', top: 46, left: 0, right: 0, zIndex: 20, boxShadow: 'var(--shadow-lg)', padding: 6 }}>
+            {results.map((p) => (
+              <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', borderRadius: 8, cursor: busy ? 'default' : 'pointer' }} onClick={() => !busy && mark(p)}>
+                <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>{initials(p.full_name)}</div>
+                <div><div style={{ fontSize: 13, fontWeight: 500 }}>{p.full_name}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>{p.phone || 'no phone'}</div></div>
+                <span style={{ marginLeft: 'auto', fontSize: 12, color: presentIds.has(p.id) ? 'var(--muted)' : 'var(--orange)', fontWeight: 600 }}>{presentIds.has(p.id) ? 'present' : busy ? '…' : '+ present'}</span>
+              </div>
+            ))}
+            {newP ? (
+              <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <input autoFocus value={newP.name} onChange={(e) => setNewP({ ...newP, name: e.target.value })} placeholder="Full name" style={_fld} />
+                <input value={newP.phone} onChange={(e) => setNewP({ ...newP, phone: e.target.value })} placeholder="Phone (optional)" style={_fld} />
+                <button className="btn btn-primary" disabled={busy || !newP.name.trim()} onClick={createAndMark} style={{ fontSize: 12.5, padding: '8px' }}>Add & mark present</button>
+              </div>
+            ) : (
+              <div className="rowhover" style={{ padding: '8px 10px', borderRadius: 8, cursor: 'pointer', color: 'var(--orange)', fontWeight: 600, fontSize: 12.5 }}
+                onClick={() => setNewP({ name: /\d/.test(q) ? '' : q, phone: /\d/.test(q) ? q.replace(/\D/g, '') : '' })}>＋ Not listed — add new person</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {present === null ? <Loading label="Loading…" /> : present.length === 0 ? <Empty label="No one marked present yet." /> : (
+        <div>
+          <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 6 }}>{present.length} present</div>
+          {present.map((r, i) => (
+            <div key={r.id} style={{ padding: '9px 0', borderBottom: '1px solid #F4EEE2' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>{initials(r.person?.full_name || '?')}</div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{r.person?.full_name || 'Unknown'}</div>
+                  {ovrDiffers(r) && <div style={{ fontSize: 11, color: '#C2691F' }}>{nameOf(r.activity_type_id)}{r.center_id && r.center_id !== session.center_id ? ` · ${r.center_id}` : ''}</div>}
+                </div>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button onClick={() => setOpenComment(openComment === r.person_id ? null : r.person_id)} title="Comments" style={{ fontSize: 12.5, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>💬</button>
+                  <button disabled={busy} onClick={() => removeRow(r)} title="Remove this attendance" style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Remove</button>
+                </div>
+              </div>
+              {openComment === r.person_id && (
+                <div style={{ marginLeft: 40, marginTop: 4 }}>
+                  <CommentThread scope={{ activity_id: activity.id, subject_person_id: r.person_id }} me={me} onToast={onToast} compact />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button className="btn btn-primary" style={{ width: '100%', padding: '11px', fontSize: 14, marginTop: 14 }} onClick={onBack}>OK — done</button>
     </div>
   )
 }
@@ -646,8 +778,9 @@ function EditEventForm({ activity, me, onClose, onSaved, onToast }) {
 // Planned-volunteer ATTENDANCE — marked here (show / no-show). The staffing +
 // vacate/backfill logic lives on Planning and reflects these marks. Renders
 // nothing if the event has no activity blocks.
-function PlannedVolunteers({ activityId, isCoordinator, me, onToast }) {
+function PlannedVolunteers({ activityId, eventDate, isCoordinator, me, onToast }) {
   const [data, setData] = useState(undefined)
+  const [futureAck, setFutureAck] = useState(false)
   const load = useCallback(async () => {
     const { data: blocks } = await supabase.from('activity_blocks').select('id, heading, attendance_mode').eq('activity_id', activityId).order('created_at')
     const ids = (blocks || []).map((b) => b.id)
@@ -671,6 +804,14 @@ function PlannedVolunteers({ activityId, isCoordinator, me, onToast }) {
   // for the block — so span records ONE mark for the whole block, not one per day.
   async function markGroup(group, status) {
     const next = group.status === status ? 'assigned' : status
+    // Soft-warn when marking presence for a day that hasn't arrived yet. per_day uses the
+    // day being marked; span / involved_only credit the whole block, so use the event day.
+    // Clearing a mark (next === 'assigned') is always allowed without a warning.
+    const refDate = group.day || eventDate
+    if (next !== 'assigned' && refDate && refDate > new Date().toISOString().slice(0, 10) && !futureAck) {
+      if (!window.confirm(`${fmtDay(refDate)} hasn’t arrived yet. You’re marking attendance before the activity day — continue?`)) return
+      setFutureAck(true)
+    }
     const { error } = await supabase.from('block_assignments').update({ status: next, marked_by: me?.id || null, marked_at: new Date().toISOString() }).in('id', group.rows.map((r) => r.id))
     if (error) return onToast('Could not mark: ' + error.message)
     onToast(`Marked ${next === 'assigned' ? 'cleared' : next.replace('_', '-')}.`)

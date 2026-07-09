@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Loading, Empty } from './View'
 import { MonthGrid } from './EventList'
-import { fmtDay, groupPhases } from '../lib/planning'
+import { fmtDay, groupPhases, addDaysISO } from '../lib/planning'
+import { materializeOccurrence } from '../lib/series'
 
 // Utility drawer — SEPARATE from the left nav. Slides in from the RIGHT edge over
 // the current page (page state preserved). Tabs: Calendar (quick glance) + Notes.
@@ -31,29 +32,45 @@ export default function UtilityDrawer({ open, onClose, me, onOpenEvent, onCreate
 function CalendarTab({ onOpenEvent, onCreateEvent }) {
   const [events, setEvents] = useState(null)
   const [phasesByEvent, setPhasesByEvent] = useState({})
+  const [series, setSeries] = useState([])
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const [a, p] = await Promise.all([
-        supabase.from('activities').select('id, name, center_id, activity_date, start_date, end_date').is('archived_at', null),
+      const [a, p, s] = await Promise.all([
+        supabase.from('activities').select('id, name, center_id, activity_date, start_date, end_date, series_id').is('archived_at', null),
         supabase.from('event_phases').select('activity_id, kind, sort_order, start_by, finish_by'),
+        supabase.from('event_series').select('*'),
       ])
       if (!alive) return
       setEvents(a.data || [])
       setPhasesByEvent(groupPhases(p.data))
+      setSeries(s.data || [])
     })()
     return () => { alive = false }
   }, [])
+
+  // A projected (not-yet-materialized) occurrence was clicked: create the real row
+  // on demand, reflect it locally, then open it. Materialize is RLS-gated to
+  // coordinators — a non-coordinator gets null and we simply do nothing.
+  async function openProjected(s, dateISO) {
+    const id = await materializeOccurrence(s, dateISO)
+    if (!id) return
+    setEvents((prev) => (prev || []).some((e) => e.id === id) ? prev
+      : [...(prev || []), { id, name: s.name, center_id: s.center_id, activity_date: dateISO, start_date: dateISO, end_date: addDaysISO(dateISO, s.span_days || 0), series_id: s.id }])
+    onOpenEvent && onOpenEvent(id)
+  }
+
   if (!events) return <Loading label="Loading calendar…" />
   return (
     <>
       <MonthGrid
-        events={events} phasesByEvent={phasesByEvent} compact
+        events={events} phasesByEvent={phasesByEvent} series={series} compact
         onOpen={(id) => onOpenEvent && onOpenEvent(id)}
+        onOpenProjected={openProjected}
         onCreateDay={onCreateEvent ? (dayISO) => onCreateEvent(dayISO) : undefined}
       />
       <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--muted-2)' }}>
-        Click an event to open it{onCreateEvent ? ' · click a day to create one' : ''}.
+        Click an event to open it{onCreateEvent ? ' · click a day to create one' : ''}. Dashed ↻ entries are upcoming repeats — click to open.
       </div>
     </>
   )

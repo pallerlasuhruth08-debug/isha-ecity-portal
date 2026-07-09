@@ -8,6 +8,8 @@ import { fetchActivityTypes } from '../lib/activityTypes'
 import EventList from '../components/EventList'
 import { PlanningEvent } from './Planning'
 import { Detail as AttendanceDetail, EventActions } from './Events'
+import CommentThread from '../components/CommentThread'
+import CreateTeamForm from '../components/CreateTeamForm'
 
 // EVENT HUB — the home for events. The list surfaces overdue/at-risk phases across
 // all events; opening one shows four LENSES over four separate tables joined by the
@@ -120,6 +122,7 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
   const flags = phases.map((p) => ({ kind: p.kind, flag: phaseFlag(p) })).filter((f) => f.flag)
   const TABS = [
     { k: 'planning', label: 'Planning' },
+    { k: 'teams', label: 'Teams' },
     { k: 'interest', label: 'Volunteer Interests' },
     { k: 'campaigns', label: 'Campaigns' },
     { k: 'attendance', label: 'Attendance' },
@@ -158,7 +161,8 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
         ))}
       </div>
 
-      {tab === 'planning' && <PlanningEvent ev={ev} me={me} isCoordinator={isCoordinator} embedded onToast={onToast} onEventChanged={reload} />}
+      {tab === 'planning' && <PlanningEvent ev={ev} me={me} isCoordinator={isCoordinator} embedded onToast={onToast} onEventChanged={reload} onStartCampaign={onStartCampaign} onOpenInterest={onOpenInterestInbox} />}
+      {tab === 'teams' && <EventTeams ev={ev} me={me} isCoordinator={isCoordinator} onToast={onToast} />}
       {tab === 'interest' && <EventInterestTab ev={ev} isCoordinator={isCoordinator} onOpenInterestInbox={onOpenInterestInbox} />}
       {tab === 'campaigns' && <EventCampaignsTab ev={ev} isCoordinator={isCoordinator} onOpenCampaign={onOpenCampaign} onStartCampaign={onStartCampaign} />}
       {tab === 'attendance' && <AttendanceDetail activity={ev} me={me} isCoordinator={isCoordinator} types={types} embedded onToast={onToast} onActivityChanged={reload} />}
@@ -242,6 +246,180 @@ function EventCampaignsTab({ ev, isCoordinator, onOpenCampaign, onStartCampaign 
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// Teams tab — a ROSTER view of the event's activity blocks (a block IS a team).
+// Name = block heading/activity, size = volunteers_needed, members = block_assignments,
+// POCs = flagged members (is_poc). Reads + writes the SAME blocks — no parallel store.
+// Size, activity and dates are edited in Planning only; here you set members + POCs.
+function EventTeams({ ev, me, isCoordinator, onToast }) {
+  const [blocks, setBlocks] = useState(null)
+  const [assigns, setAssigns] = useState([])
+  const [people, setPeople] = useState({})
+  const [types, setTypes] = useState([])
+  const [err, setErr] = useState(null)
+  const [creating, setCreating] = useState(false)
+  const [showInfo, setShowInfo] = useState(false)
+
+  const load = useCallback(async () => {
+    setErr(null)
+    const [bl, ty] = await Promise.all([
+      supabase.from('activity_blocks').select('id, heading, volunteers_needed, activity_type_id').eq('activity_id', ev.id).is('archived_at', null).order('created_at'),
+      fetchActivityTypes().catch(() => []),
+    ])
+    if (bl.error) { setErr(bl.error.message); setBlocks([]); return }
+    setBlocks(bl.data || []); setTypes(ty || [])
+    const ids = (bl.data || []).map((b) => b.id)
+    if (ids.length) {
+      const { data: asg } = await supabase.from('block_assignments').select('id, block_id, person_id, status, is_poc').in('block_id', ids)
+      setAssigns(asg || [])
+      const pids = [...new Set((asg || []).map((a) => a.person_id))]
+      if (pids.length) { const { data: pp } = await supabase.from('people').select('id, full_name, phone').in('id', pids); setPeople(Object.fromEntries((pp || []).map((p) => [p.id, p]))) }
+      else setPeople({})
+    } else setAssigns([])
+  }, [ev.id])
+  useEffect(() => { load() }, [load])
+
+  const typeLabel = (id) => types.find((t) => t.id === id)?.label
+  const firstDay = ev.start_date || ev.activity_date
+
+  if (err) return <ErrorCard>{err}</ErrorCard>
+  if (!blocks) return <Loading label="Loading teams…" />
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: -2 }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Teams</span>
+        <button onClick={() => setShowInfo((s) => !s)} title="Teams are this event's activity blocks — create teams, set members &amp; POCs here; a team's dates &amp; attendance mode are set in Planning (same block)."
+          style={{ width: 18, height: 18, borderRadius: '50%', border: '1px solid var(--border)', background: showInfo ? '#EDE4D6' : '#fff', color: 'var(--muted)', fontSize: 11, cursor: 'pointer', lineHeight: 1, padding: 0 }}>ⓘ</button>
+      </div>
+      {showInfo && (
+        <div style={{ fontSize: 12, color: 'var(--muted-2)', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 9, padding: '9px 11px' }}>
+          Teams are this event's activity blocks. Here you create teams and set members &amp; POCs; a team's <strong>dates &amp; attendance mode</strong> are set in <strong>Planning</strong> — it's the same block.
+        </div>
+      )}
+      {blocks.length === 0 ? <Empty label="No teams yet — create one below." /> : blocks.map((b) => (
+        <TeamCard key={b.id} block={b} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator}
+          assigns={assigns.filter((a) => a.block_id === b.id)} people={people} onToast={onToast} onChanged={load} />
+      ))}
+      {isCoordinator && (
+        <button className="btn btn-primary" style={{ padding: '11px', fontSize: 14 }} onClick={() => setCreating(true)}>＋ Create team</button>
+      )}
+      {creating && <CreateTeamForm ev={ev} types={types} firstDay={firstDay} me={me} onClose={() => setCreating(false)} onCreated={() => { setCreating(false); load() }} onToast={onToast} />}
+    </div>
+  )
+}
+
+function TeamCard({ block, typeLabel, firstDay, me, isCoordinator, assigns, people, onToast, onChanged }) {
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [showComments, setShowComments] = useState(false)
+
+  const byPerson = {}
+  for (const a of assigns) {
+    if (!['assigned', 'show', 'involved'].includes(a.status)) continue
+    const m = (byPerson[a.person_id] ||= { person_id: a.person_id, poc: false })
+    if (a.is_poc) m.poc = true
+  }
+  const members = Object.values(byPerson)
+  const filled = members.length
+  const size = block.volunteers_needed || 0
+  const short = size - filled
+  const full = short <= 0
+  const pocs = members.filter((m) => m.poc)
+  const memberIds = new Set(members.map((m) => m.person_id))
+
+  useEffect(() => {
+    if (q.trim().length < 2) { setResults([]); return }
+    const h = setTimeout(async () => {
+      const { data } = await supabase.from('people').select('id, full_name, phone').ilike('full_name', `%${q.trim()}%`).limit(6)
+      setResults(data || [])
+    }, 300)
+    return () => clearTimeout(h)
+  }, [q])
+
+  async function addMember(p) {
+    if (memberIds.has(p.id)) { onToast(`${p.full_name} already on the team.`); return }
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('block_assignments').insert({ block_id: block.id, person_id: p.id, day_date: firstDay, status: 'assigned', assigned_by: me?.id || null })
+      if (error) throw error
+      setQ(''); setResults([]); setAdding(false); onToast(`${p.full_name} added to ${block.heading}.`); onChanged()
+    } catch (e) { onToast(/duplicate/i.test(e.message || '') ? 'Already on the team.' : 'Could not add: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+  async function removeMember(pid, name) {
+    if (!window.confirm(`Remove ${name} from ${block.heading}?`)) return
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('block_assignments').delete().eq('block_id', block.id).eq('person_id', pid)
+      if (error) throw error
+      onToast(`${name} removed.`); onChanged()
+    } catch (e) { onToast('Could not remove: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+  async function togglePoc(pid, name, currentlyPoc) {
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('block_assignments').update({ is_poc: !currentlyPoc }).eq('block_id', block.id).eq('person_id', pid)
+      if (error) throw error
+      onToast(`${name} ${currentlyPoc ? 'is no longer' : 'set as'} POC.`); onChanged()
+    } catch (e) { onToast('Could not update POC: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>{block.heading}{block.activity_type_id && typeLabel(block.activity_type_id) ? <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {typeLabel(block.activity_type_id)}</span> : null}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>lead: {pocs.length ? pocs.map((m) => people[m.person_id]?.full_name || '—').join(', ') : 'none'}</div>
+        </div>
+        <span className="pill" style={full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
+        {isCoordinator && (
+          <button onClick={() => setAdding((a) => !a)} title="Add member" style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? '#C2691F' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
+        )}
+        <button onClick={() => setShowComments((s) => !s)} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: showComments ? '#EDE4D6' : '#fff', cursor: 'pointer' }}>💬</button>
+      </div>
+
+      {members.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
+          {members.map((m) => {
+            const p = people[m.person_id]
+            return (
+              <div key={m.person_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #F4EEE2' }}>
+                <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10.5, fontWeight: 600 }}>{initials(p?.full_name || '?')}</div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{p?.full_name || 'Unknown'}</div>
+                {m.poc && <span className="pill" style={{ ...pill('#F3E3D2', '#9C4A14'), fontSize: 10 }}>POC</span>}
+                {isCoordinator && (
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                    <button disabled={busy} onClick={() => togglePoc(m.person_id, p?.full_name, m.poc)} style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: m.poc ? '#9C4A14' : 'var(--muted)', cursor: 'pointer' }}>{m.poc ? '★ POC' : '☆ POC'}</button>
+                    <button disabled={busy} onClick={() => removeMember(m.person_id, p?.full_name)} style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Remove</button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {isCoordinator && adding && (
+        <div style={{ position: 'relative', marginTop: 10 }}>
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a person to add…" style={{ fontSize: 13, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, width: '100%' }} />
+          {results.length > 0 && (
+            <div className="card" style={{ position: 'absolute', top: 42, left: 0, right: 0, zIndex: 20, boxShadow: 'var(--shadow-lg)', padding: 6 }}>
+              {results.map((p) => (
+                <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, cursor: 'pointer' }} onClick={() => !busy && addMember(p)}>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{p.full_name}</div>
+                  <span style={{ marginLeft: 'auto', fontSize: 11.5, color: memberIds.has(p.id) ? 'var(--muted)' : 'var(--orange)', fontWeight: 600 }}>{memberIds.has(p.id) ? 'on team' : '+ add'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {showComments && <CommentThread scope={{ block_id: block.id }} me={me} onToast={onToast} />}
     </div>
   )
 }

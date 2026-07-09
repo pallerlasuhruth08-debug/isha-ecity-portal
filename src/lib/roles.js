@@ -1,15 +1,16 @@
 // Role model ported from the Volunteer Care Portal design (ROLES + tabs).
 // Each role controls which nav tabs are visible and the header scope label.
+// Exact sidebar order. Standalone 'events' (Attendance) is intentionally not here —
+// attendance now lives per-event inside the Event Hub. Admin is appended for admins.
 export const ALL_TABS = [
   'dashboard',
-  'volunteers',
-  'events',
   'hub',
-  'nurturing',
+  'volunteers',
   'meditators',
-  'advance',
-  'interest',
   'campaigns',
+  'interest',
+  'nurturing',
+  'advance',
   'unresolved',
 ]
 

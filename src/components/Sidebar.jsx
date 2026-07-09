@@ -1,16 +1,18 @@
 import { Icon } from '../lib/icons'
 import { TAB_LABELS } from '../lib/roles'
 
+// Exact sidebar order. This array drives the visible order (tabs only filters
+// visibility). 'events' (standalone Attendance) is gone — attendance lives per-event
+// in the Event Hub now.
 const NAV = [
   { key: 'dashboard', icon: 'dashboard' },
-  { key: 'volunteers', icon: 'volunteers' },
-  { key: 'events', icon: 'events' },
   { key: 'hub', icon: 'hub' },
-  { key: 'nurturing', icon: 'nurturing' },
+  { key: 'volunteers', icon: 'volunteers' },
   { key: 'meditators', icon: 'meditators' },
-  { key: 'advance', icon: 'advance' },
-  { key: 'interest', icon: 'interest' },
   { key: 'campaigns', icon: 'campaigns' },
+  { key: 'interest', icon: 'interest' },
+  { key: 'nurturing', icon: 'nurturing' },
+  { key: 'advance', icon: 'advance' },
   { key: 'unresolved', icon: 'unresolved' },
   { key: 'admin', icon: 'admin' },
 ]
