@@ -45,6 +45,23 @@ export function useTableSelection() {
     [mode],
   )
 
+  // Bulk select/deselect a batch of ids in one update — used for the "current page only"
+  // stage of the two-stage select-all (stage 2 is selectAllMatching, above).
+  const selectIds = useCallback(
+    (ids) => {
+      if (mode === 'all') setExcluded((prev) => { const n = new Set(prev); for (const id of ids) n.delete(id); return n })
+      else setIncluded((prev) => { const n = new Set(prev); for (const id of ids) n.add(id); return n })
+    },
+    [mode],
+  )
+  const deselectIds = useCallback(
+    (ids) => {
+      if (mode === 'all') setExcluded((prev) => { const n = new Set(prev); for (const id of ids) n.add(id); return n })
+      else setIncluded((prev) => { const n = new Set(prev); for (const id of ids) n.delete(id); return n })
+    },
+    [mode],
+  )
+
   const count = useCallback(
     (total) => (mode === 'all' ? Math.max(0, total - excluded.size) : included.size),
     [mode, included, excluded],
@@ -72,5 +89,5 @@ export function useTableSelection() {
     [mode, included, excluded],
   )
 
-  return { mode, isAllMode: mode === 'all', included, excluded, clear, selectAllMatching, isSelected, toggle, count, headerState, resolveIds }
+  return { mode, isAllMode: mode === 'all', included, excluded, clear, selectAllMatching, isSelected, toggle, selectIds, deselectIds, count, headerState, resolveIds }
 }

@@ -348,6 +348,14 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const filterActive = !!(debounced || Object.values(fil).some(Boolean) || dateFrom || dateTo)
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const selCount = sel.count(total)
+  const isFullySelected = sel.headerState(total) === 'all'
+
+  // Header checkbox = stage 1 of two-stage select-all: selects/deselects the CURRENT
+  // PAGE only. Stage 2 ("Select all N matching this filter") lives in the SelectionBar.
+  const pageIds = rows ? rows.map((r) => r.id) : []
+  const pageSelectedCount = pageIds.filter((id) => sel.isSelected(id)).length
+  const pageHeaderState = pageIds.length === 0 ? 'none' : pageSelectedCount === 0 ? 'none' : pageSelectedCount === pageIds.length ? 'all' : 'partial'
+  const togglePage = () => (pageSelectedCount === pageIds.length && pageIds.length > 0 ? sel.deselectIds(pageIds) : sel.selectIds(pageIds))
 
   const preset = (kind) => () => {
     if (kind === 'year') { setDateFrom(`${new Date().getFullYear()}-01-01`); setDateTo(todayISO()) }
@@ -421,19 +429,21 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
         </div>
       )}
 
-      <SelectionBar isAllMode={sel.isAllMode} count={selCount} onCreate={openCampaign} onAssign={openAssign} onClear={sel.clear} />
+      <SelectionBar isFullySelected={isFullySelected} count={selCount} total={total} onSelectAll={sel.selectAllMatching} onCreate={openCampaign} onAssign={openAssign} onClear={sel.clear} />
 
       <div className="card" style={{ overflow: 'hidden' }}>
+        {!loading && total > 0 && <PagerBar position="top" page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />}
         {/* Header: grid column labels on desktop/tablet; a compact select-all
-            bar on phone (there are no columns to label in card mode). */}
+            bar on phone (there are no columns to label in card mode). Checkbox here
+            selects only the CURRENT PAGE — "select all matching" lives in the SelectionBar. */}
         {isPhone ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
-            <Checkbox state={sel.headerState(total)} onClick={(e) => { e.stopPropagation(); selCount > 0 ? sel.clear() : sel.selectAllMatching() }} />
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select all'}</span>
+            <Checkbox state={pageHeaderState} onClick={(e) => { e.stopPropagation(); togglePage() }} />
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select this page'}</span>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, background: 'var(--panel)', alignItems: 'center' }}>
-            <Checkbox state={sel.headerState(total)} onClick={(e) => { e.stopPropagation(); selCount > 0 ? sel.clear() : sel.selectAllMatching() }} />
+            <Checkbox state={pageHeaderState} onClick={(e) => { e.stopPropagation(); togglePage() }} />
             <span>Volunteer</span>
             <span>Stage</span>
             <span>Programmes</span>

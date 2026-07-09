@@ -181,6 +181,14 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const loadingOpts = !rows && !err
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const selCount = sel.count(total)
+  const isFullySelected = sel.headerState(total) === 'all'
+
+  // Header checkbox = stage 1 of two-stage select-all: selects/deselects the CURRENT
+  // PAGE only. Stage 2 ("Select all N matching this filter") lives in the SelectionBar.
+  const pageIds = rows ? rows.map((r) => r.id) : []
+  const pageSelectedCount = pageIds.filter((id) => sel.isSelected(id)).length
+  const pageHeaderState = pageIds.length === 0 ? 'none' : pageSelectedCount === 0 ? 'none' : pageSelectedCount === pageIds.length ? 'all' : 'partial'
+  const togglePage = () => (pageSelectedCount === pageIds.length && pageIds.length > 0 ? sel.deselectIds(pageIds) : sel.selectIds(pageIds))
   const selStyle = { padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 5px)' : undefined }
   const grid = '34px 2fr 1.6fr 1.2fr 1.1fr'
 
@@ -220,17 +228,18 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
         </MobileFilterSheet>
       </div>
 
-      <SelectionBar isAllMode={sel.isAllMode} count={selCount} onCreate={openCampaign} onAssign={openAssign} onClear={sel.clear} />
+      <SelectionBar isFullySelected={isFullySelected} count={selCount} total={total} onSelectAll={sel.selectAllMatching} onCreate={openCampaign} onAssign={openAssign} onClear={sel.clear} />
 
       <div className="card" style={{ overflow: 'hidden' }}>
+        {!loading && total > 0 && <PagerBar position="top" page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />}
         {isPhone ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
-            <Checkbox state={sel.headerState(total)} onClick={() => (selCount > 0 ? sel.clear() : sel.selectAllMatching())} />
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select all'}</span>
+            <Checkbox state={pageHeaderState} onClick={() => togglePage()} />
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select this page'}</span>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, alignItems: 'center' }}>
-            <Checkbox state={sel.headerState(total)} onClick={() => (selCount > 0 ? sel.clear() : sel.selectAllMatching())} />
+            <Checkbox state={pageHeaderState} onClick={() => togglePage()} />
             <span>Meditator</span>
             <span>Programmes</span>
             <span>Where</span>

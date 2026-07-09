@@ -183,7 +183,7 @@ export default function Advance({ me, onToast }) {
       </div>
 
       <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 12px' }}>{cur.label} — candidates</h3>
-      <SelectionBar isAllMode={sel.isAllMode} count={selCount} onCreate={openCampaign} onClear={sel.clear} />
+      <SelectionBar isFullySelected={sel.isAllMode} count={selCount} onCreate={openCampaign} onClear={sel.clear} />
 
       <div className="card" style={{ overflow: 'hidden' }}>
         {isPhone ? (

@@ -110,12 +110,14 @@ export function PageSizeSelect({ value, onChange, options = [25, 50, 100] }) {
   )
 }
 
-// Table footer: page-size select + range + prev/next.
-export function PagerBar({ page, pageCount, total, pageSize, onPage, onPageSize }) {
+// Pagination controls — rendered at both top and bottom of a table, driven by the
+// SAME page/pageSize state (pass `position="top"` for the copy above the rows).
+export function PagerBar({ page, pageCount, total, pageSize, onPage, onPageSize, position = 'bottom' }) {
   const from = total === 0 ? 0 : page * pageSize + 1
   const to = Math.min(total, (page + 1) * pageSize)
+  const border = position === 'top' ? { borderBottom: '1px solid var(--border)' } : { borderTop: '1px solid var(--border)' }
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', ...border, flexWrap: 'wrap' }}>
       <PageSizeSelect value={pageSize} onChange={onPageSize} />
       <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
         {from}–{to} of {total} · page {page + 1} of {pageCount}
@@ -128,18 +130,24 @@ export function PagerBar({ page, pageCount, total, pageSize, onPage, onPageSize 
   )
 }
 
-// Selection banner shared by campaign-capable tables.
-export function SelectionBar({ isAllMode, count, onCreate, onAssign, onClear }) {
+// Selection banner shared by campaign-capable tables. Two-stage select-all:
+// `isFullySelected` (mode 'all' with zero exclusions) shows "All N selected"; any
+// partial state (current-page-only, or an "all" selection with some rows excluded)
+// shows "{count} selected" plus a "Select all {total}" prompt to promote to full.
+export function SelectionBar({ isFullySelected, count, total, onSelectAll, onCreate, onAssign, onClear }) {
   if (count <= 0) return null
   return (
     <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', marginBottom: 14, background: '#FBF1E6', borderColor: '#EBD9C2', flexWrap: 'wrap' }}>
       <span style={{ fontSize: 13, fontWeight: 600, color: '#9C4A14' }}>
-        {isAllMode ? `All ${count} matching this filter selected` : `${count} selected`}
+        {isFullySelected ? `All ${count} matching this filter selected` : `${count} selected`}
       </span>
+      {!isFullySelected && onSelectAll && total > count && (
+        <button className="btn btn-ghost" onClick={onSelectAll} style={{ fontSize: 12.5, padding: '6px 12px' }}>Select all {total} matching this filter?</button>
+      )}
       <div style={{ flex: 1 }} />
       {onAssign && <button className="btn btn-ghost" onClick={onAssign}>Assign to nurturer</button>}
       {onCreate && <button className="btn btn-primary" onClick={onCreate}>Create campaign</button>}
-      <button className="btn btn-ghost" onClick={onClear}>Clear selection</button>
+      <button className="btn btn-ghost" onClick={onClear}>✕ Clear selection</button>
     </div>
   )
 }
