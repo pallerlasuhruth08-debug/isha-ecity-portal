@@ -4,6 +4,18 @@ import { pill, initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty, Chip, PagerBar } from '../components/View'
 import CampaignForm from '../components/CampaignForm'
 import SidePanel, { PanelHeader } from '../components/SidePanel'
+import { eventDays, fmtDay } from '../lib/planning'
+
+// Event-interest status state machine (all reversible; Contacted is optional — you can
+// go Interested → Approved directly). Stored values are snake_case; labels below.
+const EI_STATUS = [
+  { v: 'interested', label: 'Interested', pill: pill('#E9F0EF', '#2F6E5E') },
+  { v: 'contacted', label: 'Contacted', pill: pill('#FBEAD9', '#C28A2A') },
+  { v: 'approved', label: 'Approved', pill: pill('#EAF2E5', '#4E7C3F') },
+  { v: 'declined', label: 'Declined', pill: pill('#FBE6E0', '#B5532F') },
+  { v: 'no_response', label: 'No Response', pill: pill('#F1EADD', '#8C7E6B') },
+]
+const EI_STATUS_MAP = Object.fromEntries(EI_STATUS.map((s) => [s.v, s]))
 
 const STATUS_PILL = {
   new: pill('#E9F0EF', '#2F6E5E'),
@@ -269,7 +281,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       </div>
       {err && <ErrorCard>Couldn't load interest inbox: {err}</ErrorCard>}
 
-      {tab === 'events' ? <EventInterests onToast={onToast} scopeEventId={eventScopeId} onScopeConsumed={onScopeConsumed} /> : (
+      {tab === 'events' ? <EventInterests onToast={onToast} uid={uid} scopeEventId={eventScopeId} onScopeConsumed={onScopeConsumed} /> : (
       <div className="card" style={{ overflow: 'hidden' }}>
           {loading && <Loading label="Loading interest inbox…" />}
           {!loading && shown.length === 0 && <Empty label="Nothing to triage here." />}
@@ -678,13 +690,14 @@ function Actions({ onClose, busy, onSubmit, label }) {
 // Event Interests — form responses that carried an event_id, grouped per event
 // (occurrence) and filterable by event. A read view over event_interest; standing
 // (no-event) interest stays in the main inbox above.
-function EventInterests({ onToast, scopeEventId = null, onScopeConsumed }) {
+function EventInterests({ onToast, uid, scopeEventId = null, onScopeConsumed }) {
   const [rows, setRows] = useState(null)
   const [evFilter, setEvFilter] = useState('all')
   const [scopeName, setScopeName] = useState(null)
+  const [busyId, setBusyId] = useState(null)
   useEffect(() => {
     supabase.from('event_interest')
-      .select('id, created_at, activity:activities!event_interest_activity_id_fkey(id, name, activity_date), person:people!event_interest_person_id_fkey(id, full_name, phone)')
+      .select('id, created_at, status, availability_dates, activity:activities!event_interest_activity_id_fkey(id, name, activity_date, start_date, end_date), person:people!event_interest_person_id_fkey(id, full_name, phone)')
       .order('created_at', { ascending: false })
       .then(({ data }) => setRows(data || []))
   }, [])
@@ -696,6 +709,34 @@ function EventInterests({ onToast, scopeEventId = null, onScopeConsumed }) {
       onScopeConsumed?.()
     }
   }, [scopeEventId, onScopeConsumed])
+
+  const patchRow = (id, fields) => setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...fields } : r)))
+
+  // Status transition — all reversible. Entering Contacted / Approved stamps the
+  // when + who (the coordinator making the change); other states clear nothing.
+  async function setStatus(r, status) {
+    if (status === r.status) return
+    setBusyId(r.id)
+    const patch = { status }
+    if (status === 'contacted') { patch.contacted_at = new Date().toISOString(); patch.contacted_by = uid || null }
+    if (status === 'approved') { patch.approved_at = new Date().toISOString(); patch.approved_by = uid || null }
+    try {
+      const { error } = await supabase.from('event_interest').update(patch).eq('id', r.id)
+      if (error) throw error
+      patchRow(r.id, { status })
+      onToast(`${r.person?.full_name || 'Interest'} → ${EI_STATUS_MAP[status]?.label || status}.`)
+    } catch (e) { onToast('Could not update status: ' + (e.message || e)) } finally { setBusyId(null) }
+  }
+
+  // Availability = actual event-day dates (maps 1:1 to block_assignments.day_date).
+  async function saveAvailability(r, dates) {
+    setBusyId(r.id)
+    try {
+      const { error } = await supabase.from('event_interest').update({ availability_dates: dates }).eq('id', r.id)
+      if (error) throw error
+      patchRow(r.id, { availability_dates: dates })
+    } catch (e) { onToast('Could not save availability: ' + (e.message || e)) } finally { setBusyId(null) }
+  }
 
   if (!rows) return <Loading label="Loading event interests…" />
 
@@ -715,22 +756,59 @@ function EventInterests({ onToast, scopeEventId = null, onScopeConsumed }) {
       {shown.length === 0 && (
         <Empty label={evFilter === 'all' ? 'No event interest yet — import interest against an event or share its interest link.' : `No interests for ${scopeName || 'this event'} yet.`} />
       )}
-      {Object.values(byEvent).map((g) => (
+      {Object.values(byEvent).map((g) => {
+        // Event days derived from the date range (inclusive). Availability is stored as
+        // these actual dates, so it lines up with block_assignments.day_date at assignment.
+        const days = eventDays(g.ev?.start_date || g.ev?.activity_date, g.ev?.end_date)
+        return (
         <div key={g.ev?.id} className="card" style={{ padding: 16, marginBottom: 12 }}>
           <div style={{ fontSize: 14, fontWeight: 600 }}>{g.ev?.name} <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 400 }}>· {fmtDate(g.ev?.activity_date)} · {g.people.length} interested</span></div>
           <div style={{ marginTop: 8 }}>
             {g.people.map((r, i) => (
-              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid #F4EEE2' }}>
-                <div style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>{initials(r.person?.full_name || '?')}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{r.person?.full_name || 'Unknown'}</div>
-                  <div style={{ fontSize: 11.5, color: r.person?.phone ? 'var(--muted)' : '#B5532F' }}>{r.person?.phone || 'no phone'} · {ago(r.created_at)}</div>
-                </div>
-              </div>
+              <PersonInterestRow key={r.id} r={r} i={i} days={days} busy={busyId === r.id} onStatus={(s) => setStatus(r, s)} onAvailability={(d) => saveAvailability(r, d)} />
             ))}
           </div>
         </div>
-      ))}
+        )
+      })}
     </>
+  )
+}
+
+// One event-interest person: name/phone + status control + day-availability chips.
+function PersonInterestRow({ r, i, days, busy, onStatus, onAvailability }) {
+  const avail = r.availability_dates || []
+  const allSelected = days.length > 0 && days.every((d) => avail.includes(d))
+  const toggleDay = (d) => onAvailability(avail.includes(d) ? avail.filter((x) => x !== d) : [...avail, d].sort())
+  const toggleAll = () => onAvailability(allSelected ? [] : [...days])
+  const chip = (on) => ({ fontSize: 11, fontWeight: 600, padding: '4px 9px', borderRadius: 7, cursor: busy ? 'default' : 'pointer', border: on ? '1px solid #C2691F' : '1px solid var(--border)', background: on ? '#F6E8D8' : '#fff', color: on ? '#C2691F' : 'var(--muted)', opacity: busy ? 0.6 : 1 })
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 0', borderBottom: '1px solid #F4EEE2' }}>
+      <div style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>{initials(r.person?.full_name || '?')}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{r.person?.full_name || 'Unknown'}</div>
+          <span className="pill" style={{ ...(EI_STATUS_MAP[r.status || 'interested']?.pill), fontSize: 10 }}>{EI_STATUS_MAP[r.status || 'interested']?.label}</span>
+          <span style={{ fontSize: 11, color: 'var(--muted-2)' }}>· {ago(r.created_at)}</span>
+        </div>
+        <div style={{ fontSize: 11.5, color: r.person?.phone ? 'var(--muted)' : '#B5532F', marginTop: 1 }}>{r.person?.phone || 'no phone'}</div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
+          <label style={{ fontSize: 10.5, color: 'var(--muted-2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>Status</label>
+          <select value={r.status || 'interested'} disabled={busy} onChange={(e) => onStatus(e.target.value)}
+            style={{ fontSize: 12, padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: 'var(--ink-soft)', cursor: busy ? 'default' : 'pointer' }}>
+            {EI_STATUS.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
+          </select>
+        </div>
+        {days.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
+            <label style={{ fontSize: 10.5, color: 'var(--muted-2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', marginRight: 2 }}>Available</label>
+            {days.length > 1 && <button disabled={busy} onClick={toggleAll} style={chip(allSelected)}>All Days</button>}
+            {days.map((d, di) => (
+              <button key={d} disabled={busy} onClick={() => toggleDay(d)} style={chip(avail.includes(d))} title={fmtDay(d)}>Day {di + 1} · {fmtDay(d)}</button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
