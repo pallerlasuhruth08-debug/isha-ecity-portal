@@ -476,8 +476,8 @@ export function CreateSessionForm({ activity, session = null, attnCount = 0, typ
           <input value={titleEdited ? title : autoTitle} onChange={(e) => { setTitle(e.target.value); setTitleEdited(true) }} placeholder={autoTitle} style={_fld} />
         </div>
 
-        <button className="btn btn-primary" disabled={busy || !typeId || (outside && !confirmedFar) || (isFuture && !confirmedFuture)} onClick={create}
-          style={{ width: '100%', padding: '12px', fontSize: 14, opacity: busy || !typeId || (outside && !confirmedFar) || (isFuture && !confirmedFuture) ? 0.55 : 1 }}>
+        <button className="btn btn-primary" disabled={busy || !typeId || (outside && !confirmedFar)} onClick={create}
+          style={{ width: '100%', padding: '12px', fontSize: 14, opacity: busy || !typeId || (outside && !confirmedFar) ? 0.55 : 1 }}>
           {busy ? (editing ? 'Saving…' : 'Creating…') : (editing ? 'Save changes' : 'Create & capture →')}
         </button>
       </div>
