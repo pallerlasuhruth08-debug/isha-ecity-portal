@@ -181,9 +181,9 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
         </div>
       </div>
 
-      {/* Attendance for planned volunteers — marked HERE (show/no-show). The
-          staffing/vacate/backfill logic lives on Planning, which reflects these marks. */}
-      <PlannedVolunteers activityId={activity.id} eventDate={activity.start_date || activity.activity_date} isCoordinator={isCoordinator} me={me} onToast={onToast} />
+      {/* Planned volunteers are NOT shown here as attended — planned ≠ attended.
+          Team members surface as a REFERENCE quick-mark list inside each session's
+          capture (matched by activity_type); presence is always explicitly captured. */}
 
       {/* Type-change keep-vs-propagate prompt (attendance present). */}
       {typeChange && (
@@ -216,6 +216,7 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
   const [counts, setCounts] = useState({})
   const [openId, setOpenId] = useState(null)
   const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
@@ -280,6 +281,9 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
               <span className="pill" style={s.type === 'meditator' ? pill('#E9F0EF', '#2F6E5E') : pill('#F6E8D8', '#C2691F')}>{s.type === 'meditator' ? 'participant' : 'volunteer'}</span>
               <span className="pill" style={pill('#EAF2E5', '#4E7C3F')}>{counts[s.id] || 0} present</span>
               {isCoordinator && (
+                <button disabled={busy} onClick={(e) => { e.stopPropagation(); setEditing(s) }} title="Edit session" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
+              )}
+              {isCoordinator && (
                 <button disabled={busy} onClick={(e) => removeSession(e, s)} title={(counts[s.id] || 0) > 0 ? 'Archive session (has records)' : 'Delete empty session'}
                   style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>🗑</button>
               )}
@@ -292,6 +296,10 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
         <CreateSessionForm activity={activity} types={types} me={me} onClose={() => setCreating(false)}
           onCreated={(id) => { setCreating(false); load(); setOpenId(id) }} onToast={onToast} />
       )}
+      {editing && (
+        <CreateSessionForm activity={activity} session={editing} attnCount={counts[editing.id] || 0} types={types} me={me}
+          onClose={() => setEditing(null)} onCreated={() => { setEditing(null); load() }} onToast={onToast} />
+      )}
     </div>
   )
 }
@@ -299,23 +307,26 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
 const _lbl = { fontSize: 12, fontWeight: 600, color: '#5C5142', display: 'block', marginBottom: 5 }
 const _fld = { fontSize: 13, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)', width: '100%' }
 
-export function CreateSessionForm({ activity, types = [], me, onClose, onCreated, onToast }) {
+export function CreateSessionForm({ activity, session = null, attnCount = 0, types = [], me, onClose, onCreated, onToast }) {
+  const editing = !!session
+  // After attendance is captured, activity_type + date are LOCKED (changing either
+  // corrupts existing history); title + centre stay editable.
+  const locked = editing && attnCount > 0
   const spanStart = activity.start_date || activity.activity_date
   const spanEnd = activity.end_date || activity.start_date || activity.activity_date
   const today = new Date().toISOString().slice(0, 10)
-  const [kind, setKind] = useState('volunteer')
-  const [date, setDate] = useState(today >= spanStart && today <= spanEnd ? today : spanStart)
-  const [centre, setCentre] = useState(activity.center_id || '')
+  const [kind, setKind] = useState(session?.type || 'volunteer')
+  const [date, setDate] = useState(session?.session_date || (today >= spanStart && today <= spanEnd ? today : spanStart))
+  const [centre, setCentre] = useState(session?.center_id || activity.center_id || '')
   const [centres, setCentres] = useState([])
   const [localTypes, setLocalTypes] = useState([])
-  const [typeId, setTypeId] = useState('')
+  const [typeId, setTypeId] = useState(session?.activity_type_id || '')
   const [newType, setNewType] = useState('')
   const [addingType, setAddingType] = useState(false)
-  const [title, setTitle] = useState('')
-  const [titleEdited, setTitleEdited] = useState(false)
+  const [title, setTitle] = useState(session?.title || '')
+  const [titleEdited, setTitleEdited] = useState(!!session?.title)
   const [earliestPhase, setEarliestPhase] = useState(null)
   const [confirmedFar, setConfirmedFar] = useState(false)
-  const [confirmedFuture, setConfirmedFuture] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -339,9 +350,8 @@ export function CreateSessionForm({ activity, types = [], me, onClose, onCreated
   const outside = date < windowStart || date > spanEnd
   const nBefore = date < spanStart ? daysBetween(spanStart, date) : 0
   const nAfter = date > spanEnd ? daysBetween(date, spanEnd) : 0
-  // The activity day hasn't arrived yet — soft-warn against recording attendance early.
-  const isFuture = date > today
-  const nFuture = isFuture ? daysBetween(date, today) : 0
+  // Creating a session for any in-range date is always allowed (setup in advance is valid).
+  // The future-date gate lives on CAPTURE, not creation.
 
   async function createType() {
     const label = newType.trim()
@@ -358,9 +368,18 @@ export function CreateSessionForm({ activity, types = [], me, onClose, onCreated
   async function create() {
     if (!typeId) return onToast('Pick an activity type.')
     if (outside && !confirmedFar) return
-    if (isFuture && !confirmedFuture) return
     setBusy(true)
     try {
+      if (editing) {
+        // locked fields (activity_type, date) are never written once attendance exists.
+        const patch = { title: effTitle, type: kind, center_id: centre || activity.center_id || null }
+        if (!locked) { patch.session_date = date; patch.activity_type_id = typeId }
+        const { error } = await supabase.from('attendance_sessions').update(patch).eq('id', session.id)
+        if (error) throw error
+        onToast('Session updated.')
+        onCreated(session.id)
+        return
+      }
       const { data, error } = await supabase.from('attendance_sessions').insert({
         activity_id: activity.id, title: effTitle, type: kind, session_date: date,
         center_id: centre || activity.center_id || null, activity_type_id: typeId, created_by: me?.id || null,
@@ -368,16 +387,21 @@ export function CreateSessionForm({ activity, types = [], me, onClose, onCreated
       if (error) throw error
       onToast('Session created — capture attendance.')
       onCreated(data.id)
-    } catch (e) { onToast('Could not create session: ' + (e.message || e)) } finally { setBusy(false) }
+    } catch (e) { onToast(`Could not ${editing ? 'update' : 'create'} session: ` + (e.message || e)) } finally { setBusy(false) }
   }
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
       <div className="card" style={{ width: 520, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 22, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Create attendance session</h3>
+          <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>{editing ? 'Edit attendance session' : 'Create attendance session'}</h3>
           <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={onClose}>✕ Close</button>
         </div>
+        {locked && (
+          <div style={{ fontSize: 11.5, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 8, padding: '7px 10px', marginBottom: 12 }}>
+            🔒 This session has {attnCount} captured record(s). Activity type and date are locked (changing them would corrupt that history); title and centre stay editable.
+          </div>
+        )}
         <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16 }}>{activity.name} · {fmtDay(spanStart)}{spanEnd !== spanStart ? `–${fmtDay(spanEnd)}` : ''}</div>
 
         <div style={{ marginBottom: 14 }}>
@@ -393,7 +417,7 @@ export function CreateSessionForm({ activity, types = [], me, onClose, onCreated
         <div style={{ display: 'flex', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 150 }}>
             <span style={_lbl}>Date</span>
-            <input type="date" value={date} onChange={(e) => { setDate(e.target.value); setConfirmedFar(false); setConfirmedFuture(false) }} style={{ ..._fld, borderColor: outside || isFuture ? '#E7A08A' : 'var(--border)' }} />
+            <input type="date" value={date} disabled={locked} onChange={(e) => { setDate(e.target.value); setConfirmedFar(false) }} style={{ ..._fld, borderColor: outside ? '#E7A08A' : 'var(--border)', opacity: locked ? 0.6 : 1, cursor: locked ? 'not-allowed' : 'pointer' }} />
           </div>
           <div style={{ flex: 1, minWidth: 150 }}>
             <span style={_lbl}>Centre <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· where it happened</span></span>
@@ -412,14 +436,6 @@ export function CreateSessionForm({ activity, types = [], me, onClose, onCreated
             </label>
           </div>
         )}
-        {isFuture && (
-          <div style={{ fontSize: 12.5, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 9, padding: '9px 11px', marginBottom: 14 }}>
-            This day hasn’t arrived yet — it’s {nFuture} day{nFuture > 1 ? 's' : ''} away. Normally you record attendance on the activity day, not before.
-            <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 7, cursor: 'pointer', fontWeight: 600 }}>
-              <input type="checkbox" checked={confirmedFuture} onChange={(e) => setConfirmedFuture(e.target.checked)} /> Record attendance ahead of the day anyway
-            </label>
-          </div>
-        )}
 
         <div style={{ marginBottom: 14 }}>
           <span style={_lbl}>Activity type <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· shared list</span></span>
@@ -431,11 +447,11 @@ export function CreateSessionForm({ activity, types = [], me, onClose, onCreated
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 8 }}>
-              <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={_fld}>
+              <select value={typeId} disabled={locked} onChange={(e) => setTypeId(e.target.value)} style={{ ..._fld, opacity: locked ? 0.6 : 1, cursor: locked ? 'not-allowed' : 'pointer' }}>
                 <option value="">— pick {kind === 'meditator' ? 'participant' : 'volunteer'} activity —</option>
                 {typeOpts.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
               </select>
-              <button className="btn btn-ghost" onClick={() => setAddingType(true)} style={{ fontSize: 12.5, padding: '8px 12px', whiteSpace: 'nowrap' }}>＋ New type</button>
+              {!locked && <button className="btn btn-ghost" onClick={() => setAddingType(true)} style={{ fontSize: 12.5, padding: '8px 12px', whiteSpace: 'nowrap' }}>＋ New type</button>}
             </div>
           )}
         </div>
@@ -447,7 +463,7 @@ export function CreateSessionForm({ activity, types = [], me, onClose, onCreated
 
         <button className="btn btn-primary" disabled={busy || !typeId || (outside && !confirmedFar) || (isFuture && !confirmedFuture)} onClick={create}
           style={{ width: '100%', padding: '12px', fontSize: 14, opacity: busy || !typeId || (outside && !confirmedFar) || (isFuture && !confirmedFuture) ? 0.55 : 1 }}>
-          {busy ? 'Creating…' : 'Create & capture →'}
+          {busy ? (editing ? 'Saving…' : 'Creating…') : (editing ? 'Save changes' : 'Create & capture →')}
         </button>
       </div>
     </div>
@@ -469,10 +485,11 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
   const [addingType, setAddingType] = useState(false)
   const [newType, setNewType] = useState('')
   const [openComment, setOpenComment] = useState(null) // person_id whose comments are open
-  const [futureAck, setFutureAck] = useState(false)
+  const [refMembers, setRefMembers] = useState([]) // team members whose team activity = this session's activity
   const seq = useRef(0)
-  // This session's own date hasn't arrived yet — soft-warn before recording early.
-  const isFuture = session.session_date > new Date().toISOString().slice(0, 10)
+  // Capture is HARD-gated until the session's own date: creating a session in advance is
+  // fine, but people can only be marked present on or after the day.
+  const captureOpen = session.session_date <= new Date().toISOString().slice(0, 10)
 
   useEffect(() => {
     supabase.from('centers').select('id, name, active').order('name')
@@ -490,6 +507,27 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
     setPresent(data || [])
   }, [session.id])
   useEffect(() => { load() }, [load])
+
+  // REFERENCE list (quick-mark assist, NEVER auto-marked): team members whose team's
+  // activity_type matches this session's. Presence is still explicitly captured; tapping
+  // a member marks them present and inherits the activity_type FROM their team (#7).
+  useEffect(() => {
+    if (!session.activity_type_id) { setRefMembers([]); return }
+    let alive = true
+    ;(async () => {
+      const { data: blocks } = await supabase.from('activity_blocks')
+        .select('id').eq('activity_id', activity.id).eq('activity_type_id', session.activity_type_id).is('archived_at', null)
+      const ids = (blocks || []).map((b) => b.id)
+      if (!ids.length) { if (alive) setRefMembers([]); return }
+      const { data: asg } = await supabase.from('block_assignments')
+        .select('person_id, block_id, person:people!block_assignments_person_id_fkey(id, full_name, phone)')
+        .in('block_id', ids)
+      const seen = new Set(); const out = []
+      for (const a of asg || []) { if (a.person_id && !seen.has(a.person_id) && a.person) { seen.add(a.person_id); out.push({ id: a.person_id, full_name: a.person.full_name, phone: a.person.phone }) } }
+      if (alive) setRefMembers(out)
+    })()
+    return () => { alive = false }
+  }, [activity.id, session.activity_type_id])
 
   useEffect(() => {
     const h = setTimeout(async () => {
@@ -520,23 +558,23 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
     } catch (e) { onToast('Could not add type: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
-  async function mark(person) {
+  // opts.activityTypeId — a matched team member inherits their team's activity_type (#7).
+  // Walk-ins (from search) fall back to the per-next-person override, then the session default.
+  async function mark(person, opts = {}) {
+    if (!captureOpen) { onToast(`Attendance capture opens on ${fmtDay(session.session_date)}.`); return }
     if (presentIds.has(person.id)) { onToast(`${person.full_name} already present.`); setQ(''); setResults([]); return }
-    if (isFuture && !futureAck) {
-      if (!window.confirm(`This session is dated ${fmtDay(session.session_date)}, which hasn’t arrived yet. You’re recording attendance before the activity day — continue?`)) return
-      setFutureAck(true)
-    }
+    const typeForRow = opts.activityTypeId || ovrType || session.activity_type_id
     setBusy(true)
     try {
       const { error } = await supabase.from('attendance').insert({
         session_id: session.id, activity_id: activity.id, person_id: person.id,
-        activity_type_id: ovrType || session.activity_type_id, attended_on: session.session_date,
-        center_id: ovrCentre || session.center_id,
+        activity_type_id: typeForRow, attended_on: session.session_date,
+        center_id: opts.centerId || ovrCentre || session.center_id,
       })
       if (error) throw error
       await ensureParticipation(person.id, session.type, { source: 'event_attendance' })
       setQ(''); setResults([]); setNewP(null); load()
-      onToast(`${person.full_name} — present${ovrType && ovrType !== session.activity_type_id ? ` · ${nameOf(ovrType)}` : ''}.`)
+      onToast(`${person.full_name} — present${typeForRow && typeForRow !== session.activity_type_id ? ` · ${nameOf(typeForRow)}` : ''}.`)
     } catch (e) { onToast('Could not mark present: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
@@ -577,13 +615,27 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
       <div className="card" style={{ padding: 14, marginBottom: 12, background: 'var(--panel)' }}>
         <div style={{ fontSize: 15, fontWeight: 600 }}>{session.title || typeLabel?.(session.activity_type_id) || 'Attendance'}</div>
         <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{fmtDay(session.session_date)} · {session.center_id || '—'} · {session.type === 'meditator' ? 'participant' : 'volunteer'}{session.activity_type_id ? ` · ${typeLabel?.(session.activity_type_id)}` : ''}</div>
-        {isFuture && (
+        {!captureOpen && (
           <div style={{ fontSize: 12, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 8, padding: '7px 10px', marginTop: 8 }}>
-            ⚠ This day hasn’t arrived yet — attendance is normally recorded on the activity day, not in advance.
+            🔒 Attendance capture opens on {fmtDay(session.session_date)}. The session is set up; marking people present unlocks on the day.
           </div>
         )}
       </div>
 
+      {captureOpen && (<>
+      {/* REFERENCE list (assist only — never auto-marked): team members whose team's
+          activity matches this session. Tapping marks present + inherits their team's type. */}
+      {refMembers.filter((m) => !presentIds.has(m.id)).length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 5 }}>Team members for this activity · tap to mark present (not auto-marked)</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {refMembers.filter((m) => !presentIds.has(m.id)).map((m) => (
+              <button key={m.id} disabled={busy} onClick={() => mark(m, { activityTypeId: session.activity_type_id })}
+                style={{ fontSize: 12, padding: '5px 10px', borderRadius: 16, border: '1px solid #CDE3C6', background: '#fff', color: '#4E7C3F', cursor: busy ? 'default' : 'pointer' }}>＋ {m.full_name}</button>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Per-person override: activity + centre applied to whoever you mark next
           (defaults to the session's — change it only when someone did something else). */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -641,6 +693,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
           </div>
         )}
       </div>
+      </>)}
 
       {present === null ? <Loading label="Loading…" /> : present.length === 0 ? <Empty label="No one marked present yet." /> : (
         <div>

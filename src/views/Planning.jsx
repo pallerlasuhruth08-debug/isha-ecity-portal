@@ -169,6 +169,7 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
   const [busy, setBusy] = useState(false)
   const [menuFor, setMenuFor] = useState(null) // to-do id whose ⋯ menu is open
   const [launch, setLaunch] = useState(null)   // { todo, kind } for inline modals
+  const [dragId, setDragId] = useState(null)   // to-do id being dragged
   const [types, setTypes] = useState([])
   const firstDay = ev.start_date || ev.activity_date
 
@@ -215,11 +216,16 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
   async function patch(id, p) { const { error } = await supabase.from('event_todos').update(p).eq('id', id); if (error) return onToast('Could not update: ' + error.message); load() }
   function toggleDone(r) { return patch(r.id, r.done ? { done: false, done_at: null, done_by: null } : { done: true, done_at: new Date().toISOString(), done_by: me?.id || null }) }
   async function remove(r) { if (!window.confirm(`Delete to-do “${r.text}”?`)) return; const { error } = await supabase.from('event_todos').delete().eq('id', r.id); if (error) return onToast('Could not delete: ' + error.message); load() }
-  async function move(idx, dir) {
-    const j = idx + dir; if (j < 0 || j >= rows.length) return
-    const a = rows[idx], b = rows[j]
-    await supabase.from('event_todos').update({ sort_order: b.sort_order }).eq('id', a.id)
-    await supabase.from('event_todos').update({ sort_order: a.sort_order }).eq('id', b.id)
+  // Drag-to-reorder: drop `fromId` at `toId`'s position, renumber sort_order, persist.
+  async function reorder(fromId, toId) {
+    if (!fromId || fromId === toId) return
+    const arr = [...rows]
+    const from = arr.findIndex((r) => r.id === fromId)
+    const to = arr.findIndex((r) => r.id === toId)
+    if (from < 0 || to < 0) return
+    const [moved] = arr.splice(from, 1); arr.splice(to, 0, moved)
+    setRows(arr.map((r, i) => ({ ...r, sort_order: i }))) // optimistic
+    await Promise.all(arr.map((r, i) => supabase.from('event_todos').update({ sort_order: i }).eq('id', r.id)))
     load()
   }
 
@@ -243,11 +249,14 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
       </div>
       {rows.length === 0 && <Empty label="No to-dos yet — add the first below." />}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {rows.map((r, i) => (
-          <TodoRow key={r.id} r={r} i={i} n={rows.length} isCoordinator={isCoordinator}
+        {rows.map((r) => (
+          <TodoRow key={r.id} r={r} isCoordinator={isCoordinator}
             menuOpen={menuFor === r.id} onMenu={() => setMenuFor(menuFor === r.id ? null : r.id)}
             onToggle={() => toggleDone(r)} onText={(v) => patch(r.id, { text: v })} onDate={(v) => patch(r.id, { due_date: v || null })}
-            onUp={() => move(i, -1)} onDown={() => move(i, 1)} onDelete={() => remove(r)} onPick={(k) => pickAction(r, k)} />
+            onDelete={() => remove(r)} onPick={(k) => pickAction(r, k)}
+            dragging={dragId === r.id}
+            onDragStart={() => setDragId(r.id)} onDragEnd={() => setDragId(null)}
+            onDragOver={(e) => e.preventDefault()} onDrop={() => { reorder(dragId, r.id); setDragId(null) }} />
         ))}
       </div>
       {isCoordinator && (
@@ -276,9 +285,11 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
   )
 }
 
-function TodoRow({ r, i, n, isCoordinator, menuOpen, onMenu, onToggle, onText, onDate, onUp, onDown, onDelete, onPick }) {
+function TodoRow({ r, isCoordinator, menuOpen, onMenu, onToggle, onText, onDate, onDelete, onPick, dragging, onDragStart, onDragEnd, onDragOver, onDrop }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #F4EEE2' }}>
+    <div draggable={isCoordinator} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop}
+      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #F4EEE2', opacity: dragging ? 0.4 : 1, background: dragging ? '#FBF1E6' : 'transparent' }}>
+      {isCoordinator && <span title="Drag to reorder" style={{ cursor: 'grab', color: 'var(--muted-2)', fontSize: 14, flexShrink: 0, userSelect: 'none' }}>⠿</span>}
       <input type="checkbox" checked={!!r.done} disabled={!isCoordinator} onChange={onToggle} style={{ width: 16, height: 16, flexShrink: 0, cursor: isCoordinator ? 'pointer' : 'default' }} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
         {isCoordinator ? (
@@ -295,8 +306,6 @@ function TodoRow({ r, i, n, isCoordinator, menuOpen, onMenu, onToggle, onText, o
       ) : r.due_date ? <span style={{ fontSize: 11.5, color: 'var(--muted)', flexShrink: 0 }}>{fmtDay(r.due_date)}</span> : null}
       {isCoordinator && (
         <div style={{ display: 'flex', gap: 2, position: 'relative', flexShrink: 0 }}>
-          <button title="Move up" onClick={onUp} disabled={i === 0} style={{ ...miniBtn, opacity: i === 0 ? 0.4 : 1 }}>↑</button>
-          <button title="Move down" onClick={onDown} disabled={i === n - 1} style={{ ...miniBtn, opacity: i === n - 1 ? 0.4 : 1 }}>↓</button>
           <button title="Actions" onClick={onMenu} style={miniBtn}>⋯</button>
           {menuOpen && (
             <div className="card" style={{ position: 'absolute', top: 26, right: 0, zIndex: 30, boxShadow: 'var(--shadow-lg)', padding: 6, width: 214 }}>

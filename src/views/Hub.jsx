@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { rangeLabel, groupPhases, phaseFlag, flaggedPhases, currentPhase, phaseTone, FLAG_META, PHASE_SHORT, fmtDay } from '../lib/planning'
+import { rangeLabel, groupPhases, phaseFlag, flaggedPhases, currentPhase, phaseTone, FLAG_META, PHASE_SHORT, fmtDay, countdownLabel } from '../lib/planning'
 import { ensureSeriesWindow } from '../lib/series'
 import { fetchActivityTypes } from '../lib/activityTypes'
 import EventList from '../components/EventList'
@@ -140,18 +140,14 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
           <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>{rangeLabel(ev.start_date || ev.activity_date, ev.end_date)} · {ev.center_id}</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-          <span className="pill" style={{ background: phaseTone(cur.kind).bg, color: phaseTone(cur.kind).fg }}>{cur.label}</span>
+          {(() => {
+            const cd = countdownLabel(ev.start_date || ev.activity_date)
+            const over = cd.startsWith('Overdue')
+            return cd ? <span className="pill" style={{ background: over ? '#FBE0DA' : '#EAF2E5', color: over ? '#B5391F' : '#4E7C3F', fontWeight: 600 }}>{cd}</span> : null
+          })()}
           <EventActions activity={ev} me={me} isCoordinator={isCoordinator} onToast={onToast} onChanged={reload} onDeleted={onBack} />
         </div>
       </div>
-
-      {flags.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-          {flags.map((f) => (
-            <span key={f.kind} className="pill" style={{ background: FLAG_META[f.flag].bg, color: FLAG_META[f.flag].fg, fontSize: 11.5 }}>{PHASE_SHORT[f.kind] || f.kind} · {FLAG_META[f.flag].label}</span>
-          ))}
-        </div>
-      )}
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
         {TABS.map((t) => (
@@ -407,7 +403,6 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 15, fontWeight: 600 }}>{block.heading}{block.activity_type_id && typeLabel(block.activity_type_id) ? <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {typeLabel(block.activity_type_id)}</span> : null}</div>
-          <div style={{ fontSize: 12, color: 'var(--muted)' }}>lead: {pocs.length ? pocs.map((m) => people[m.person_id]?.full_name || '—').join(', ') : 'none'}</div>
         </div>
         <span className="pill" style={full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
         {isCoordinator && (

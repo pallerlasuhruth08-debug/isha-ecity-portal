@@ -2,6 +2,10 @@
    Volunteer Care Portal — design system
    Ported from "Volunteer Care Portal.dc.html" (Claude Design)
    ============================================================ */
+
+/* Date inputs read as clickable everywhere (event forms and beyond). */
+input[type="date"] { cursor: pointer; }
+
 :root {
   --bg: #f4ede1;
   --panel: #fbf6ec;

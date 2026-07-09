@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { pill } from '../lib/ui'
-import { fmtDay } from '../lib/planning'
+import { phaseChipLabel } from '../lib/planning'
 
 // Create a team = create an ACTIVITY BLOCK on this event (one source of truth).
 // Shared by the Teams tab and the Planning to-do launchers. onCreated(blockId) fires
@@ -13,8 +13,9 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
   const [name, setName] = useState(block?.heading || '')
   const [nameEdited, setNameEdited] = useState(!!block)
   const [needed, setNeeded] = useState(block?.volunteers_needed ?? 4)
-  const [phaseId, setPhaseId] = useState(block?.phase_id || '')
+  const [phaseIds, setPhaseIds] = useState([]) // multi-phase (block_phases junction)
   const [phases, setPhases] = useState([])
+  const [attnLocked, setAttnLocked] = useState(false) // team has captured attendance → activity_type locked
   const [leadQ, setLeadQ] = useState('')
   const [leadResults, setLeadResults] = useState([])
   const [lead, setLead] = useState(null) // { id, full_name }
@@ -26,6 +27,21 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
     supabase.from('event_phases').select('id, label, kind, start_by, finish_by').eq('activity_id', ev.id).order('sort_order')
       .then(({ data }) => setPhases(data || []))
   }, [ev.id])
+  // Edit mode: load the team's current phases + whether it has captured attendance
+  // (marked assignment or event-level rows) — which locks the activity_type.
+  useEffect(() => {
+    if (!block) return
+    supabase.from('block_phases').select('phase_id').eq('block_id', block.id)
+      .then(({ data }) => setPhaseIds((data || []).map((r) => r.phase_id)))
+    ;(async () => {
+      const { count: attCount } = await supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('block_id', block.id)
+      const { data: asg } = await supabase.from('block_assignments').select('status').eq('block_id', block.id)
+      const marked = (asg || []).some((a) => ['show', 'no_show', 'involved'].includes(a.status))
+      setAttnLocked((attCount || 0) > 0 || marked)
+    })()
+  }, [block])
+
+  const togglePhase = (id) => setPhaseIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id])
   useEffect(() => {
     if (leadQ.trim().length < 2) { setLeadResults([]); return }
     const h = setTimeout(async () => {
@@ -51,24 +67,34 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
     } catch (e) { onToast('Could not add type: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
+  // Sync the block_phases junction to the selected phase set.
+  async function syncPhases(blockId) {
+    await supabase.from('block_phases').delete().eq('block_id', blockId)
+    if (phaseIds.length) await supabase.from('block_phases').insert(phaseIds.map((pid) => ({ block_id: blockId, phase_id: pid })))
+  }
+
   async function create() {
     if (!typeId) return onToast('Pick an activity type.')
     setBusy(true)
     try {
+      const primaryPhase = phaseIds[0] || null // legacy phase_id mirrors the first selected phase
       if (editing) {
-        const { error } = await supabase.from('activity_blocks').update({
-          heading: effName, activity_type_id: typeId, volunteers_needed: Number(needed) || 0, phase_id: phaseId || null,
-        }).eq('id', block.id)
+        // activity_type is LOCKED once attendance exists — never rewrite it here.
+        const patch = { heading: effName, volunteers_needed: Number(needed) || 0, phase_id: primaryPhase }
+        if (!attnLocked) patch.activity_type_id = typeId
+        const { error } = await supabase.from('activity_blocks').update(patch).eq('id', block.id)
         if (error) throw error
+        await syncPhases(block.id)
         onToast(`Team "${effName}" updated.`)
         onCreated(block.id)
         return
       }
       const { data: blk, error } = await supabase.from('activity_blocks').insert({
         activity_id: ev.id, heading: effName, activity_type_id: typeId, volunteers_needed: Number(needed) || 0,
-        phase_id: phaseId || null, recruiting_method: 'manual', attendance_mode: 'per_day', created_by: me?.id || null,
+        phase_id: primaryPhase, recruiting_method: 'manual', attendance_mode: 'per_day', created_by: me?.id || null,
       }).select('id').single()
       if (error) throw error
+      await syncPhases(blk.id)
       if (lead) {
         await supabase.from('block_assignments').insert({ block_id: blk.id, person_id: lead.id, day_date: firstDay, status: 'assigned', is_poc: true, assigned_by: me?.id || null })
       }
@@ -89,9 +115,22 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>A team is an activity block on {ev.name}. Dates come from the phase; mode is set in Planning.</div>
 
+        {/* Order: Team Name → Activity Type → Size → Phase(s) */}
         <div style={{ marginBottom: 14 }}>
-          <span style={lbl}>Activity <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· shared list</span></span>
-          {addingType ? (
+          <span style={lbl}>Team name</span>
+          <input value={nameEdited ? name : autoName} onChange={(e) => { setName(e.target.value); setNameEdited(true) }} placeholder={autoName} style={fld} />
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <span style={lbl}>Activity type <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· shared list</span></span>
+          {attnLocked ? (
+            <>
+              <select value={typeId} disabled style={{ ...fld, opacity: 0.6, cursor: 'not-allowed' }}>
+                {allTypes.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+              <div style={{ fontSize: 11.5, color: '#9C4A14', marginTop: 5 }}>🔒 Locked — this team has captured attendance. Changing its activity type would rewrite that participation history.</div>
+            </>
+          ) : addingType ? (
             <div style={{ display: 'flex', gap: 8 }}>
               <input autoFocus value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="New activity (e.g. Kitchen)" onKeyDown={(e) => e.key === 'Enter' && createType()} style={fld} />
               <button className="btn btn-primary" disabled={busy || !newType.trim()} onClick={createType} style={{ fontSize: 12.5, padding: '8px 12px' }}>Add</button>
@@ -108,24 +147,22 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 130 }}>
-            <span style={lbl}>Team name</span>
-            <input value={nameEdited ? name : autoName} onChange={(e) => { setName(e.target.value); setNameEdited(true) }} placeholder={autoName} style={fld} />
-          </div>
-          <div style={{ width: 110 }}>
-            <span style={lbl}>Size needed</span>
-            <input type="number" min={0} value={needed} onChange={(e) => setNeeded(e.target.value)} style={fld} />
-          </div>
+        <div style={{ marginBottom: 14, width: 130 }}>
+          <span style={lbl}>Size needed</span>
+          <input type="number" min={0} value={needed} onChange={(e) => setNeeded(e.target.value)} style={fld} />
         </div>
 
         {phases.length > 0 && (
           <div style={{ marginBottom: 14 }}>
-            <span style={lbl}>Phase <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· carries the dates</span></span>
-            <select value={phaseId} onChange={(e) => setPhaseId(e.target.value)} style={fld}>
-              <option value="">— unphased (event span) —</option>
-              {phases.map((p) => <option key={p.id} value={p.id}>{p.label}{p.start_by ? ` · ${fmtDay(p.start_by)}${p.finish_by && p.finish_by !== p.start_by ? `–${fmtDay(p.finish_by)}` : ''}` : ''}</option>)}
-            </select>
+            <span style={lbl}>Phase(s) <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· a team can span several</span></span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {phases.map((p) => (
+                <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '6px 9px', border: '1px solid var(--border)', borderRadius: 8, background: phaseIds.includes(p.id) ? '#F6E8D8' : '#fff' }}>
+                  <input type="checkbox" checked={phaseIds.includes(p.id)} onChange={() => togglePhase(p.id)} />
+                  {phaseChipLabel(p)}
+                </label>
+              ))}
+            </div>
           </div>
         )}
 

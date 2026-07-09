@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { pill } from '../lib/ui'
-import { eventDays, currentPhase, phaseTone, rangeLabel, todayISO, seriesDatesUpTo, addDaysISO } from '../lib/planning'
+import { eventDays, currentPhase, phaseTone, rangeLabel, todayISO, seriesDatesUpTo, addDaysISO, countdownLabel } from '../lib/planning'
 
 // Shared event-list UI used by BOTH the Attendance and Planning pages. Identical
 // layout; the PAGE supplies onOpen (its own detail) — the two never share a detail.
@@ -49,9 +49,9 @@ export default function EventList({ events, phasesByEvent = {}, onOpen, right = 
             {tab === 'upcoming' ? 'No upcoming events.' : 'No events yet.'}
           </div>
         ) : shown.map((e) => {
-          const ph = currentPhase(e, phasesByEvent[e.id])
-          const tone = phaseTone(ph.kind)
           const past = (e.end_date || e.start_date || e.activity_date || '') < t
+          const cd = countdownLabel(e.start_date || e.activity_date)
+          const over = cd.startsWith('Overdue')
           return (
             <div key={e.id} className="rowhover" onClick={() => onOpen(e.id)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', borderBottom: '1px solid #F1E9DB', cursor: 'pointer' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -62,7 +62,7 @@ export default function EventList({ events, phasesByEvent = {}, onOpen, right = 
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>{rangeLabel(e.start_date || e.activity_date, e.end_date)} · {e.center_id}</div>
               </div>
-              <span className="pill" style={{ background: tone.bg, color: tone.fg, opacity: past ? 0.65 : 1 }}>{ph.label}</span>
+              {cd && !past && <span className="pill" style={{ background: over ? '#FBE0DA' : '#EAF2E5', color: over ? '#B5391F' : '#4E7C3F', fontWeight: 600, whiteSpace: 'nowrap' }}>{cd}</span>}
               <span style={{ fontSize: 12, color: 'var(--orange)', fontWeight: 600, whiteSpace: 'nowrap' }}>Open →</span>
             </div>
           )
@@ -133,7 +133,7 @@ export function MonthGrid({ events, phasesByEvent = {}, series = [], onOpen, onO
           <div key={w} style={{ background: 'var(--panel)', padding: '6px', fontSize: 9.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)', textAlign: 'center' }}>{w}</div>
         ))}
         {cells.map((d, i) => (
-          <div key={i} onClick={() => d && onCreateDay && onCreateDay(d)} style={{ background: d === t ? '#FBF1E6' : '#fff', minHeight: compact ? 58 : 84, padding: 4, cursor: d && onCreateDay ? 'pointer' : 'default', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div key={i} onClick={() => d && onCreateDay && onCreateDay(d)} style={{ background: d === t ? '#FBF1E6' : '#fff', height: compact ? 62 : 88, overflow: 'hidden', padding: 4, cursor: d && onCreateDay ? 'pointer' : 'default', display: 'flex', flexDirection: 'column', gap: 2 }}>
             {d && <div style={{ fontSize: 10, fontWeight: d === t ? 700 : 500, color: d === t ? 'var(--orange)' : 'var(--muted-2)' }}>{Number(d.slice(-2))}</div>}
             {(() => {
               const items = [...(byDay[d] || []), ...(projectedByDay[d] || [])]

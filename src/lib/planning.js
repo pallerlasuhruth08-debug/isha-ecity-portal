@@ -317,3 +317,30 @@ export function rangeLabel(start, end) {
   if (!end || end === start) return fmtDay(start)
   return `${fmtDay(start)} – ${fmtDay(end)}`
 }
+
+// Phase chip label WITHOUT the pre-far/pre-near jargon: the descriptor + date span,
+// e.g. "Promotion · 1 Jul–9 Jul". Phases carry a label like "Pre-far · promotion".
+export function phaseChipLabel(p) {
+  if (!p) return ''
+  const raw = (p.label || '').includes('·') ? p.label.split('·').slice(1).join('·').trim() : (p.label || p.kind || 'Phase')
+  const name = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Phase'
+  const span = p.start_by ? ` · ${fmtDay(p.start_by)}${p.finish_by && p.finish_by !== p.start_by ? `–${fmtDay(p.finish_by)}` : ''}` : ''
+  return name + span
+}
+
+// Natural-language countdown to an event's start (or overdue days past it).
+export function countdownLabel(startISO) {
+  if (!startISO) return ''
+  const today = todayISO()
+  const days = daysBetweenISO(startISO, today) // start - today
+  if (days < 0) return `Overdue · ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'}`
+  if (days === 0) return 'Today'
+  if (days === 1) return '1 day to go'
+  if (days < 14) return `${days} days to go`
+  if (days < 60) { const w = Math.round(days / 7); return `${w} week${w === 1 ? '' : 's'} to go` }
+  const m = Math.round(days / 30); return `${m} month${m === 1 ? '' : 's'} to go`
+}
+
+function daysBetweenISO(a, b) {
+  return Math.round((new Date(a + 'T00:00:00') - new Date(b + 'T00:00:00')) / 86400000)
+}
