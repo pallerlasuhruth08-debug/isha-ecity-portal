@@ -334,7 +334,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
       )}
       {blocks.length === 0 ? <Empty label="No teams yet — create one below." /> : blocks.map((b) => (
         <TeamCard key={b.id} ev={ev} block={b} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator} types={types}
-          assigns={assigns.filter((a) => a.block_id === b.id)} people={people} onToast={onToast} onChanged={load} />
+          assigns={assigns.filter((a) => a.block_id === b.id)} allAssigns={assigns} allBlocks={blocks} people={people} onToast={onToast} onChanged={load} />
       ))}
       {isCoordinator && (
         <button className="btn btn-primary tap44" style={{ padding: '11px', fontSize: 14 }} onClick={() => setCreating(true)}>＋ Create team</button>
@@ -344,7 +344,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   )
 }
 
-function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, people, types = [], onToast, onChanged }) {
+function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, types = [], onToast, onChanged }) {
   const [q, setQ] = useState('')
   const [results, setResults] = useState([])
   const [busy, setBusy] = useState(false)
@@ -365,6 +365,15 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   const full = short <= 0
   const pocs = members.filter((m) => m.poc)
   const memberIds = new Set(members.map((m) => m.person_id))
+
+  // Existing team memberships FOR THIS EVENT ONLY — shown in the add-member picker so a
+  // coordinator adding someone sees where they already are, without being blocked (a
+  // person can legitimately be on more than one team for the same event).
+  const blockNameById = Object.fromEntries(allBlocks.map((bl) => [bl.id, bl.heading]))
+  const teamsForPerson = (personId) => {
+    const ids = [...new Set(allAssigns.filter((a) => a.person_id === personId && ['assigned', 'show', 'involved'].includes(a.status)).map((a) => a.block_id))]
+    return ids.map((id) => ({ id, name: blockNameById[id] || 'Unknown team' }))
+  }
 
   useEffect(() => {
     if (q.trim().length < 2) { setResults([]); return }
@@ -479,12 +488,25 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
           <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a person to add…" style={{ fontSize: 13, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, width: '100%' }} />
           {results.length > 0 && (
             <div className="card" style={{ position: 'absolute', top: 42, left: 0, right: 0, zIndex: 20, boxShadow: 'var(--shadow-lg)', padding: 6 }}>
-              {results.map((p) => (
-                <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, cursor: 'pointer' }} onClick={() => !busy && addMember(p)}>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{p.full_name}</div>
-                  <span style={{ marginLeft: 'auto', fontSize: 11.5, color: memberIds.has(p.id) ? 'var(--muted)' : 'var(--orange)', fontWeight: 600 }}>{memberIds.has(p.id) ? 'on team' : '+ add'}</span>
-                </div>
-              ))}
+              {results.map((p) => {
+                const teams = teamsForPerson(p.id)
+                const inThisTeam = teams.some((t) => t.id === block.id)
+                return (
+                  <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, cursor: 'pointer' }} onClick={() => !busy && addMember(p)}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>{p.full_name}</div>
+                      {inThisTeam ? (
+                        <div style={{ fontSize: 11, fontWeight: 600, color: '#9C4A14' }}>Already a member of this team.</div>
+                      ) : teams.length ? (
+                        <div style={{ fontSize: 11, color: 'var(--muted-2)' }}>Already in: {teams.map((t) => t.name).join(' · ')}</div>
+                      ) : (
+                        <div style={{ fontSize: 11, color: 'var(--muted-2)' }}>Not in any team yet</div>
+                      )}
+                    </div>
+                    <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 11.5, color: memberIds.has(p.id) ? 'var(--muted)' : 'var(--orange)', fontWeight: 600 }}>{memberIds.has(p.id) ? 'on team' : '+ add'}</span>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

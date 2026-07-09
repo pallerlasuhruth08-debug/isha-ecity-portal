@@ -19,6 +19,7 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
   const [leadQ, setLeadQ] = useState('')
   const [leadResults, setLeadResults] = useState([])
   const [lead, setLead] = useState(null) // { id, full_name }
+  const [eventTeamsByPerson, setEventTeamsByPerson] = useState({}) // person_id -> [team names], THIS event only
   const [addingType, setAddingType] = useState(false)
   const [newType, setNewType] = useState('')
   const [busy, setBusy] = useState(false)
@@ -40,6 +41,27 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
       setAttnLocked((attCount || 0) > 0 || marked)
     })()
   }, [block])
+
+  // Existing team memberships FOR THIS EVENT ONLY — shown in the lead/POC picker so a
+  // coordinator sees where a person already is before picking them; never blocks it.
+  useEffect(() => {
+    if (editing) return // this picker only appears when creating a brand-new team
+    let alive = true
+    ;(async () => {
+      const { data: bl } = await supabase.from('activity_blocks').select('id, heading').eq('activity_id', ev.id).is('archived_at', null)
+      const ids = (bl || []).map((b) => b.id)
+      if (!ids.length) { if (alive) setEventTeamsByPerson({}); return }
+      const { data: asg } = await supabase.from('block_assignments').select('person_id, block_id, status').in('block_id', ids)
+      const nameById = Object.fromEntries((bl || []).map((b) => [b.id, b.heading]))
+      const map = {}
+      for (const a of asg || []) {
+        if (!['assigned', 'show', 'involved'].includes(a.status)) continue
+        ;(map[a.person_id] ||= new Set()).add(nameById[a.block_id] || 'Unknown team')
+      }
+      if (alive) setEventTeamsByPerson(Object.fromEntries(Object.entries(map).map(([k, v]) => [k, [...v]])))
+    })()
+    return () => { alive = false }
+  }, [ev.id, editing])
 
   const togglePhase = (id) => setPhaseIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id])
   useEffect(() => {
@@ -179,9 +201,15 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
               <input value={leadQ} onChange={(e) => setLeadQ(e.target.value)} placeholder="Search a person…" style={fld} />
               {leadResults.length > 0 && (
                 <div className="card" style={{ position: 'absolute', top: 62, left: 0, right: 0, zIndex: 20, boxShadow: 'var(--shadow-lg)', padding: 6 }}>
-                  {leadResults.map((p) => (
-                    <div key={p.id} className="rowhover" style={{ padding: '7px 9px', borderRadius: 8, cursor: 'pointer', fontSize: 13 }} onClick={() => { setLead(p); setLeadQ(''); setLeadResults([]) }}>{p.full_name}</div>
-                  ))}
+                  {leadResults.map((p) => {
+                    const teams = eventTeamsByPerson[p.id] || []
+                    return (
+                      <div key={p.id} className="rowhover" style={{ padding: '7px 9px', borderRadius: 8, cursor: 'pointer' }} onClick={() => { setLead(p); setLeadQ(''); setLeadResults([]) }}>
+                        <div style={{ fontSize: 13 }}>{p.full_name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--muted-2)' }}>{teams.length ? `Already in: ${teams.join(' · ')}` : 'Not in any team yet'}</div>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </>
