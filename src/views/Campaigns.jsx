@@ -188,7 +188,8 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
   const enriched = useMemo(() => {
     const map = {}
     for (const c of campaigns || []) {
-      map[c.id] = { ...c, contacts: [], removed: [], callers: {}, callerPool: callerPools[c.id] || [], splitCount: (splitsByCampaign[c.id] || []).length }
+      const splitByNumber = Object.fromEntries((splitsByCampaign[c.id] || []).map((s) => [s.split_number, s]))
+      map[c.id] = { ...c, contacts: [], removed: [], callers: {}, callerPool: callerPools[c.id] || [], splitCount: (splitsByCampaign[c.id] || []).length, splitByNumber }
     }
     for (const j of journeys) {
       const bucket = map[j.campaign_id]
@@ -198,6 +199,11 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
       const callerKey = j.caller_source && j.caller_id ? `${j.caller_source}:${j.caller_id}` : null
       const assignee = (callerKey && callerNames[callerKey]) || j.assignee?.full_name || null
       const src = j.caller_source === 'nurturing_team' ? ' · Team' : j.caller_source === 'volunteer' ? ' · Volunteer' : ''
+      // Messaging-campaign batch assignee — distinct from the calling-campaign
+      // "assigned" caller above. Recipients self-organize into campaign_splits
+      // (batches) that volunteers claim via the portal; this reads who claimed
+      // the batch this recipient's split_number belongs to (null if unclaimed).
+      const split = j.split_number != null ? bucket.splitByNumber[j.split_number] : null
       const row = {
         journeyId: j.id,
         personId: j.person?.id || null,
@@ -205,6 +211,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
         phone: j.person?.phone || '',
         callerKey,
         assigned: assignee ? assignee + src : '— unassigned —',
+        assignedTo: split?.claimed_by_name || null,
         last: lastTouch(logs),
         status,
         messageStatus: j.message_status || 'to_message',
@@ -234,6 +241,19 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
       c.msgToMessage = c.contacts.filter((x) => x.messageStatus === 'to_message').length
       c.msgSent = c.contacts.filter((x) => x.messageStatus === 'sent').length
       c.msgResponded = c.contacts.filter((x) => x.messageStatus === 'responded').length
+      // Distinct batch-assignee names (+ counts) for the coordinator's "Assigned to"
+      // filter — messaging campaigns only, since that's the only assignment that comes
+      // from campaign_splits. "Unassigned" (null name) sorts last.
+      if (typeOf(c) === 'messaging') {
+        const byName = {}
+        for (const x of c.contacts) {
+          const k = x.assignedTo || '__unassigned__'
+          byName[k] = (byName[k] || 0) + 1
+        }
+        c.assigneeOptions = Object.entries(byName)
+          .map(([k, count]) => ({ name: k === '__unassigned__' ? null : k, count }))
+          .sort((a, b) => (a.name || '￿').localeCompare(b.name || '￿'))
+      }
     }
     return map
   }, [campaigns, journeys, logsByJourney, callerNames, callerPools, splitsByCampaign])
@@ -596,6 +616,20 @@ function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
   )
 }
 
+// Messaging campaigns only: who claimed the batch this recipient falls into
+// (campaign_splits.claimed_by_name), replacing the caller-assignment select
+// that column shows for calling campaigns — batches are self-claimed via the
+// volunteer portal, not hand-assigned, so this is read-only.
+function AssignedToLine({ assignedTo, batchNumber }) {
+  if (!assignedTo) return <span style={{ fontSize: 12, color: 'var(--orange)', fontStyle: 'italic' }}>Unassigned</span>
+  return (
+    <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+      Assigned to: <span style={{ color: 'var(--ink-soft)', fontWeight: 600 }}>{assignedTo}</span>
+      {batchNumber != null && ` · Batch ${batchNumber}`}
+    </span>
+  )
+}
+
 function Metric({ v, label, color }) {
   return (
     <div>
@@ -642,6 +676,8 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
   const [editing, setEditing] = useState(false)
   const [busyDel, setBusyDel] = useState(false)
   const [lastChannel, setLastChannel] = useState({}) // journeyId -> 'sms'|'whatsapp', last Message/WhatsApp link tapped
+  const [assigneeFilter, setAssigneeFilter] = useState('all') // messaging only: 'all' | claimed_by_name | '__unassigned__'
+  useEffect(() => { setAssigneeFilter('all') }, [c.id])
   const myId = me?.id
   const myName = me?.full_name || ''
   const messaging = c.campaign_type === 'messaging' // WhatsApp/SMS only — no call button, script or log
@@ -724,6 +760,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
   const MESSAGE_ORDER = { to_message: 0, sent: 1, responded: 2 }
   const shown = [...c.contacts]
     .filter((x) => callFilter === 'all' || x[statusKey] === callFilter)
+    .filter((x) => !messaging || assigneeFilter === 'all' || (assigneeFilter === '__unassigned__' ? !x.assignedTo : x.assignedTo === assigneeFilter))
     .sort((a, b) => messaging
       ? (MESSAGE_ORDER[a.messageStatus] ?? 9) - (MESSAGE_ORDER[b.messageStatus] ?? 9)
       : (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9))
@@ -903,6 +940,14 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             </button>
           )
         })}
+        {messaging && isCoordinator && (c.assigneeOptions || []).length > 0 && (
+          <select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} title="Filter by assigned volunteer"
+            style={{ padding: '7px 11px', fontSize: 12, fontWeight: 600, borderRadius: 20, border: '1px solid var(--border)', background: '#fff', color: assigneeFilter === 'all' ? 'var(--ink-soft)' : 'var(--ink)', cursor: 'pointer', flexShrink: 0 }}>
+            <option value="all">Assigned to · All volunteers</option>
+            {c.assigneeOptions.filter((o) => o.name).map((o) => <option key={o.name} value={o.name}>{o.name} ({o.count})</option>)}
+            {c.assigneeOptions.filter((o) => !o.name).map((o) => <option key="__unassigned__" value="__unassigned__">Unassigned ({o.count})</option>)}
+          </select>
+        )}
       </div>
       <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
         {!isPhone && (
@@ -928,6 +973,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
               </div>
               <span className="pill" style={{ ...(messaging ? pillForMessage(p.messageStatus) : pillFor(p.status)), flexShrink: 0 }}>{messaging ? labelForMessage(p.messageStatus) : p.status}</span>
             </div>
+            {messaging && <div style={{ marginTop: 3, marginLeft: 34 }}><AssignedToLine assignedTo={p.assignedTo} batchNumber={p.splitNumber} /></div>}
             {/* Row 2: Call, Message, WhatsApp, Log/Sent, ⋯ — equal width, one row */}
             {isCoordinator && (
               <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
@@ -953,7 +999,9 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             </div>
             <div style={{ fontSize: 14, color: p.phone ? 'var(--ink-soft)' : 'var(--muted-2)' }}>{p.phone || 'no phone on record'}</div>
             <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>
-              {isCoordinator ? (
+              {messaging ? (
+                <AssignedToLine assignedTo={p.assignedTo} batchNumber={p.splitNumber} />
+              ) : isCoordinator ? (
                 <select
                   value={p.callerKey || ''}
                   disabled={busyId === p.journeyId}
@@ -1148,7 +1196,9 @@ function RecipientDetailPanel({ row, isCoordinator, actorNames, messaging = fals
       <div style={{ padding: '20px 26px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div className="card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <DetailField label="Phone" value={row.phone || 'No phone on record'} />
-          {isCoordinator && <DetailField label="Assigned to" value={row.assigned} />}
+          {isCoordinator && (
+            <DetailField label="Assigned to" value={messaging ? (row.assignedTo ? `${row.assignedTo}${row.splitNumber != null ? ' · Batch ' + row.splitNumber : ''}` : 'Unassigned') : row.assigned} />
+          )}
           <DetailField label="Last touch" value={row.last + (isCoordinator && row.logs[0] ? ` · by ${actorNames[row.logs[0].logged_by] || '—'}` : '')} />
         </div>
       </div>
