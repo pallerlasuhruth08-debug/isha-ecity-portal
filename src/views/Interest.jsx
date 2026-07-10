@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { Pad, ErrorCard, Loading, Empty, Chip, PagerBar } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Chip, PagerPill } from '../components/View'
 import CampaignForm from '../components/CampaignForm'
 import SidePanel, { PanelHeader } from '../components/SidePanel'
 import EventInterestPanel from '../components/EventInterestPanel'
@@ -291,6 +291,10 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       {err && <ErrorCard>Couldn't load interest inbox: {err}</ErrorCard>}
 
       {tab === 'events' ? <EventInterestPanel uid={uid} scopeEventId={eventScopeId} onScopeConsumed={onScopeConsumed} onToast={onToast} recipientDraft={recipientDraft} onRecipientsDone={onRecipientsDone} /> : (
+      <>
+      <div style={{ marginBottom: 10, fontSize: 14, color: 'var(--muted)' }}>
+        {loading ? 'Loading…' : `${total} ${total === 1 ? 'person' : 'people'}`}
+      </div>
       <div className="card" style={{ overflow: 'hidden' }}>
           {loading && <Loading label="Loading interest inbox…" />}
           {!loading && shown.length === 0 && <Empty label="Nothing to triage here." />}
@@ -311,8 +315,9 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
               {it.kind === 'volunteering' && <span className="pill" style={STATUS_PILL[it.status] || STATUS_PILL.new}>{it.status}</span>}
             </div>
           ))}
-          {!loading && total > 0 && <PagerBar page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />}
         </div>
+      {!loading && total > 0 && <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} />}
+      </>
       )}
 
       {sel && (

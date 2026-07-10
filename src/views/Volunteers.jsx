@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { STAGE_PILL, initials, avatarFor, pill } from '../lib/ui'
-import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerBar, SelectionBar } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerPill } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import { multiFieldOr, PEOPLE_SEARCH_FIELDS } from '../lib/searchFilter'
@@ -370,7 +370,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const isFullySelected = sel.headerState(total) === 'all'
 
   // Header checkbox = stage 1 of two-stage select-all: selects/deselects the CURRENT
-  // PAGE only. Stage 2 ("Select all N matching this filter") lives in the SelectionBar.
+  // PAGE only. Stage 2 ("Select all N matching this filter") lives in the pagination pill.
   const pageIds = rows ? rows.map((r) => r.id) : []
   const pageSelectedCount = pageIds.filter((id) => sel.isSelected(id)).length
   const pageHeaderState = pageIds.length === 0 ? 'none' : pageSelectedCount === 0 ? 'none' : pageSelectedCount === pageIds.length ? 'all' : 'partial'
@@ -412,15 +412,13 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
           <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onRecipientsDone && onRecipientsDone()}>Cancel</button>
         </div>
       )}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, color: 'var(--muted)' }}>
-          {loading ? 'Loading…' : (
-            <>
-              {total} total
-              <span className="mobile-hide"> · click a row to open the profile; use checkboxes to build a campaign.</span>
-            </>
-          )}
-        </div>
+      <div style={{ marginBottom: 16, fontSize: 14, color: 'var(--muted)' }}>
+        {loading ? 'Loading…' : (
+          <>
+            {total} volunteer{total === 1 ? '' : 's'}
+            <span className="mobile-hide"> · click a row to open the profile; use checkboxes to build a campaign.</span>
+          </>
+        )}
       </div>
 
       {err && <ErrorCard>Couldn't load volunteers: {err}</ErrorCard>}
@@ -459,16 +457,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
         </div>
       )}
 
-      <SelectionBar isFullySelected={isFullySelected} count={selCount} total={total} onSelectAll={sel.selectAllMatching}
-        onCreate={recipientDraft ? addSelectedToCampaign : openCampaign}
-        createLabel={recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : 'Create campaign'}
-        onAssign={recipientDraft ? undefined : openAssign} onClear={sel.clear} />
-
       <div className="card" style={{ overflow: 'hidden' }}>
-        {!loading && total > 0 && <PagerBar position="top" page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />}
         {/* Header: grid column labels on desktop/tablet; a compact select-all
             bar on phone (there are no columns to label in card mode). Checkbox here
-            selects only the CURRENT PAGE — "select all matching" lives in the SelectionBar. */}
+            selects only the CURRENT PAGE — "select all matching" lives in the pagination pill. */}
         {isPhone ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
             <Checkbox state={pageHeaderState} onClick={(e) => { e.stopPropagation(); togglePage() }} />
@@ -548,8 +540,17 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
             </div>
           ))}
 
-        {!loading && total > 0 && <PagerBar page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />}
       </div>
+      {!loading && total > 0 && (
+        <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize}
+          selection={{
+            count: selCount, total, isFullySelected, onSelectAll: sel.selectAllMatching, onClear: sel.clear,
+            actions: [
+              ...(recipientDraft ? [] : [{ label: 'Assign to nurturer', onClick: openAssign, disabled: resolving }]),
+              { label: recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : (resolving ? 'Preparing…' : 'Create campaign'), onClick: recipientDraft ? addSelectedToCampaign : openCampaign, disabled: resolving, primary: true },
+            ],
+          }} />
+      )}
 
       {showForm && (
         <CampaignForm audience="volunteer" personIds={formIds} eventId={campaignDraft?.eventId || null}

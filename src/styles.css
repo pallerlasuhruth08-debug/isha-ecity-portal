@@ -191,6 +191,152 @@ button {
   white-space: nowrap;
 }
 
+/* Floating pagination pill (see components/View.jsx PagerPill). Hidden until the
+   page is scrolled past ~80% of a viewport height, then fades in bottom-center. */
+.pager-pill {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  height: 40px;
+  padding: 0 16px;
+  background: var(--sb-bg);
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  z-index: 50;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.pager-pill.pager-pill-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+.pager-pill-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+}
+.pager-pill-chevron {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.pager-pill-chevron:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.pager-pill-rows {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-family: inherit;
+  padding: 4px 8px;
+  cursor: pointer;
+  outline: none;
+}
+.pager-pill-rows option {
+  color: var(--ink);
+  background: #fff;
+}
+/* Select-all + actions takeover: same pill position, wider, accent background —
+   replaces the pagination pill (never shown together) whenever a selection is
+   active. This is the only "selected" readout + action bar — no top banner. Single
+   row when there's room (desktop); on a narrow phone it wraps to a second line
+   (rather than scrolling out of sight) so the action buttons are always visible
+   without any hidden gesture — "N selected" on row 1, action buttons on row 2. */
+.pager-pill.pager-pill-select {
+  background: linear-gradient(150deg, var(--orange-2), var(--orange-3));
+  padding: 0 8px 0 16px;
+  max-width: calc(100vw - 32px);
+}
+.pager-pill.pager-pill-select > * {
+  flex-shrink: 0;
+}
+@media (max-width: 640px) {
+  .pager-pill.pager-pill-select {
+    height: auto;
+    min-height: 40px;
+    padding: 8px 10px 8px 16px;
+    border-radius: 20px;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+}
+.pager-pill-select-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pager-pill-link {
+  background: none;
+  border: none;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 0;
+  margin-left: 4px;
+}
+.pager-pill-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pager-pill-btn {
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: transparent;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.pager-pill-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.pager-pill-btn-primary {
+  background: #fff;
+  color: var(--orange-3);
+  border-color: #fff;
+}
+.pager-pill-clear {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 0;
+}
+
 /* toast */
 .toast {
   position: fixed;

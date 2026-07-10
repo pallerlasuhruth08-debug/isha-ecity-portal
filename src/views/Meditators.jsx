@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerBar, SelectionBar } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerPill } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import { multiFieldOr, PEOPLE_SEARCH_FIELDS } from '../lib/searchFilter'
@@ -201,7 +201,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const isFullySelected = sel.headerState(total) === 'all'
 
   // Header checkbox = stage 1 of two-stage select-all: selects/deselects the CURRENT
-  // PAGE only. Stage 2 ("Select all N matching this filter") lives in the SelectionBar.
+  // PAGE only. Stage 2 ("Select all N matching this filter") lives in the pagination pill.
   const pageIds = rows ? rows.map((r) => r.id) : []
   const pageSelectedCount = pageIds.filter((id) => sel.isSelected(id)).length
   const pageHeaderState = pageIds.length === 0 ? 'none' : pageSelectedCount === 0 ? 'none' : pageSelectedCount === pageIds.length ? 'all' : 'partial'
@@ -235,8 +235,10 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
           </div>
         </div>
         {/* On mobile this becomes the sticky bottom CTA below (one primary action per screen,
-            thumb-reachable) instead of competing for space with the count text here. */}
-        {!recipientDraft && !isPhone && <button className="btn" disabled={resolving} onClick={openCampaign}>{Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}</button>}
+            thumb-reachable) instead of competing for space with the count text here. Hidden
+            while a selection is active — the pagination pill's own Create-campaign action
+            takes over then, so there's only ever one "create campaign" control on screen. */}
+        {!recipientDraft && !isPhone && selCount === 0 && <button className="btn" disabled={resolving} onClick={openCampaign}>{Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}</button>}
       </div>
 
       {err && <ErrorCard>Couldn't load meditators: {err}</ErrorCard>}
@@ -260,13 +262,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
         </MobileFilterSheet>
       </div>
 
-      <SelectionBar isFullySelected={isFullySelected} count={selCount} total={total} onSelectAll={sel.selectAllMatching}
-        onCreate={recipientDraft ? addSelectedToCampaign : openCampaign}
-        createLabel={recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : 'Create campaign'}
-        onAssign={recipientDraft ? undefined : openAssign} onClear={sel.clear} />
-
       <div className="card" style={{ overflow: 'hidden' }}>
-        {!loading && total > 0 && <PagerBar position="top" page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />}
         {isPhone ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
             <Checkbox state={pageHeaderState} onClick={() => togglePage()} />
@@ -323,10 +319,17 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
               <div style={{ fontSize: 14, color: 'var(--muted)' }}>{lastActive(p.last_active_date)}</div>
             </div>
           ))}
-        {!loading && total > 0 && (
-          <PagerBar page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
-        )}
       </div>
+      {!loading && total > 0 && (
+        <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize}
+          selection={{
+            count: selCount, total, isFullySelected, onSelectAll: sel.selectAllMatching, onClear: sel.clear,
+            actions: [
+              ...(recipientDraft ? [] : [{ label: 'Assign to nurturer', onClick: openAssign, disabled: resolving }]),
+              { label: recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : (resolving ? 'Preparing…' : 'Create campaign'), onClick: recipientDraft ? addSelectedToCampaign : openCampaign, disabled: resolving, primary: true },
+            ],
+          }} />
+      )}
 
       {showForm && (
         <CampaignForm
@@ -344,9 +347,11 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       )}
       {profileId && <PersonProfile personId={profileId} me={me} onClose={() => setProfileId(null)} onToast={onToast} onChanged={loadPage} />}
 
-      {isPhone && !recipientDraft && (
+      {isPhone && !recipientDraft && selCount === 0 && (
         <>
-          {/* Clears the fixed bar below so the last table row stays reachable. */}
+          {/* Clears the fixed bar below so the last table row stays reachable. Hidden
+              while a selection is active — the pagination pill's Create-campaign
+              action takes over then (see selection.actions above). */}
           <div style={{ height: 68 }} />
           <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, padding: '10px 14px calc(10px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '1px solid var(--border)', zIndex: 120 }}>
             <button

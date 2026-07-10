@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { Pad, ErrorCard, Loading, Empty, Chip, Checkbox, PagerBar, SelectionBar } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Chip, Checkbox, PagerPill } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import CampaignForm from '../components/CampaignForm'
@@ -165,8 +165,10 @@ export default function Advance({ me, onToast }) {
         <p className="mobile-hide" style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 560 }}>
           Bhava Spandana, Shoonya, Samyama &amp; Guru Puja — track interest through to registration.
         </p>
-        {/* On mobile this becomes the sticky bottom CTA below instead of wrapping to two lines here. */}
-        {!isPhone && <button className="btn" disabled={resolving} onClick={openCampaign}>{Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}</button>}
+        {/* On mobile this becomes the sticky bottom CTA below instead of wrapping to two lines here.
+            Both are hidden while a selection is active — the pagination pill's own
+            Create-campaign action takes over then. */}
+        {!isPhone && selCount === 0 && <button className="btn" disabled={resolving} onClick={openCampaign}>{Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}</button>}
       </div>
       {err && <ErrorCard>Couldn't load advance programmes: {err}</ErrorCard>}
 
@@ -183,8 +185,7 @@ export default function Advance({ me, onToast }) {
         ))}
       </div>
 
-      <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 12px' }}>{cur.label} — candidates</h3>
-      <SelectionBar isFullySelected={sel.isAllMode} count={selCount} onCreate={openCampaign} onClear={sel.clear} />
+      <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 12px' }}>{cur.label} — {total} candidate{total === 1 ? '' : 's'}</h3>
 
       <div className="card" style={{ overflow: 'hidden' }}>
         {isPhone ? (
@@ -248,10 +249,14 @@ export default function Advance({ me, onToast }) {
               </div>
             </div>
           ))}
-        {!loading && total > 0 && (
-          <PagerBar page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
-        )}
       </div>
+      {!loading && total > 0 && (
+        <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize}
+          selection={{
+            count: selCount, total, isFullySelected: sel.isAllMode, onClear: sel.clear,
+            actions: [{ label: resolving ? 'Preparing…' : 'Create campaign', onClick: openCampaign, disabled: resolving, primary: true }],
+          }} />
+      )}
 
       {showForm && (
         <CampaignForm
@@ -265,7 +270,7 @@ export default function Advance({ me, onToast }) {
       )}
       {profileId && <PersonProfile personId={profileId} me={me} onClose={() => setProfileId(null)} onToast={onToast} onChanged={loadPage} />}
 
-      {isPhone && (
+      {isPhone && selCount === 0 && (
         <>
           <div style={{ height: 68 }} />
           <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, padding: '10px 14px calc(10px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '1px solid var(--border)', zIndex: 120 }}>

@@ -1,4 +1,6 @@
 // Small shared primitives used across the ported views.
+import { useEffect, useRef, useState } from 'react'
+
 export function Pad({ children }) {
   return (
     <div className="main-pad" style={{ padding: '26px 32px 60px', overflowY: 'auto' }}>
@@ -93,61 +95,75 @@ export function Checkbox({ state, onClick, size = 19 }) {
   )
 }
 
-export function PageSizeSelect({ value, onChange, options = [25, 50, 100] }) {
-  return (
-    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
-      Rows
-      <select
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        style={{ padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }}
-      >
-        {options.map((o) => (
-          <option key={o} value={o}>{o}</option>
-        ))}
-      </select>
-    </label>
-  )
-}
+// Floating pagination pill: page nav + rows-per-page, hidden until the user scrolls
+// past the first viewport height of the (scrollable) page, then fades in bottom-center.
+// Tapping a chevron changes page and scrolls back to top. While a selection is active
+// (`selection.count > 0`), the pill is taken over by a select-all + actions bar instead —
+// same position, always visible regardless of scroll (the two never compete for the same
+// spot). This is the ONE place selection state + its actions (Create campaign, Assign, …)
+// live — there's no separate top banner, so there's only one "selected" readout on screen.
+export function PagerPill({ page, pageCount, onPage, pageSize, onPageSize, selection }) {
+  const ref = useRef(null)
+  const [visible, setVisible] = useState(false)
+  const selecting = !!(selection && selection.count > 0)
 
-// Pagination controls — rendered at both top and bottom of a table, driven by the
-// SAME page/pageSize state (pass `position="top"` for the copy above the rows).
-export function PagerBar({ page, pageCount, total, pageSize, onPage, onPageSize, position = 'bottom' }) {
-  const from = total === 0 ? 0 : page * pageSize + 1
-  const to = Math.min(total, (page + 1) * pageSize)
-  const border = position === 'top' ? { borderBottom: '1px solid var(--border)' } : { borderTop: '1px solid var(--border)' }
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', ...border, flexWrap: 'wrap' }}>
-      <PageSizeSelect value={pageSize} onChange={onPageSize} />
-      <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-        {from}–{to} of {total} · page {page + 1} of {pageCount}
-      </span>
-      <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-        <button className="btn btn-ghost" disabled={page === 0} onClick={() => onPage(Math.max(0, page - 1))} style={{ opacity: page === 0 ? 0.5 : 1 }}>Prev</button>
-        <button className="btn btn-ghost" disabled={page + 1 >= pageCount} onClick={() => onPage(Math.min(pageCount - 1, page + 1))} style={{ opacity: page + 1 >= pageCount ? 0.5 : 1 }}>Next</button>
+  useEffect(() => {
+    const scroller = ref.current?.closest('.main-pad') || window
+    const getY = () => (scroller === window ? window.scrollY : scroller.scrollTop)
+    const getH = () => (scroller === window ? window.innerHeight : scroller.clientHeight)
+    const onScroll = () => setVisible(getY() > getH() * 0.8)
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => scroller.removeEventListener('scroll', onScroll)
+  }, [])
+
+  if (!selecting && pageCount <= 1) return null
+
+  function go(p) {
+    onPage(p)
+    ;(ref.current?.closest('.main-pad') || window).scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  if (selecting) {
+    const { count, total, isFullySelected, onSelectAll, onClear, actions = [] } = selection
+    return (
+      <div ref={ref} className="pager-pill pager-pill-select pager-pill-visible">
+        {/* Label + clear are ONE atomic flex item, so wrapping always keeps them
+            together on row 1 — only the (bulkier) actions group drops to row 2. */}
+        <div className="pager-pill-select-top">
+          <span className="pager-pill-label">
+            {isFullySelected ? `All ${count} selected` : `${count} selected`}
+            {!isFullySelected && onSelectAll && total > count && (
+              <button className="pager-pill-link" onClick={onSelectAll}>· Select all {total}</button>
+            )}
+          </span>
+          <button className="pager-pill-clear" onClick={onClear} aria-label="Clear selection">✕</button>
+        </div>
+        {actions.length > 0 && (
+          <div className="pager-pill-actions">
+            {actions.map((a) => (
+              <button key={a.label} className={'pager-pill-btn' + (a.primary ? ' pager-pill-btn-primary' : '')} disabled={a.disabled} onClick={a.onClick}>{a.label}</button>
+            ))}
+          </div>
+        )}
       </div>
-    </div>
-  )
-}
+    )
+  }
 
-// Selection banner shared by campaign-capable tables. Two-stage select-all:
-// `isFullySelected` (mode 'all' with zero exclusions) shows "All N selected"; any
-// partial state (current-page-only, or an "all" selection with some rows excluded)
-// shows "{count} selected" plus a "Select all {total}" prompt to promote to full.
-export function SelectionBar({ isFullySelected, count, total, onSelectAll, onCreate, createLabel = 'Create campaign', onAssign, onClear }) {
-  if (count <= 0) return null
   return (
-    <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', marginBottom: 14, background: '#FBF1E6', borderColor: '#EBD9C2', flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--rust)' }}>
-        {isFullySelected ? `All ${count} matching this filter selected` : `${count} selected`}
-      </span>
-      {!isFullySelected && onSelectAll && total > count && (
-        <button className="btn btn-ghost" onClick={onSelectAll} style={{ fontSize: 12, padding: '6px 12px' }}>Select all {total} matching this filter?</button>
+    <div ref={ref} className={'pager-pill' + (visible ? ' pager-pill-visible' : '')}>
+      <button className="pager-pill-chevron" disabled={page === 0} onClick={() => go(Math.max(0, page - 1))} aria-label="Previous page">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6" /></svg>
+      </button>
+      <span className="pager-pill-label">Page {page + 1} of {pageCount}</span>
+      <button className="pager-pill-chevron" disabled={page + 1 >= pageCount} onClick={() => go(Math.min(pageCount - 1, page + 1))} aria-label="Next page">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+      </button>
+      {onPageSize && (
+        <select className="pager-pill-rows" value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} aria-label="Rows per page">
+          {[25, 50, 100].map((o) => <option key={o} value={o}>{o} / page</option>)}
+        </select>
       )}
-      <div style={{ flex: 1 }} />
-      {onAssign && <button className="btn btn-ghost" onClick={onAssign}>Assign to nurturer</button>}
-      {onCreate && <button className="btn btn-primary" onClick={onCreate}>{createLabel}</button>}
-      <button className="btn btn-ghost" onClick={onClear}>✕ Clear selection</button>
     </div>
   )
 }

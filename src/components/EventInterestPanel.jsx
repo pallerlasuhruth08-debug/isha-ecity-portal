@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { Loading, Empty, Checkbox, PagerBar, SelectionBar } from './View'
+import { Loading, Empty, Checkbox, PagerPill } from './View'
 import SidePanel, { PanelHeader } from './SidePanel'
 import { eventDays, fmtDay } from '../lib/planning'
 import { useTableSelection } from '../lib/useTableSelection'
@@ -276,21 +276,11 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
         <button className="tap44" onClick={() => setAvailFilter('all_days')} style={filterChip(availFilter === 'all_days')}>All Days</button>
       </div>
 
-      <SelectionBar
-        isFullySelected={isFullySelected}
-        count={selCount}
-        total={total}
-        onSelectAll={sel.selectAllMatching}
-        onCreate={resolving ? undefined : (recipientDraft ? addSelectedToCampaign : openCampaign)}
-        createLabel={recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : 'Create campaign'}
-        onClear={sel.clear}
-      />
+      <div style={{ marginBottom: 10, fontSize: 14, color: 'var(--muted)' }}>
+        {loading ? 'Loading…' : `${total} interest${total === 1 ? '' : 's'}`}
+      </div>
 
       <div className="card" style={{ overflow: 'hidden' }}>
-        {!loading && total > 0 && (
-          <PagerBar position="top" page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
-        )}
-
         {/* Table header */}
         {isPhone ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
@@ -349,10 +339,17 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
           </div>
         ))}
 
-        {!loading && total > 0 && (
-          <PagerBar page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
-        )}
       </div>
+      {!loading && total > 0 && (
+        <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize}
+          selection={{
+            count: selCount, total, isFullySelected, onSelectAll: sel.selectAllMatching, onClear: sel.clear,
+            actions: [{
+              label: recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : (resolving ? 'Preparing…' : 'Create campaign'),
+              onClick: recipientDraft ? addSelectedToCampaign : openCampaign, disabled: resolving, primary: true,
+            }],
+          }} />
+      )}
 
       {selected && (
         <InterestDetail
