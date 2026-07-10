@@ -132,16 +132,19 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
         })
       }
 
+      // Chunked: journey_id=in.(...) with hundreds of UUIDs inline can exceed the
+      // gateway's URL-length limit and come back 400 as the recipient list grows.
       const jIds = (js || []).map((j) => j.id)
       let logs = []
-      if (jIds.length) {
+      const CALL_LOG_CHUNK = 200
+      for (let i = 0; i < jIds.length; i += CALL_LOG_CHUNK) {
         const { data: ls, error: e3 } = await supabase
           .from('call_logs')
           .select('id, journey_id, reachability, remarks, logged_at, logged_by')
-          .in('journey_id', jIds)
+          .in('journey_id', jIds.slice(i, i + CALL_LOG_CHUNK))
           .order('logged_at', { ascending: false })
         if (e3) throw e3
-        logs = ls || []
+        logs.push(...(ls || []))
       }
       const byJ = {}
       for (const c of logs) (byJ[c.journey_id] ||= []).push(c)
