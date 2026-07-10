@@ -536,7 +536,10 @@ function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
         </div>
       )}
 
-      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', marginBottom: 10 }}>Batches</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>Batches</div>
+        <button className="btn btn-ghost" style={{ height: 28, padding: '0 10px', fontSize: 12, marginLeft: 'auto' }} disabled={busy} onClick={copyLink}>Copy portal link</button>
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {splits.map((s) => {
           const rows = contacts.filter((c) => c.splitNumber === s.split_number)
@@ -556,15 +559,12 @@ function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
                 ) : (
                   <span style={{ color: 'var(--muted-2)', fontWeight: 600 }}>Available</span>
                 )}
-                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                  <button className="btn btn-ghost" style={{ height: 30, padding: '0 10px', fontSize: 12 }} disabled={busy} onClick={copyLink}>Copy link</button>
-                  {claimed && (
-                    <>
-                      <button className="btn btn-ghost" style={{ height: 30, padding: '0 10px', fontSize: 12 }} disabled={busy} onClick={() => extendSession(s)}>+24hrs</button>
-                      <button style={{ height: 30, padding: '0 10px', fontSize: 12, fontWeight: 600, borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }} disabled={busy} onClick={() => releaseBatch(s)}>Release</button>
-                    </>
-                  )}
-                </div>
+                {claimed && (
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                    <button className="btn btn-ghost" style={{ height: 30, padding: '0 10px', fontSize: 12 }} disabled={busy} onClick={() => extendSession(s)}>+24hrs</button>
+                    <button style={{ height: 30, padding: '0 10px', fontSize: 12, fontWeight: 600, borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }} disabled={busy} onClick={() => releaseBatch(s)}>Release</button>
+                  </div>
+                )}
               </div>
               {rows.length > 0 && (
                 <div style={{ height: 5, borderRadius: 3, background: '#EFE4D3', overflow: 'hidden', marginTop: 8 }}>
