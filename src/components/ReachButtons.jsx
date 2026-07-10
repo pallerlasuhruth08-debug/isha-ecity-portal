@@ -10,7 +10,10 @@ import { useBreakpoint } from '../lib/useBreakpoint'
 // so on mobile they stay inline but grow to a real 44px tap target.
 // compact=true: fixed 36px/14px sizing, each button flex:1 (equal width) inside
 // the caller's own flex row — used by the campaign call-list card.
-export default function ReachButtons({ phone, smsText, waText, onArm, messaging = false, compact = false }) {
+// onChannelTap('sms'|'whatsapp') fires (in addition to the normal deep-link
+// navigation) when Message/WhatsApp is tapped — lets a caller (messaging
+// campaigns' Sent button) know which channel to attribute the send to.
+export default function ReachButtons({ phone, smsText, waText, onArm, onChannelTap, messaging = false, compact = false }) {
   const { isPhone } = useBreakpoint()
   const base = compact
     ? { fontSize: 14, fontWeight: 600, borderRadius: 8, border: '1px solid var(--border)', textDecoration: 'none', whiteSpace: 'nowrap', height: 36, flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }
@@ -43,8 +46,8 @@ export default function ReachButtons({ phone, smsText, waText, onArm, messaging 
   return (
     <div style={wrapStyle}>
       {!messaging && <a href={telHref(phone)} onClick={onArm} style={link}>Call</a>}
-      <a href={smsHref(phone, smsText)} style={link}>Message</a>
-      <a href={waHref(phone, waText)} target="_blank" rel="noopener noreferrer" style={link}>WhatsApp</a>
+      <a href={smsHref(phone, smsText)} onClick={() => onChannelTap?.('sms')} style={link}>Message</a>
+      <a href={waHref(phone, waText)} target="_blank" rel="noopener noreferrer" onClick={() => onChannelTap?.('whatsapp')} style={link}>WhatsApp</a>
     </div>
   )
 }

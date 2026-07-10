@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { waHref, smsHref, telHref, hasDialable, fillTemplate } from '../lib/phone'
 import { LOG_OUTCOMES, DEFAULT_OUTCOME, pillForOutcome, fmtWhen } from '../lib/calllog'
+import { pillForMessage, labelForMessage } from '../lib/messageStatus'
 
 // No-login volunteer calling portal, reached via a per-split share link (#volunteer=<token>).
 // The 32-char token is the ONLY access control: anyone who opens it enters their name +
@@ -117,7 +118,8 @@ export default function PublicVolunteerPortal({ token }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(rows || []).map((r) => (
               <RecipientRow key={r.journey_id} r={r} token={token} myName={caller.name} label={callerLabel(caller)} messaging={info.campaign_type === 'messaging'}
-                onLogged={(outcome) => setRows((prev) => prev.map((x) => (x.journey_id === r.journey_id ? { ...x, called: true, last_outcome: outcome, last_logged_at: new Date().toISOString() } : x)))} />
+                onLogged={(outcome) => setRows((prev) => prev.map((x) => (x.journey_id === r.journey_id ? { ...x, called: true, last_outcome: outcome, last_logged_at: new Date().toISOString() } : x)))}
+                onMessageStatus={(status) => setRows((prev) => prev.map((x) => (x.journey_id === r.journey_id ? { ...x, message_status: status } : x)))} />
             ))}
           </div>
 
@@ -130,11 +132,13 @@ export default function PublicVolunteerPortal({ token }) {
   )
 }
 
-function RecipientRow({ r, token, myName, label, messaging = false, onLogged }) {
+function RecipientRow({ r, token, myName, label, messaging = false, onLogged, onMessageStatus }) {
   const [logging, setLogging] = useState(false)
   const [outcome, setOutcome] = useState(DEFAULT_OUTCOME)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+  const [sentBusy, setSentBusy] = useState(false)
+  const [lastChannel, setLastChannel] = useState('whatsapp') // which link (SMS/WhatsApp) was tapped last
   const waText = fillTemplate(r.whatsapp_template, { name: r.person_name, myName })
   const smsText = fillTemplate(r.sms_template, { name: r.person_name, myName })
   const dialable = hasDialable(r.phone)
@@ -150,7 +154,25 @@ function RecipientRow({ r, token, myName, label, messaging = false, onLogged }) 
     } catch { /* stays open on failure so they can retry */ } finally { setBusy(false) }
   }
 
-  const actionCount = (messaging ? 2 : 4)
+  // Same optimistic-then-write-then-revert-on-failure shape as the coordinator view —
+  // sent_by has no meaning here (no login), so the RPC records `label` instead, same
+  // as portal_log_call already does for call_logs.portal_caller_label.
+  async function toggleSent() {
+    const goingTo = r.message_status === 'sent' || r.message_status === 'responded' ? 'to_message' : 'sent'
+    if (goingTo === 'to_message' && !window.confirm('Mark as not sent?')) return
+    const prev = r.message_status
+    setSentBusy(true)
+    onMessageStatus(goingTo)
+    try {
+      const { data, error } = await supabase.rpc('portal_mark_sent', { p_token: token, p_journey_id: r.journey_id, p_channel: lastChannel, p_caller_label: label, p_to: goingTo })
+      if (error) throw error
+      if (data.status !== 'ok') throw new Error(data.status)
+    } catch {
+      onMessageStatus(prev)
+    } finally { setSentBusy(false) }
+  }
+
+  const actionCount = (messaging ? 3 : 4)
 
   return (
     <div className="card" style={{ padding: 16 }}>
@@ -159,18 +181,26 @@ function RecipientRow({ r, token, myName, label, messaging = false, onLogged }) 
           <div style={{ fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.person_name}</div>
           <div style={{ fontSize: 12, color: dialable ? 'var(--muted)' : 'var(--red)' }}>{r.phone || 'no phone on record'}</div>
         </div>
-        {r.called && r.last_outcome && (
+        {messaging ? (
+          <span className="pill" style={pillForMessage(r.message_status)}>{labelForMessage(r.message_status)}</span>
+        ) : r.called && r.last_outcome && (
           <span className="pill" style={pillForOutcome(r.last_outcome)}>{r.last_outcome}</span>
         )}
       </div>
       {r.called && r.last_logged_at && (
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Last logged {fmtWhen(r.last_logged_at)}</div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${actionCount === 2 ? 2 : 2}, 1fr)`, gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${actionCount}, 1fr)`, gap: 8 }}>
         {!messaging && <a href={telHref(r.phone)} aria-disabled={!dialable} tabIndex={dialable ? 0 : -1} style={{ ...rowBtn, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>Call</a>}
-        <a href={smsHref(r.phone, smsText)} aria-disabled={!dialable} tabIndex={dialable ? 0 : -1} style={{ ...rowBtn, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>SMS</a>
-        <a href={waHref(r.phone, waText)} target="_blank" rel="noopener noreferrer" aria-disabled={!dialable} tabIndex={dialable ? 0 : -1} style={{ ...rowBtn, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>WhatsApp</a>
+        <a href={smsHref(r.phone, smsText)} onClick={() => setLastChannel('sms')} aria-disabled={!dialable} tabIndex={dialable ? 0 : -1} style={{ ...rowBtn, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>SMS</a>
+        <a href={waHref(r.phone, waText)} target="_blank" rel="noopener noreferrer" onClick={() => setLastChannel('whatsapp')} aria-disabled={!dialable} tabIndex={dialable ? 0 : -1} style={{ ...rowBtn, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>WhatsApp</a>
         {!messaging && <button onClick={() => setLogging((v) => !v)} style={{ ...rowBtn, background: logging ? '#241B14' : '#fff', color: logging ? '#F6ECDC' : 'var(--ink-soft)' }}>Log</button>}
+        {messaging && (() => {
+          const sent = r.message_status === 'sent' || r.message_status === 'responded'
+          return (
+            <button onClick={toggleSent} disabled={sentBusy} style={{ ...rowBtn, border: '1px solid ' + (sent ? '#4E7C3F' : 'var(--border)'), background: sent ? '#EAF2E5' : '#fff', color: sent ? '#4E7C3F' : 'var(--ink-soft)' }}>{sent ? '✓ Sent' : 'Sent'}</button>
+          )
+        })()}
       </div>
       {logging && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-soft)' }}>

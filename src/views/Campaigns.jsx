@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { initials, avatarFor } from '../lib/ui'
 import { STATUS_ORDER, OUTCOME_TO_STATUS, pillFor } from '../lib/calllog'
+import { MESSAGE_STATUS, pillForMessage, labelForMessage } from '../lib/messageStatus'
 import { fillTemplate } from '../lib/phone'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import { Pad, ErrorCard } from '../components/View'
@@ -77,7 +78,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
       const { data: js, error: e2 } = await supabase
         .from('journeys')
         .select(
-          'id, campaign_id, status, assigned_to, caller_source, caller_id, split_number, ' +
+          'id, campaign_id, status, assigned_to, caller_source, caller_id, split_number, message_status, ' +
             'person:people!journeys_person_id_fkey(id, full_name, phone, center_id), ' +
             'assignee:profiles!journeys_assigned_to_fkey(full_name)',
         )
@@ -176,6 +177,10 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openCampaignId, campaigns])
 
+  // A leftover call-status filter (e.g. "Replied") means nothing on a messaging
+  // campaign's To message/Sent/Responded chips — reset on every campaign switch.
+  useEffect(() => { setCallFilter('all') }, [openId])
+
   // Build per-campaign contact rows + aggregates.
   const enriched = useMemo(() => {
     const map = {}
@@ -199,6 +204,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
         assigned: assignee ? assignee + src : '— unassigned —',
         last: lastTouch(logs),
         status,
+        messageStatus: j.message_status || 'to_message',
         logs,
         splitNumber: j.split_number ?? null,
       }
@@ -220,6 +226,11 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
       c.enrolled = c.contacts.filter((x) => x.status === 'Enrolled').length
       c.responsePct = c.reach ? Math.round((c.responded / c.reach) * 100) + '%' : '0%'
       c.callerList = Object.values(c.callers).map((k) => ({ ...k, rate: k.contacted ? Math.round((k.responded / k.contacted) * 100) + '%' : '—' }))
+      // Messaging-campaign counterpart to reach/responded/enrolled — mutually exclusive
+      // buckets over message_status (no call ever happens for these campaigns).
+      c.msgToMessage = c.contacts.filter((x) => x.messageStatus === 'to_message').length
+      c.msgSent = c.contacts.filter((x) => x.messageStatus === 'sent').length
+      c.msgResponded = c.contacts.filter((x) => x.messageStatus === 'responded').length
     }
     return map
   }, [campaigns, journeys, logsByJourney, callerNames, callerPools, splitsByCampaign])
@@ -246,6 +257,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
         eventNames={eventNames}
         splits={splitsByCampaign[openId] || []}
         reload={load}
+        setJourneys={setJourneys}
         onBack={() => setOpenId(null)}
         callFilter={callFilter}
         setCallFilter={setCallFilter}
@@ -487,7 +499,20 @@ function CallerStat({ v, label, color }) {
   )
 }
 
-function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = {}, splits = [], reload, onBack, callFilter, setCallFilter, onAddRecipients, onToast }) {
+// Messaging campaigns' mark-as-sent toggle. Unsent: neutral "Sent" (the action).
+// Sent/Responded: green "✓ Sent" (the confirmation) — tapping it again asks before
+// reverting, so an accidental double-tap can't silently wipe the record.
+function SentButton({ status, onToggle, compact = false }) {
+  const sent = status === 'sent' || status === 'responded'
+  const base = compact ? { flex: 1, height: 36, fontSize: 14 } : { height: 36, padding: '0 12px', fontSize: 12 }
+  return (
+    <button onClick={onToggle} style={{ ...base, fontWeight: 600, borderRadius: 8, cursor: 'pointer', border: '1px solid ' + (sent ? '#4E7C3F' : 'var(--border)'), background: sent ? '#EAF2E5' : '#fff', color: sent ? '#4E7C3F' : 'var(--ink-soft)' }}>
+      {sent ? '✓ Sent' : 'Sent'}
+    </button>
+  )
+}
+
+function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = {}, splits = [], reload, setJourneys, onBack, callFilter, setCallFilter, onAddRecipients, onToast }) {
   const { isPhone } = useBreakpoint()
   const [logFor, setLogFor] = useState(null) // {journeyId, personId, name, phone}
   const [assignFor, setAssignFor] = useState(null) // recipient row being reassigned (kebab → Assign caller)
@@ -499,9 +524,54 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
   const [detailTab, setDetailTab] = useState('calls') // 'calls' | 'callers'
   const [editing, setEditing] = useState(false)
   const [busyDel, setBusyDel] = useState(false)
+  const [lastChannel, setLastChannel] = useState({}) // journeyId -> 'sms'|'whatsapp', last Message/WhatsApp link tapped
   const myId = me?.id
   const myName = me?.full_name || ''
   const messaging = c.campaign_type === 'messaging' // WhatsApp/SMS only — no call button, script or log
+
+  // Messaging Sent/Responded — optimistic: flip journeys state immediately so the
+  // badge/counts/pills update with no reload, then write; revert + toast on failure.
+  function setMessageStatusOptimistic(row, next, write) {
+    const prev = row.messageStatus
+    setJourneys((js) => js.map((j) => (j.id === row.journeyId ? { ...j, message_status: next } : j)))
+    write().catch((e) => {
+      setJourneys((js) => js.map((j) => (j.id === row.journeyId ? { ...j, message_status: prev } : j)))
+      onToast?.('Could not update: ' + (e.message || e))
+    })
+  }
+  function markSent(row) {
+    const channel = lastChannel[row.journeyId] || 'whatsapp'
+    setMessageStatusOptimistic(row, 'sent', async () => {
+      const { error: e1 } = await supabase.from('message_logs').insert({ journey_id: row.journeyId, campaign_id: c.id, person_id: row.personId, channel, sent_by: myId })
+      if (e1) throw e1
+      const { error: e2 } = await supabase.from('journeys').update({ message_status: 'sent' }).eq('id', row.journeyId)
+      if (e2) throw e2
+    })
+  }
+  function unmarkSent(row) {
+    if (!window.confirm('Mark as not sent?')) return
+    setMessageStatusOptimistic(row, 'to_message', async () => {
+      const { error } = await supabase.from('journeys').update({ message_status: 'to_message' }).eq('id', row.journeyId)
+      if (error) throw error
+    })
+  }
+  function toggleSent(row) {
+    if (row.messageStatus === 'sent' || row.messageStatus === 'responded') unmarkSent(row)
+    else markSent(row)
+  }
+  function markResponded(row) {
+    setMessageStatusOptimistic(row, 'responded', async () => {
+      const { error } = await supabase.from('journeys').update({ message_status: 'responded' }).eq('id', row.journeyId)
+      if (error) throw error
+      // Feeds the person back into the linked event's Volunteer Interest pool, same
+      // shape as any other event_interest row — coordinator approves from there same as usual.
+      if (c.event_id && row.personId) {
+        const { error: e2 } = await supabase.from('event_interest').upsert({ activity_id: c.event_id, person_id: row.personId, source: 'campaign_response' }, { onConflict: 'activity_id,person_id' })
+        if (e2) throw e2
+      }
+    })
+    onToast?.(`${row.name} marked Responded.`)
+  }
 
   // Test campaigns are hard-deletable regardless of activity (their activity was never
   // real). Delete the journeys first (SET NULL would orphan them) — that CASCADES their
@@ -523,17 +593,23 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
 
   const existingCallerKeys = useMemo(() => new Set(c.callerPool.map((x) => x.key)), [c.callerPool])
 
-  const chips = [
-    { key: 'all', label: 'All' },
-    { key: 'To call', label: 'To call' },
-    { key: 'Call back', label: 'Call back' },
-    { key: 'Replied', label: 'Replied' },
-    { key: 'Enrolled', label: 'Enrolled' },
-  ]
-  const counts = c.contacts.reduce((a, x) => ((a[x.status] = (a[x.status] || 0) + 1), a), {})
+  const chips = messaging
+    ? [{ key: 'all', label: 'All' }, ...MESSAGE_STATUS.map((s) => ({ key: s.v, label: s.label }))]
+    : [
+        { key: 'all', label: 'All' },
+        { key: 'To call', label: 'To call' },
+        { key: 'Call back', label: 'Call back' },
+        { key: 'Replied', label: 'Replied' },
+        { key: 'Enrolled', label: 'Enrolled' },
+      ]
+  const statusKey = messaging ? 'messageStatus' : 'status'
+  const counts = c.contacts.reduce((a, x) => ((a[x[statusKey]] = (a[x[statusKey]] || 0) + 1), a), {})
+  const MESSAGE_ORDER = { to_message: 0, sent: 1, responded: 2 }
   const shown = [...c.contacts]
-    .filter((x) => callFilter === 'all' || x.status === callFilter)
-    .sort((a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9))
+    .filter((x) => callFilter === 'all' || x[statusKey] === callFilter)
+    .sort((a, b) => messaging
+      ? (MESSAGE_ORDER[a.messageStatus] ?? 9) - (MESSAGE_ORDER[b.messageStatus] ?? 9)
+      : (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9))
 
   // ---- coordinator mutations (RLS is the real backstop) ----
   async function removeRecipient(row) {
@@ -627,10 +703,21 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           </div>
         </div>
         <div style={{ display: 'flex', gap: 26, marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-soft)', flexWrap: 'wrap' }}>
-          <Metric v={c.reach} label="reached" />
-          <Metric v={c.responsePct} label="responded" color="#4E7C3F" />
-          <Metric v={c.enrolled} label="enrolled" />
-          <Metric v={c.callerList.length} label="callers" />
+          {messaging ? (
+            <>
+              <Metric v={c.contacts.length} label="recipients" />
+              <Metric v={c.msgSent} label="sent" color="#8A6D1B" />
+              <Metric v={c.msgResponded} label="responded" color="#4E7C3F" />
+              <Metric v={0} label="confirmed" />
+            </>
+          ) : (
+            <>
+              <Metric v={c.reach} label="reached" />
+              <Metric v={c.responsePct} label="responded" color="#4E7C3F" />
+              <Metric v={c.enrolled} label="enrolled" />
+              <Metric v={c.callerList.length} label="callers" />
+            </>
+          )}
         </div>
         <EventLinkControl campaign={c} eventName={eventNames[c.event_id]?.name} isCoordinator={isCoordinator} reload={reload} onToast={onToast} />
         {isCoordinator && <CampaignSplits campaignId={c.id} contacts={c.contacts} splits={splits} reload={reload} onToast={onToast} />}
@@ -722,17 +809,19 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
                 <span style={{ fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
                 <span style={{ fontSize: 12, color: p.phone ? 'var(--muted)' : 'var(--muted-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.phone || 'no phone'}</span>
               </div>
-              <span className="pill" style={{ ...pillFor(p.status), flexShrink: 0 }}>{p.status}</span>
+              <span className="pill" style={{ ...(messaging ? pillForMessage(p.messageStatus) : pillFor(p.status)), flexShrink: 0 }}>{messaging ? labelForMessage(p.messageStatus) : p.status}</span>
             </div>
-            {/* Row 2: Call, Message, WhatsApp, Log, ⋯ — equal width, one row */}
+            {/* Row 2: Call, Message, WhatsApp, Log/Sent, ⋯ — equal width, one row */}
             {isCoordinator && (
               <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                <ReachButtons compact phone={p.phone} messaging={messaging} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
+                <ReachButtons compact phone={p.phone} messaging={messaging} onChannelTap={(ch) => setLastChannel((m) => ({ ...m, [p.journeyId]: ch }))} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
                 {!messaging && <button style={{ flex: 1, height: 36, fontSize: 14, fontWeight: 600, borderRadius: 8, border: '1px solid var(--border)', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }} onClick={() => setLogFor(p)}>Log</button>}
+                {messaging && <SentButton compact status={p.messageStatus} onToggle={() => toggleSent(p)} />}
                 <KebabMenu buttonStyle={{ height: 36, width: 36, fontSize: 16 }} items={[
+                  ...(messaging ? [{ label: '↩ Mark as Responded', onClick: () => markResponded(p), disabled: p.messageStatus === 'responded' }] : []),
                   { label: 'Assign caller', onClick: () => setAssignFor(p) },
-                  { label: 'Remove', onClick: () => removeRecipient(p), danger: true, disabled: busyId === p.journeyId },
-                  { label: 'View details', onClick: () => setDetailFor(p) },
+                  { label: messaging ? '✕ Remove from campaign' : 'Remove', onClick: () => removeRecipient(p), danger: true, disabled: busyId === p.journeyId },
+                  { label: messaging ? '👁 View profile' : 'View details', onClick: () => setDetailFor(p) },
                 ]} />
               </div>
             )}
@@ -761,13 +850,20 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>{p.last}</div>
             <div>
-              <span className="pill" style={pillFor(p.status)}>{p.status}</span>
+              <span className="pill" style={messaging ? pillForMessage(p.messageStatus) : pillFor(p.status)}>{messaging ? labelForMessage(p.messageStatus) : p.status}</span>
               {isCoordinator && p.logs[0] && <div style={{ fontSize: 12, color: 'var(--muted-2)', marginTop: 3 }}>by {actorNames[p.logs[0].logged_by] || '—'}</div>}
             </div>
             {isCoordinator && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <ReachButtons phone={p.phone} messaging={messaging} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
+                <ReachButtons phone={p.phone} messaging={messaging} onChannelTap={(ch) => setLastChannel((m) => ({ ...m, [p.journeyId]: ch }))} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
                 {!messaging && <button className="btn btn-ghost" style={{ padding: '6px 9px', fontSize: 12 }} onClick={() => setLogFor(p)}>Log</button>}
+                {messaging && <SentButton status={p.messageStatus} onToggle={() => toggleSent(p)} />}
+                {messaging && (
+                  <KebabMenu buttonStyle={{ height: 32, width: 32, fontSize: 14 }} items={[
+                    { label: '↩ Mark as Responded', onClick: () => markResponded(p), disabled: p.messageStatus === 'responded' },
+                    { label: '👁 View profile', onClick: () => setDetailFor(p) },
+                  ]} />
+                )}
                 <button title="Remove from campaign" disabled={busyId === p.journeyId} onClick={() => removeRecipient(p)} style={{ padding: '6px 8px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>✕</button>
               </div>
             )}
@@ -886,7 +982,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
         />
       )}
       {detailFor && (
-        <RecipientDetailPanel row={detailFor} isCoordinator={isCoordinator} actorNames={actorNames} onClose={() => setDetailFor(null)} />
+        <RecipientDetailPanel row={detailFor} isCoordinator={isCoordinator} actorNames={actorNames} messaging={messaging} onClose={() => setDetailFor(null)} />
       )}
     </Pad>
   )
@@ -920,7 +1016,7 @@ function AssignCallerModal({ row, callerPool, busy, onAssign, onClose }) {
 
 // Kebab → "View details" (also opened by tapping the card): the fields dropped
 // from the compact card — last touch and who's assigned.
-function RecipientDetailPanel({ row, isCoordinator, actorNames, onClose }) {
+function RecipientDetailPanel({ row, isCoordinator, actorNames, messaging = false, onClose }) {
   return (
     <SidePanel onClose={onClose}>
       <PanelHeader onClose={onClose}>
@@ -928,7 +1024,7 @@ function RecipientDetailPanel({ row, isCoordinator, actorNames, onClose }) {
           <div style={{ width: 46, height: 46, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 600 }}>{initials(row.name)}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 3px' }}>{row.name}</h2>
-            <span className="pill" style={pillFor(row.status)}>{row.status}</span>
+            <span className="pill" style={messaging ? pillForMessage(row.messageStatus) : pillFor(row.status)}>{messaging ? labelForMessage(row.messageStatus) : row.status}</span>
           </div>
         </div>
       </PanelHeader>
