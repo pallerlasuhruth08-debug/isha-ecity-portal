@@ -383,7 +383,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     else { setDateFrom(''); setDateTo('') }
   }
 
-  const selStyle = { padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 4px)' : undefined }
+  const selStyle = { padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 4px)' : undefined }
   const selectDefs = [
     { k: 'stage', all: 'All stages', opts: ['New', 'Reached out', 'Oriented', 'Active', 'Core Group'] },
     { k: 'atype', all: 'Any activity type', opts: opts.atypes },
@@ -402,19 +402,24 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     <Pad>
       {campaignDraft && (
         <div className="card" style={{ padding: '12px 16px', marginBottom: 14, background: '#FBF1E4', borderColor: '#E7C9B8', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 13, color: '#9C4A14', fontWeight: 600 }}>Building the call list for “{campaignDraft.eventName}” — select people, then Create campaign.</div>
+          <div style={{ fontSize: 14, color: 'var(--rust)', fontWeight: 600 }}>Building the call list for “{campaignDraft.eventName}” — select people, then Create campaign.</div>
           <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onClearCampaignDraft && onClearCampaignDraft()}>Cancel</button>
         </div>
       )}
       {recipientDraft && (
         <div className="card" style={{ padding: '12px 16px', marginBottom: 14, background: '#FBF1E4', borderColor: '#E7C9B8', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 13, color: '#9C4A14', fontWeight: 600 }}>Adding volunteers to “{recipientDraft.campaignName}” — select people, then Add to campaign.</div>
+          <div style={{ fontSize: 14, color: 'var(--rust)', fontWeight: 600 }}>Adding volunteers to “{recipientDraft.campaignName}” — select people, then Add to campaign.</div>
           <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onRecipientsDone && onRecipientsDone()}>Cancel</button>
         </div>
       )}
       <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-          {loading ? 'Loading…' : `${total} total · click a row to open the profile; use checkboxes to build a campaign.`}
+        <div style={{ fontSize: 14, color: 'var(--muted)' }}>
+          {loading ? 'Loading…' : (
+            <>
+              {total} total
+              <span className="mobile-hide"> · click a row to open the profile; use checkboxes to build a campaign.</span>
+            </>
+          )}
         </div>
       </div>
 
@@ -423,7 +428,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10, alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: isPhone ? '11px 12px' : '8px 12px', minWidth: 190, flexBasis: isPhone ? '100%' : undefined }}>
           {Icon.search(15)}
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email or pincode…" style={{ border: 'none', outline: 'none', fontSize: 13, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email or pincode…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
         <MobileFilterSheet count={Object.values(fil).filter(Boolean).length + (dateFrom || dateTo ? 1 : 0)}>
           {selectDefs.map((d) => (
@@ -436,7 +441,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
               })}
             </select>
           ))}
-          {filterActive && <button onClick={clearFil} style={{ background: 'none', border: 'none', color: '#B85C1E', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Clear filters</button>}
+          {filterActive && <button onClick={clearFil} style={{ background: 'none', border: 'none', color: '#B85C1E', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Clear filters</button>}
         </MobileFilterSheet>
       </div>
 
@@ -467,10 +472,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
         {isPhone ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
             <Checkbox state={pageHeaderState} onClick={(e) => { e.stopPropagation(); togglePage() }} />
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select this page'}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select this page'}</span>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, background: 'var(--panel)', alignItems: 'center' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--border)', fontSize: 12, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, background: 'var(--panel)', alignItems: 'center' }}>
             <Checkbox state={pageHeaderState} onClick={(e) => { e.stopPropagation(); togglePage() }} />
             <span>Volunteer</span>
             <span>Stage</span>
@@ -489,24 +494,24 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
               <div style={{ paddingTop: 2, minHeight: 44, display: 'flex', alignItems: 'center' }}>
                 <Checkbox state={sel.isSelected(v.id)} onClick={(e) => { e.stopPropagation(); sel.toggle(v.id) }} />
               </div>
-              <div style={{ width: 40, height: 40, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 600, flexShrink: 0 }}>{initials(v.name)}</div>
+              <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(v.name)}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontSize: 14.5, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</div>
                   <span className="pill" style={STAGE_PILL[v.stage] || pill('#F1EADD', '#8C7E6B')}>{v.stage}</span>
                 </div>
-                <div style={{ fontSize: 12.5, color: v.phone ? 'var(--muted)' : '#B5532F', marginTop: 2 }}>{v.phone || 'No phone on record'}</div>
+                <div style={{ fontSize: 12, color: v.phone ? 'var(--muted)' : 'var(--red)', marginTop: 2 }}>{v.phone || 'No phone on record'}</div>
                 <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4 }}>{v.programs} · {v.where}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
                   {v.attended > 0 ? <span style={{ color: '#4E7C3F', fontWeight: 600 }}>{v.attended} attended</span> : 'No attendance'} · {v.last}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-                  {v.manualTags.map((t) => (<span key={'m' + t} style={{ fontSize: 10.5, fontWeight: 600, color: '#fff', background: '#9C4A14', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
-                  {v.derivedTags.filter((d) => !v.manualTags.includes(d)).map((t) => (<span key={'d' + t} style={{ fontSize: 10.5, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
+                  {v.manualTags.map((t) => (<span key={'m' + t} style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--rust)', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
+                  {v.derivedTags.filter((d) => !v.manualTags.includes(d)).map((t) => (<span key={'d' + t} style={{ fontSize: 12, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
                   {tagRow === v.id ? (
-                    <input autoFocus value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addRowTag(v.id); if (e.key === 'Escape') setTagRow(null) }} onBlur={() => addRowTag(v.id)} placeholder="tag…" style={{ width: 90, fontSize: 11, border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', outline: 'none' }} />
+                    <input autoFocus value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addRowTag(v.id); if (e.key === 'Escape') setTagRow(null) }} onBlur={() => addRowTag(v.id)} placeholder="tag…" style={{ width: 90, fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', outline: 'none' }} />
                   ) : (
-                    <span onClick={() => { setTagRow(v.id); setTagInput('') }} title="Add tag" style={{ fontSize: 11, fontWeight: 700, color: '#B85C1E', cursor: 'pointer', border: '1px dashed #E2C9A8', borderRadius: 6, padding: '3px 8px' }}>＋ tag</span>
+                    <span onClick={() => { setTagRow(v.id); setTagInput('') }} title="Add tag" style={{ fontSize: 12, fontWeight: 700, color: '#B85C1E', cursor: 'pointer', border: '1px dashed #E2C9A8', borderRadius: 6, padding: '3px 8px' }}>＋ tag</span>
                   )}
                 </div>
               </div>
@@ -518,27 +523,27 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
             <div key={v.id} className="rowhover" onClick={() => setProfileId(v.id)} style={{ display: 'grid', gridTemplateColumns: grid, gap: 14, padding: '13px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', cursor: 'pointer', background: profileId === v.id ? '#FBF1E6' : undefined }}>
               <Checkbox state={sel.isSelected(v.id)} onClick={(e) => { e.stopPropagation(); sel.toggle(v.id) }} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                <div style={{ width: 38, height: 38, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(v.name)}</div>
+                <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(v.name)}</div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</div>
-                  <div style={{ fontSize: 11.5, color: v.phone ? 'var(--muted)' : '#B5532F', marginTop: 1 }}>{v.phone || 'No phone on record'}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</div>
+                  <div style={{ fontSize: 12, color: v.phone ? 'var(--muted)' : 'var(--red)', marginTop: 1 }}>{v.phone || 'No phone on record'}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-                    {v.manualTags.map((t) => (<span key={'m' + t} style={{ fontSize: 10.5, fontWeight: 600, color: '#fff', background: '#9C4A14', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
-                    {v.derivedTags.filter((d) => !v.manualTags.includes(d)).map((t) => (<span key={'d' + t} style={{ fontSize: 10.5, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
+                    {v.manualTags.map((t) => (<span key={'m' + t} style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--rust)', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
+                    {v.derivedTags.filter((d) => !v.manualTags.includes(d)).map((t) => (<span key={'d' + t} style={{ fontSize: 12, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
                     {tagRow === v.id ? (
-                      <input autoFocus value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addRowTag(v.id); if (e.key === 'Escape') setTagRow(null) }} onBlur={() => addRowTag(v.id)} placeholder="tag…" style={{ width: 80, fontSize: 10.5, border: '1px solid var(--border)', borderRadius: 6, padding: '1px 5px', outline: 'none' }} />
+                      <input autoFocus value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addRowTag(v.id); if (e.key === 'Escape') setTagRow(null) }} onBlur={() => addRowTag(v.id)} placeholder="tag…" style={{ width: 90, fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', outline: 'none' }} />
                     ) : (
-                      <span onClick={() => { setTagRow(v.id); setTagInput('') }} title="Add tag" style={{ fontSize: 10.5, fontWeight: 700, color: '#B85C1E', cursor: 'pointer', border: '1px dashed #E2C9A8', borderRadius: 6, padding: '1px 6px' }}>＋ tag</span>
+                      <span onClick={() => { setTagRow(v.id); setTagInput('') }} title="Add tag" style={{ fontSize: 12, fontWeight: 700, color: '#B85C1E', cursor: 'pointer', border: '1px dashed #E2C9A8', borderRadius: 6, padding: '3px 8px' }}>＋ tag</span>
                     )}
                   </div>
                 </div>
               </div>
               <div><span className="pill" style={STAGE_PILL[v.stage] || pill('#F1EADD', '#8C7E6B')}>{v.stage}</span></div>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{v.programs}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.where}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+              <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{v.programs}</div>
+              <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.where}</div>
+              <div style={{ fontSize: 14, color: 'var(--muted)' }}>
                 {v.attended > 0 ? <span style={{ color: '#4E7C3F', fontWeight: 600 }}>{v.attended} attended</span> : '—'}
-                <div style={{ fontSize: 11, color: 'var(--muted-2)' }}>{v.last}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>{v.last}</div>
               </div>
             </div>
           ))}

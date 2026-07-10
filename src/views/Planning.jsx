@@ -55,10 +55,10 @@ export default function Planning({ me, isCoordinator, onToast, openEventId = nul
   // (distinct from the Attendance page). Create is in-context here (coordinators).
   return (
     <Pad>
-      <p style={{ margin: '0 0 14px', fontSize: 13.5, color: 'var(--muted)' }}>Staff volunteers for each event — activity blocks, per-day slots, recruiting.</p>
+      <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--muted)' }}>Staff volunteers for each event — activity blocks, per-day slots, recruiting.</p>
       <AttentionPanel events={events} phasesByEvent={phasesByEvent} onOpen={setOpenId} />
       <EventList events={events} phasesByEvent={phasesByEvent} onOpen={setOpenId} right={isCoordinator && onCreateEvent && (
-        <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => onCreateEvent()}>＋ Create event</button>
+        <button className="btn btn-primary" style={{ fontSize: 12, padding: '8px 14px' }} onClick={() => onCreateEvent()}>＋ Create event</button>
       )} />
     </Pad>
   )

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill } from '../lib/ui'
+import { Pad, ErrorCard } from '../components/View'
 import KpiCard from '../components/KpiCard'
 
 // A count(*) helper — head:true keeps it cheap (no rows returned).
@@ -109,20 +110,13 @@ export default function Dashboard({ me, onToast, onNavigate }) {
   const shownRecs = track === 'all' ? RECS : RECS.filter((r) => r.track === track)
 
   return (
-    <div className="main-pad" style={{ padding: '26px 32px 60px', overflowY: 'auto' }}>
-      <h2 style={{ fontSize: 25, fontWeight: 600, margin: '0 0 4px' }}>Namaskaram{firstName ? `, ${firstName}` : ''}</h2>
-      <div style={{ fontSize: 13.5, color: 'var(--muted)', marginBottom: 22 }}>
+    <Pad>
+      <h2 className="dash-greeting" style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>Namaskaram{firstName ? `, ${firstName}` : ''}</h2>
+      <div className="mobile-hide" style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 22 }}>
         Here's what's moving across the center today.
       </div>
 
-      {err && (
-        <div
-          className="card"
-          style={{ padding: 14, marginBottom: 18, borderColor: '#E7C9B8', background: '#FBEEE6', color: '#9C4A14', fontSize: 13 }}
-        >
-          Couldn't load live counts: {err}
-        </div>
-      )}
+      {err && <ErrorCard>Couldn't load live counts: {err}</ErrorCard>}
 
       {/* KPI grid */}
       <div
@@ -199,12 +193,12 @@ export default function Dashboard({ me, onToast, onNavigate }) {
           AUTO-INSIGHT
         </span>
       </div>
-      <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+      <div className="mobile-hide" style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 14 }}>
         Where care and outreach will do the most — across new meditators, advance programmes and
         volunteer nurturing. Turn any one into a campaign.
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div className="scroll-tabs" style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         {TRACK_TABS.map((t) => {
           const on = t.key === track
           return (
@@ -214,7 +208,7 @@ export default function Dashboard({ me, onToast, onNavigate }) {
               className="btn"
               style={{
                 padding: '8px 14px',
-                fontSize: 12.5,
+                fontSize: 12,
                 borderRadius: 20,
                 background: on ? '#241B14' : '#fff',
                 color: on ? '#F6ECDC' : 'var(--ink-soft)',
@@ -236,10 +230,10 @@ export default function Dashboard({ me, onToast, onNavigate }) {
               </span>
               <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>{r.count}</span>
             </div>
-            <div style={{ fontSize: 15, fontWeight: 600, fontFamily: "'Newsreader',serif", color: 'var(--ink)' }}>
+            <div style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Newsreader',serif", color: 'var(--ink)' }}>
               {r.title}
             </div>
-            <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 }}>{r.body}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{r.body}</div>
             <button
               className="btn btn-primary"
               style={{ alignSelf: 'flex-start', marginTop: 2 }}
@@ -253,6 +247,6 @@ export default function Dashboard({ me, onToast, onNavigate }) {
           </div>
         ))}
       </div>
-    </div>
+    </Pad>
   )
 }

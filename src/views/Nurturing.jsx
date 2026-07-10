@@ -23,10 +23,10 @@ const lastContactLabel = (iso) => {
   if (d < 30) return `${d}d ago`
   return `${Math.round(d / 30)}mo ago`
 }
-const reach = (phone) => {
+const reach = (phone, isPhone) => {
   const t = telHref(phone)
-  if (!t) return <span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>no phone</span>
-  const base = { padding: '5px 10px', fontSize: 11.5, fontWeight: 600, borderRadius: 7, border: '1px solid var(--border)', textDecoration: 'none', whiteSpace: 'nowrap', color: 'var(--ink-soft)', background: '#fff' }
+  if (!t) return <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>no phone</span>
+  const base = { padding: isPhone ? '10px 12px' : '5px 10px', fontSize: 12, fontWeight: 600, borderRadius: 7, border: '1px solid var(--border)', textDecoration: 'none', whiteSpace: 'nowrap', color: 'var(--ink-soft)', background: '#fff', minHeight: isPhone ? 44 : undefined, display: 'inline-flex', alignItems: 'center' }
   return (
     <span style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
       <a href={t} style={base}>Call</a>
@@ -79,8 +79,8 @@ export default function Nurturing({ me, isCoordinator = false, onToast }) {
   // Level 1 — teams
   return (
     <Pad>
-      <div style={{ marginBottom: 18 }}>
-        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)' }}>Nurturing teams. Assignment happens on the Volunteers &amp; Meditators screens — this view is for oversight.</p>
+      <div className="mobile-hide" style={{ marginBottom: 18 }}>
+        <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)' }}>Nurturing teams. Assignment happens on the Volunteers &amp; Meditators screens — this view is for oversight.</p>
       </div>
       {teams.length === 0 && <Empty label="No teams yet." />}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 16 }}>
@@ -159,14 +159,14 @@ function TeamDetail({ team, isCoordinator, onBack, onOpenNurturer, onToast, onOp
     <Pad>
       <BackLink onClick={onBack} label="All teams" />
       <div className="card" style={{ padding: 22, marginBottom: 18 }}>
-        <h2 style={{ fontSize: 21, fontWeight: 600, margin: '0 0 3px' }}>{team.name}</h2>
-        <div style={{ fontSize: 13, color: 'var(--muted)' }}>{team.type} · {(members || []).length} nurturers</div>
+        <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 3px' }}>{team.name}</h2>
+        <div style={{ fontSize: 14, color: 'var(--muted)' }}>{team.type} · {(members || []).length} nurturers</div>
       </div>
 
       {!members ? <Loading label="Loading roster…" /> : (
         <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
           {!isPhone && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.8fr 1.4fr auto', gap: 12, padding: '12px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.8fr 1.4fr auto', gap: 12, padding: '12px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 12, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
               <span>Nurturer</span><span>Gender</span><span>Contact</span><span></span>
             </div>
           )}
@@ -174,35 +174,35 @@ function TeamDetail({ team, isCoordinator, onBack, onOpenNurturer, onToast, onOp
             isPhone ? (
               <div key={m.id} className="rowhover" style={{ padding: 14, borderBottom: '1px solid #F1E9DB' }}>
                 <div onClick={() => onOpenNurturer(m.person?.id)} style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0, cursor: 'pointer' }}>
-                  <div style={{ width: 38, height: 38, borderRadius: '50%', background: '#3D6E60', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(m.person?.full_name || '?')}</div>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--green-2)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(m.person?.full_name || '?')}</div>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 14.5, fontWeight: 600 }}>{m.person?.full_name || 'Unknown'}{m.is_poc && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), marginLeft: 8 }}>POC</span>}</div>
+                    <div style={{ fontSize: 16, fontWeight: 600 }}>{m.person?.full_name || 'Unknown'}{m.is_poc && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), marginLeft: 8 }}>POC</span>}</div>
                     <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>{genderOf(m.person?.gender)} · {m.person?.phone || 'no phone'}{m.person?.pincode ? ` · ${m.person.pincode}` : ''}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--orange)', marginTop: 2 }}>view held people →</div>
+                    <div style={{ fontSize: 12, color: 'var(--orange)', marginTop: 2 }}>view held people →</div>
                   </div>
                 </div>
                 {isCoordinator && (
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <button disabled={busy} onClick={() => togglePoc(m)} className="btn btn-ghost" style={{ fontSize: 12.5, padding: '9px 12px', minHeight: 40 }}>{m.is_poc ? 'Unset POC' : 'Make POC'}</button>
-                    <button disabled={busy} onClick={() => markLeft(m)} style={{ fontSize: 12.5, padding: '9px 12px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer', minHeight: 40 }}>Remove</button>
+                    <button disabled={busy} onClick={() => togglePoc(m)} className="btn btn-ghost" style={{ fontSize: 12, padding: '9px 12px', minHeight: 44 }}>{m.is_poc ? 'Unset POC' : 'Make POC'}</button>
+                    <button disabled={busy} onClick={() => markLeft(m)} style={{ fontSize: 12, padding: '9px 12px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer', minHeight: 44 }}>Remove</button>
                   </div>
                 )}
               </div>
             ) : (
               <div key={m.id} className="rowhover" style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.8fr 1.4fr auto', gap: 12, padding: '12px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center' }}>
                 <div onClick={() => onOpenNurturer(m.person?.id)} style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0, cursor: 'pointer' }}>
-                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: '#3D6E60', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(m.person?.full_name || '?')}</div>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--green-2)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(m.person?.full_name || '?')}</div>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.person?.full_name || 'Unknown'}{m.is_poc && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), marginLeft: 8 }}>POC</span>}</div>
-                    <div style={{ fontSize: 11, color: 'var(--orange)' }}>view held people →</div>
+                    <div style={{ fontSize: 16, fontWeight: 600 }}>{m.person?.full_name || 'Unknown'}{m.is_poc && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), marginLeft: 8 }}>POC</span>}</div>
+                    <div style={{ fontSize: 12, color: 'var(--orange)' }}>view held people →</div>
                   </div>
                 </div>
-                <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{genderOf(m.person?.gender)}</div>
-                <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{m.person?.phone || 'no phone'}{m.person?.pincode ? ` · ${m.person.pincode}` : ''}</div>
+                <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{genderOf(m.person?.gender)}</div>
+                <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{m.person?.phone || 'no phone'}{m.person?.pincode ? ` · ${m.person.pincode}` : ''}</div>
                 {isCoordinator ? (
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button disabled={busy} onClick={() => togglePoc(m)} className="btn btn-ghost" style={{ fontSize: 11.5, padding: '5px 10px' }}>{m.is_poc ? 'Unset POC' : 'Make POC'}</button>
-                    <button disabled={busy} onClick={() => markLeft(m)} style={{ fontSize: 11.5, padding: '5px 10px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Remove</button>
+                    <button disabled={busy} onClick={() => togglePoc(m)} className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}>{m.is_poc ? 'Unset POC' : 'Make POC'}</button>
+                    <button disabled={busy} onClick={() => markLeft(m)} style={{ fontSize: 12, padding: '5px 10px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Remove</button>
                   </div>
                 ) : <span />}
               </div>
@@ -219,7 +219,7 @@ function TeamDetail({ team, isCoordinator, onBack, onOpenNurturer, onToast, onOp
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
             {results.map((p) => (
               <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between', padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 10 }}>
-                <div><span style={{ fontSize: 13.5, fontWeight: 600 }}>{p.full_name}</span> <span style={{ fontSize: 12, color: 'var(--muted)' }}>{p.phone || 'no phone'}{p.pincode ? ` · ${p.pincode}` : ''}</span></div>
+                <div><span style={{ fontSize: 14, fontWeight: 600 }}>{p.full_name}</span> <span style={{ fontSize: 12, color: 'var(--muted)' }}>{p.phone || 'no phone'}{p.pincode ? ` · ${p.pincode}` : ''}</span></div>
                 <button disabled={busy} className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 11px' }} onClick={() => addMember(p.id)}>Add</button>
               </div>
             ))}
@@ -302,14 +302,14 @@ function NurturerDetail({ nurturerPersonId, me, onBack, onToast, onOpenProfile }
     <Pad>
       <BackLink onClick={onBack} label="Team roster" />
       <div className="card" style={{ padding: 22, marginBottom: 18, display: 'flex', alignItems: 'center', gap: 14 }}>
-        <div style={{ width: 48, height: 48, borderRadius: '50%', background: avatarFor(1), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, fontWeight: 600 }}>{initials(nurturer?.full_name || '?')}</div>
+        <div style={{ width: 46, height: 46, borderRadius: '50%', background: avatarFor(1), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 600 }}>{initials(nurturer?.full_name || '?')}</div>
         <div>
-          <h2 style={{ fontSize: 21, fontWeight: 600, margin: '0 0 2px' }}>{nurturer?.full_name || '…'}</h2>
-          <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{genderOf(nurturer?.gender)} · {nurturer?.phone || 'no phone'}{nurturer?.pincode ? ` · ${nurturer.pincode}` : ''} · {(held || []).length} held</div>
+          <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 2px' }}>{nurturer?.full_name || '…'}</h2>
+          <div style={{ fontSize: 14, color: 'var(--muted)' }}>{genderOf(nurturer?.gender)} · {nurturer?.phone || 'no phone'}{nurturer?.pincode ? ` · ${nurturer.pincode}` : ''} · {(held || []).length} held</div>
         </div>
       </div>
 
-      <h3 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 10px' }}>People this nurturer is holding</h3>
+      <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 10px' }}>People this nurturer is holding</h3>
       {!held ? <Loading label="Loading…" /> : (
         <div className="card" style={{ overflow: 'hidden', marginBottom: 18 }}>
           {held.length === 0 && <div style={{ padding: 22 }}><Empty label="No one assigned yet — add below, or bulk-assign from Volunteers/Meditators." /></div>}
@@ -319,14 +319,14 @@ function NurturerDetail({ nurturerPersonId, me, onBack, onToast, onOpenProfile }
               return (
                 <div key={a.id} className="rowhover" style={{ padding: 14, borderBottom: '1px solid #F1E9DB' }}>
                   <div onClick={() => onOpenProfile(a.cared?.id)} style={{ minWidth: 0, cursor: 'pointer' }}>
-                    <div style={{ fontSize: 14.5, fontWeight: 600 }}>{a.cared?.full_name || 'Unknown'}</div>
-                    <div style={{ fontSize: 12, color: overdue ? '#B5532F' : 'var(--muted)', marginTop: 1 }}>{lastContactLabel(lastContact[a.cared_person_id])}{overdue ? ' · overdue' : ''}</div>
+                    <div style={{ fontSize: 16, fontWeight: 600 }}>{a.cared?.full_name || 'Unknown'}</div>
+                    <div style={{ fontSize: 12, color: overdue ? 'var(--red)' : 'var(--muted)', marginTop: 1 }}>{lastContactLabel(lastContact[a.cared_person_id])}{overdue ? ' · overdue' : ''}</div>
                     <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 2 }}>{genderOf(a.cared?.gender)} · {a.cared?.phone || 'no phone'}{a.cared?.pincode ? ` · ${a.cared.pincode}` : ''}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-                    {reach(a.cared?.phone)}
-                    <button className="btn btn-primary" style={{ padding: '9px 16px', fontSize: 12.5, minHeight: 40 }} onClick={() => setLogFor(a)}>Log</button>
-                    <button title="End care" onClick={() => endCare(a)} disabled={busy} style={{ padding: '9px 12px', fontSize: 12.5, borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer', marginLeft: 'auto', minHeight: 40 }}>✕ End</button>
+                    {reach(a.cared?.phone, true)}
+                    <button className="btn btn-primary" style={{ padding: '9px 16px', fontSize: 12, minHeight: 44 }} onClick={() => setLogFor(a)}>Log</button>
+                    <button title="End care" onClick={() => endCare(a)} disabled={busy} style={{ padding: '9px 12px', fontSize: 12, borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer', marginLeft: 'auto', minHeight: 44 }}>✕ End</button>
                   </div>
                 </div>
               )
@@ -334,15 +334,15 @@ function NurturerDetail({ nurturerPersonId, me, onBack, onToast, onOpenProfile }
             return (
               <div key={a.id} className="rowhover" style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.8fr 1.4fr auto', gap: 12, padding: '12px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center' }}>
                 <div onClick={() => onOpenProfile(a.cared?.id)} style={{ minWidth: 0, cursor: 'pointer' }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{a.cared?.full_name || 'Unknown'}</div>
-                  <div style={{ fontSize: 11.5, color: overdue ? '#B5532F' : 'var(--muted)' }}>{lastContactLabel(lastContact[a.cared_person_id])}{overdue ? ' · overdue' : ''}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>{a.cared?.full_name || 'Unknown'}</div>
+                  <div style={{ fontSize: 12, color: overdue ? 'var(--red)' : 'var(--muted)' }}>{lastContactLabel(lastContact[a.cared_person_id])}{overdue ? ' · overdue' : ''}</div>
                 </div>
-                <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{genderOf(a.cared?.gender)}</div>
-                <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{a.cared?.phone || 'no phone'}{a.cared?.pincode ? ` · ${a.cared.pincode}` : ''}</div>
+                <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{genderOf(a.cared?.gender)}</div>
+                <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{a.cared?.phone || 'no phone'}{a.cared?.pincode ? ` · ${a.cared.pincode}` : ''}</div>
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-                  {reach(a.cared?.phone)}
-                  <button className="btn btn-primary" style={{ padding: '5px 10px', fontSize: 11.5 }} onClick={() => setLogFor(a)}>Log</button>
-                  <button title="End care" onClick={() => endCare(a)} disabled={busy} style={{ padding: '5px 8px', fontSize: 11.5, borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>✕</button>
+                  {reach(a.cared?.phone, false)}
+                  <button className="btn btn-primary" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => setLogFor(a)}>Log</button>
+                  <button title="End care" onClick={() => endCare(a)} disabled={busy} style={{ padding: '5px 8px', fontSize: 12, borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>✕</button>
                 </div>
               </div>
             )
@@ -389,13 +389,13 @@ function NurturingLog({ assignment, loggedBy, onClose, onSaved, onToast }) {
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 140, padding: 20 }} onClick={onClose}>
       <div className="card" style={{ width: 420, maxWidth: '100%', padding: 24 }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 4px' }}>Log nurturing contact</h3>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>{assignment.cared?.full_name} · {assignment.cared?.phone || 'no phone'}</div>
-        <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#5C5142', marginBottom: 14 }}>Outcome
+        <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 16 }}>{assignment.cared?.full_name} · {assignment.cared?.phone || 'no phone'}</div>
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', marginBottom: 14 }}>Outcome
           <select value={outcome} onChange={(e) => setOutcome(e.target.value)} style={{ ...inputStyle, marginTop: 6 }}>
             {['Reached', 'No answer', 'Call back', 'Doing well', 'Needs support'].map((o) => <option key={o}>{o}</option>)}
           </select>
         </label>
-        <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: '#5C5142', marginBottom: 16 }}>Note (optional)
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', marginBottom: 16 }}>Note (optional)
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} style={{ ...inputStyle, marginTop: 6, resize: 'vertical' }} />
         </label>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -409,11 +409,11 @@ function NurturingLog({ assignment, loggedBy, onClose, onSaved, onToast }) {
 
 function BackLink({ onClick, label }) {
   return (
-    <div onClick={onClick} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 600, color: 'var(--orange)', cursor: 'pointer', marginBottom: 16 }}>
+    <div onClick={onClick} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 600, color: 'var(--orange)', cursor: 'pointer', marginBottom: 16 }}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
       {label}
     </div>
   )
 }
 
-const inputStyle = { width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', fontSize: 13.5, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', background: '#fff', color: 'var(--ink)' }
+const inputStyle = { width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', background: '#fff', color: 'var(--ink)' }

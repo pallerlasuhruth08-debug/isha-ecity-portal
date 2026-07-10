@@ -206,28 +206,37 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const pageSelectedCount = pageIds.filter((id) => sel.isSelected(id)).length
   const pageHeaderState = pageIds.length === 0 ? 'none' : pageSelectedCount === 0 ? 'none' : pageSelectedCount === pageIds.length ? 'all' : 'partial'
   const togglePage = () => (pageSelectedCount === pageIds.length && pageIds.length > 0 ? sel.deselectIds(pageIds) : sel.selectIds(pageIds))
-  const selStyle = { padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 5px)' : undefined }
+  const selStyle = { padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 5px)' : undefined }
   const grid = '34px 2fr 1.6fr 1.2fr 1.1fr'
 
   return (
     <Pad>
       {campaignDraft && (
         <div className="card" style={{ padding: '12px 16px', marginBottom: 14, background: '#FBF1E4', borderColor: '#E7C9B8', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 13, color: '#9C4A14', fontWeight: 600 }}>Building the call list for “{campaignDraft.eventName}” — select people, then Create campaign.</div>
+          <div style={{ fontSize: 14, color: 'var(--rust)', fontWeight: 600 }}>Building the call list for “{campaignDraft.eventName}” — select people, then Create campaign.</div>
           <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onClearCampaignDraft && onClearCampaignDraft()}>Cancel</button>
         </div>
       )}
       {recipientDraft && (
         <div className="card" style={{ padding: '12px 16px', marginBottom: 14, background: '#FBF1E4', borderColor: '#E7C9B8', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 13, color: '#9C4A14', fontWeight: 600 }}>Adding meditators to “{recipientDraft.campaignName}” — select people, then Add to campaign.</div>
+          <div style={{ fontSize: 14, color: 'var(--rust)', fontWeight: 600 }}>Adding meditators to “{recipientDraft.campaignName}” — select people, then Add to campaign.</div>
           <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onRecipientsDone && onRecipientsDone()}>Cancel</button>
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
         <div>
-          <div style={{ fontSize: 13, color: 'var(--muted)' }}>{loading ? 'Loading…' : `${total} in care · filter by programme and recent activity.`}</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)' }}>
+            {loading ? 'Loading…' : (
+              <>
+                {total} in care
+                <span className="mobile-hide"> · filter by programme and recent activity.</span>
+              </>
+            )}
+          </div>
         </div>
-        {!recipientDraft && <button className="btn" disabled={resolving} onClick={openCampaign}>{Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}</button>}
+        {/* On mobile this becomes the sticky bottom CTA below (one primary action per screen,
+            thumb-reachable) instead of competing for space with the count text here. */}
+        {!recipientDraft && !isPhone && <button className="btn" disabled={resolving} onClick={openCampaign}>{Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}</button>}
       </div>
 
       {err && <ErrorCard>Couldn't load meditators: {err}</ErrorCard>}
@@ -235,7 +244,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: isPhone ? '11px 12px' : '8px 12px', minWidth: 200, flexBasis: isPhone ? '100%' : undefined }}>
           {Icon.search(15)}
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email or pincode…" style={{ border: 'none', outline: 'none', fontSize: 13, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email or pincode…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
         <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0)}>
           <select value={prog} onChange={(e) => setProg(e.target.value)} style={selStyle}>
@@ -261,10 +270,10 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
         {isPhone ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
             <Checkbox state={pageHeaderState} onClick={() => togglePage()} />
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select this page'}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select this page'}</span>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, alignItems: 'center' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 12, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, alignItems: 'center' }}>
             <Checkbox state={pageHeaderState} onClick={() => togglePage()} />
             <span>Meditator</span>
             <span>Programmes</span>
@@ -281,13 +290,13 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
               <div style={{ minHeight: 44, display: 'flex', alignItems: 'center' }}>
                 <Checkbox state={sel.isSelected(p.id)} onClick={(e) => { e.stopPropagation(); sel.toggle(p.id) }} />
               </div>
-              <div style={{ width: 40, height: 40, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name)}</div>
+              <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name)}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.full_name}</div>
-                <div style={{ fontSize: 12.5, color: p.phone ? 'var(--muted)' : '#B5532F', marginTop: 2 }}>{p.phone || 'No phone on record'}</div>
+                <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.full_name}</div>
+                <div style={{ fontSize: 12, color: p.phone ? 'var(--muted)' : 'var(--red)', marginTop: 2 }}>{p.phone || 'No phone on record'}</div>
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
                   {progList(p).length === 0 && <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>No programmes</span>}
-                  {progList(p).map((t) => (<span key={t} className="pill" style={pill('#F3E3D2', '#9C4A14')}>{t}</span>))}
+                  {progList(p).map((t) => (<span key={t} className="pill" style={pill('#F3E3D2', 'var(--rust)')}>{t}</span>))}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 6 }}>{[p.area, p.pincode].filter(Boolean).join(' · ') || p.center_id || '—'}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{lastActive(p.last_active_date)}</div>
@@ -300,18 +309,18 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
             <div key={p.id} className="rowhover" onClick={() => setProfileId(p.id)} style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '13px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', cursor: 'pointer', background: profileId === p.id ? '#FBF1E6' : undefined }}>
               <Checkbox state={sel.isSelected(p.id)} onClick={(e) => { e.stopPropagation(); sel.toggle(p.id) }} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
-                <div style={{ width: 36, height: 36, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name)}</div>
+                <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name)}</div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.full_name}</div>
-                  <div style={{ fontSize: 11.5, color: p.phone ? 'var(--muted)' : '#B5532F' }}>{p.phone || 'No phone on record'}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.full_name}</div>
+                  <div style={{ fontSize: 12, color: p.phone ? 'var(--muted)' : 'var(--red)' }}>{p.phone || 'No phone on record'}</div>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                 {progList(p).length === 0 && <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>—</span>}
-                {progList(p).map((t) => (<span key={t} className="pill" style={pill('#F3E3D2', '#9C4A14')}>{t}</span>))}
+                {progList(p).map((t) => (<span key={t} className="pill" style={pill('#F3E3D2', 'var(--rust)')}>{t}</span>))}
               </div>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[p.area, p.pincode].filter(Boolean).join(' · ') || p.center_id || '—'}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{lastActive(p.last_active_date)}</div>
+              <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[p.area, p.pincode].filter(Boolean).join(' · ') || p.center_id || '—'}</div>
+              <div style={{ fontSize: 14, color: 'var(--muted)' }}>{lastActive(p.last_active_date)}</div>
             </div>
           ))}
         {!loading && total > 0 && (
@@ -334,6 +343,23 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
         <AssignNurturerDialog personIds={assignIds} label="meditators" me={me} onClose={() => setShowAssign(false)} onToast={onToast} onDone={() => { setShowAssign(false); sel.clear(); loadPage() }} />
       )}
       {profileId && <PersonProfile personId={profileId} me={me} onClose={() => setProfileId(null)} onToast={onToast} onChanged={loadPage} />}
+
+      {isPhone && !recipientDraft && (
+        <>
+          {/* Clears the fixed bar below so the last table row stays reachable. */}
+          <div style={{ height: 68 }} />
+          <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, padding: '10px 14px calc(10px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '1px solid var(--border)', zIndex: 120 }}>
+            <button
+              className="btn btn-primary"
+              disabled={resolving}
+              onClick={openCampaign}
+              style={{ width: '100%', height: 48, justifyContent: 'center', fontSize: 15 }}
+            >
+              {Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}
+            </button>
+          </div>
+        </>
+      )}
     </Pad>
   )
 }

@@ -248,3 +248,51 @@ button {
     padding-top: 16px !important;
   }
 }
+
+/* ============================================================
+   Mobile layout pass (screens fixed one at a time — see per-view
+   comments for what's been walked). Desktop untouched: everything
+   below is gated behind @media (max-width: 768px).
+   ============================================================ */
+@media (max-width: 768px) {
+  /* Global: form fields at native size or smaller trigger iOS Safari's
+     auto-zoom on focus. 16px is the documented threshold. */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+  /* Global: belt-and-suspenders against any element forcing horizontal scroll. */
+  html,
+  body {
+    overflow-x: hidden;
+  }
+  /* Text-only helper content a returning user doesn't need re-reading every visit
+     (page-purpose blurbs, mechanic explanations like "click a row to..."). Opt in
+     per-element with this class; screens are converted to it one at a time. */
+  .mobile-hide {
+    display: none !important;
+  }
+  /* Widens the tap area of small controls (checkboxes etc.) to the 44x44 minimum
+     without changing their visual size — pair with a wrapper, see Checkbox in View.jsx. */
+  .tap-hit-44 {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* Dashboard: restores breathing room below the greeting once its subtitle
+     (a .mobile-hide sibling) disappears on mobile. */
+  .dash-greeting {
+    margin-bottom: 18px !important;
+  }
+  /* Interest inbox: keep the tab-chip row and its trailing kebab menu on one
+     line — the chips scroll (.scroll-tabs), the kebab stays put at the end. */
+  .interest-toolbar {
+    flex-wrap: nowrap !important;
+  }
+  .interest-toolbar > .scroll-tabs {
+    flex: 1 1 auto;
+  }
+}

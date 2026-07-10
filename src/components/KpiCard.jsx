@@ -26,7 +26,7 @@ export default function KpiCard({ icon, tint, ink, value, label, badge, badgeSty
         <div style={{ fontFamily: "'Newsreader',serif", fontSize: 30, fontWeight: 600, lineHeight: 1, color: 'var(--ink)' }}>
           {loading ? '—' : value}
         </div>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 6 }}>{label}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>{label}</div>
       </div>
     </div>
   )

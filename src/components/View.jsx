@@ -9,18 +9,18 @@ export function Pad({ children }) {
 
 export function ErrorCard({ children }) {
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 16, borderColor: '#E7C9B8', background: '#FBEEE6', color: '#9C4A14', fontSize: 13 }}>
+    <div className="card" style={{ padding: 14, marginBottom: 16, borderColor: '#E7C9B8', background: '#FBEEE6', color: 'var(--rust)', fontSize: 14 }}>
       {children}
     </div>
   )
 }
 
 export function Loading({ label = 'Loading…' }) {
-  return <div style={{ padding: 28, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>{label}</div>
+  return <div style={{ padding: 28, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>{label}</div>
 }
 
 export function Empty({ label = 'Nothing here yet.' }) {
-  return <div style={{ padding: 28, textAlign: 'center', color: 'var(--muted-2)', fontSize: 13 }}>{label}</div>
+  return <div style={{ padding: 28, textAlign: 'center', color: 'var(--muted-2)', fontSize: 14 }}>{label}</div>
 }
 
 export function SectionTitle({ title, subtitle, right }) {
@@ -28,7 +28,7 @@ export function SectionTitle({ title, subtitle, right }) {
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
       <div>
         <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 3px' }}>{title}</h3>
-        {subtitle && <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>{subtitle}</p>}
+        {subtitle && <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)' }}>{subtitle}</p>}
       </div>
       {right}
     </div>
@@ -42,7 +42,7 @@ export function Chip({ on, label, count, onClick }) {
       className="btn"
       style={{
         padding: '7px 13px',
-        fontSize: 12.5,
+        fontSize: 12,
         borderRadius: 20,
         background: on ? '#241B14' : '#fff',
         color: on ? '#F6ECDC' : 'var(--ink-soft)',
@@ -72,35 +72,35 @@ export function Checkbox({ state, onClick, size = 19 }) {
   const partial = state === 'partial'
   const filled = on || partial
   return (
-    <div
-      onClick={onClick}
-      style={{
-        width: size,
-        height: size,
-        borderRadius: 6,
-        border: '1.5px solid ' + (filled ? '#C2691F' : '#D8CBB6'),
-        background: filled ? '#C2691F' : '#fff',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: '#fff',
-        cursor: 'pointer',
-        flexShrink: 0,
-      }}
-    >
-      {on ? CHECK : partial ? DASH : null}
+    <div onClick={onClick} className="tap-hit-44" style={{ cursor: 'pointer', flexShrink: 0 }}>
+      <div
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 6,
+          border: '1.5px solid ' + (filled ? 'var(--orange)' : '#D8CBB6'),
+          background: filled ? 'var(--orange)' : '#fff',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#fff',
+          flexShrink: 0,
+        }}
+      >
+        {on ? CHECK : partial ? DASH : null}
+      </div>
     </div>
   )
 }
 
 export function PageSizeSelect({ value, onChange, options = [25, 50, 100] }) {
   return (
-    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--muted)' }}>
+    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
       Rows
       <select
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        style={{ padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }}
+        style={{ padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }}
       >
         {options.map((o) => (
           <option key={o} value={o}>{o}</option>
@@ -119,7 +119,7 @@ export function PagerBar({ page, pageCount, total, pageSize, onPage, onPageSize,
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', ...border, flexWrap: 'wrap' }}>
       <PageSizeSelect value={pageSize} onChange={onPageSize} />
-      <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+      <span style={{ fontSize: 12, color: 'var(--muted)' }}>
         {from}–{to} of {total} · page {page + 1} of {pageCount}
       </span>
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
@@ -138,11 +138,11 @@ export function SelectionBar({ isFullySelected, count, total, onSelectAll, onCre
   if (count <= 0) return null
   return (
     <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', marginBottom: 14, background: '#FBF1E6', borderColor: '#EBD9C2', flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 13, fontWeight: 600, color: '#9C4A14' }}>
+      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--rust)' }}>
         {isFullySelected ? `All ${count} matching this filter selected` : `${count} selected`}
       </span>
       {!isFullySelected && onSelectAll && total > count && (
-        <button className="btn btn-ghost" onClick={onSelectAll} style={{ fontSize: 12.5, padding: '6px 12px' }}>Select all {total} matching this filter?</button>
+        <button className="btn btn-ghost" onClick={onSelectAll} style={{ fontSize: 12, padding: '6px 12px' }}>Select all {total} matching this filter?</button>
       )}
       <div style={{ flex: 1 }} />
       {onAssign && <button className="btn btn-ghost" onClick={onAssign}>Assign to nurturer</button>}

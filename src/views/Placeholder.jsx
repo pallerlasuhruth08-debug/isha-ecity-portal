@@ -1,10 +1,11 @@
 import { Icon } from '../lib/icons'
+import { Pad } from '../components/View'
 
 // Faithful shell for views still being wired to Supabase. Keeps the app fully
 // navigable while each view is ported one at a time.
 export default function Placeholder({ view, title, note }) {
   return (
-    <div className="main-pad" style={{ padding: '26px 32px 60px', overflowY: 'auto' }}>
+    <Pad>
       <div
         className="card"
         style={{
@@ -24,7 +25,7 @@ export default function Placeholder({ view, title, note }) {
             height: 56,
             borderRadius: 16,
             background: '#F3E3D2',
-            color: '#9C4A14',
+            color: 'var(--rust)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -33,7 +34,7 @@ export default function Placeholder({ view, title, note }) {
           {(Icon[view] || Icon.dashboard)(26)}
         </div>
         <h2 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>{title}</h2>
-        <div style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55 }}>
+        <div style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.55 }}>
           {note ||
             'This view is designed and next in line to be wired to live Supabase data. The layout, interactions and role scoping from the design are being ported here.'}
         </div>
@@ -44,6 +45,6 @@ export default function Placeholder({ view, title, note }) {
           WIRING IN PROGRESS
         </span>
       </div>
-    </div>
+    </Pad>
   )
 }

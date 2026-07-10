@@ -25,8 +25,8 @@ const SECTIONS = [
   { k: 'unresolved', label: 'Unresolved' },
 ]
 const SENTINELS = ['all', 'unassigned']
-const selStyle = { padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: 40 }
-const inputStyle = { padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 13, fontFamily: 'inherit', background: '#fff', color: 'var(--ink)', outline: 'none', minHeight: 40 }
+const selStyle = { padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: 40 }
+const inputStyle = { padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 14, fontFamily: 'inherit', background: '#fff', color: 'var(--ink)', outline: 'none', minHeight: 40 }
 
 export default function Admin({ me, onToast }) {
   const [tab, setTab] = useState('users')
@@ -40,13 +40,13 @@ export default function Admin({ me, onToast }) {
   return (
     <Pad>
       <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+        <div style={{ fontSize: 14, color: 'var(--muted)' }}>
           Access is derived from role + the pincode map — set a person's role (and, for a coordinator, their centre); the database does the filtering.
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
         {tabs.map((t) => (
-          <button key={t.k} onClick={() => setTab(t.k)} className="btn" style={{ padding: '8px 15px', fontSize: 13, borderRadius: 20, background: tab === t.k ? '#241B14' : '#fff', color: tab === t.k ? '#F6ECDC' : 'var(--ink-soft)', border: tab === t.k ? 'none' : '1px solid var(--border)' }}>
+          <button key={t.k} onClick={() => setTab(t.k)} className="btn" style={{ padding: '8px 15px', fontSize: 14, borderRadius: 20, background: tab === t.k ? '#241B14' : '#fff', color: tab === t.k ? '#F6ECDC' : 'var(--ink-soft)', border: tab === t.k ? 'none' : '1px solid var(--border)' }}>
             {t.label}
           </button>
         ))}
@@ -100,11 +100,11 @@ function TodoTemplates({ onToast }) {
   if (types === null) return <Loading label="Loading…" />
   return (
     <div>
-      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
         Per event-type checklist. When an event of this type is created, these items are copied onto its Planning to-do list (due date = event day + offset), then editable per event.
       </div>
       <div style={{ marginBottom: 14 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#5C5142', display: 'block', marginBottom: 5 }}>Event type</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', display: 'block', marginBottom: 5 }}>Event type</span>
         <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={{ ...fld, minWidth: 240 }}>
           {types.length === 0 && <option value="">— no activity types —</option>}
           {types.map((t) => <option key={t.id} value={t.id}>{t.label}{t.kind === 'meditator' ? ' · participant' : ''}</option>)}
@@ -114,12 +114,12 @@ function TodoTemplates({ onToast }) {
         <div className="card" style={{ padding: 12, marginBottom: 14 }}>
           {rows.map((r) => (
             <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid #F4EEE2', flexWrap: 'wrap' }}>
-              <input defaultValue={r.text} key={r.text} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== r.text) patch(r.id, { text: v }) }} style={{ flex: 1, minWidth: 140, border: 'none', outline: 'none', fontSize: 13.5, background: 'transparent', color: 'var(--ink)', fontFamily: 'inherit' }} />
-              <label style={{ fontSize: 11.5, color: 'var(--muted)' }}>day <input type="number" defaultValue={r.day_offset} key={'o' + r.day_offset} onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== r.day_offset) patch(r.id, { day_offset: v }) }} style={{ width: 58, ...fld, padding: '3px 6px', marginLeft: 4 }} /></label>
-              <select value={r.action_kind || ''} onChange={(e) => patch(r.id, { action_kind: e.target.value || null })} style={{ ...fld, padding: '4px 7px', fontSize: 11.5 }}>
+              <input defaultValue={r.text} key={r.text} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== r.text) patch(r.id, { text: v }) }} style={{ flex: 1, minWidth: 140, border: 'none', outline: 'none', fontSize: 14, background: 'transparent', color: 'var(--ink)', fontFamily: 'inherit' }} />
+              <label style={{ fontSize: 12, color: 'var(--muted)' }}>day <input type="number" defaultValue={r.day_offset} key={'o' + r.day_offset} onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== r.day_offset) patch(r.id, { day_offset: v }) }} style={{ width: 58, ...fld, padding: '3px 6px', marginLeft: 4 }} /></label>
+              <select value={r.action_kind || ''} onChange={(e) => patch(r.id, { action_kind: e.target.value || null })} style={{ ...fld, padding: '4px 7px', fontSize: 12 }}>
                 {TT_ACTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
-              <button onClick={() => del(r)} style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Delete</button>
+              <button onClick={() => del(r)} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Delete</button>
             </div>
           ))}
         </div>
@@ -129,7 +129,7 @@ function TodoTemplates({ onToast }) {
           <span style={{ fontSize: 12, fontWeight: 600, color: '#5C5142', display: 'block', marginBottom: 5 }}>New template item</span>
           <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder="e.g. Confirm hall booking" style={{ ...fld, width: '100%' }} />
         </div>
-        <label style={{ fontSize: 11.5, color: 'var(--muted)' }}>Day offset<br /><input type="number" value={offset} onChange={(e) => setOffset(e.target.value)} title="Days relative to the event day (negative = before)" style={{ width: 84, ...fld }} /></label>
+        <label style={{ fontSize: 12, color: 'var(--muted)' }}>Day offset<br /><input type="number" value={offset} onChange={(e) => setOffset(e.target.value)} title="Days relative to the event day (negative = before)" style={{ width: 84, ...fld }} /></label>
         <select value={action} onChange={(e) => setAction(e.target.value)} style={fld}>
           {TT_ACTIONS.map(([v, l]) => <option key={v} value={v}>{v ? `Action: ${l}` : 'No action'}</option>)}
         </select>
@@ -247,10 +247,10 @@ function UserRow({ u, idx, centres, roles, onToast, onSaved }) {
 
   return (
     <div className="rowhover" style={{ display: 'flex', gap: 10, padding: '14px 18px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', flexWrap: 'wrap' }}>
-      <div style={{ width: 38, height: 38, borderRadius: '50%', background: avatarFor(idx), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(name || u.email || '?')}</div>
+      <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(idx), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(name || u.email || '?')}</div>
       <div style={{ minWidth: 150, flex: 1 }}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" style={{ ...inputStyle, width: '100%', minHeight: 34, padding: '6px 9px', fontWeight: 600 }} />
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>{u.email || 'no email'}{!u.active && <span style={{ color: '#B5532F', marginLeft: 8 }}>inactive</span>}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>{u.email || 'no email'}{!u.active && <span style={{ color: 'var(--red)', marginLeft: 8 }}>inactive</span>}</div>
       </div>
       <select value={role} onChange={(e) => setRole(e.target.value)} style={selStyle} title="Role">
         {roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
@@ -260,13 +260,13 @@ function UserRow({ u, idx, centres, roles, onToast, onSaved }) {
         <option value="all">All centres (sector)</option>
         {centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
       </select>
-      <button className="btn btn-primary" disabled={!dirty || busy} onClick={save} style={{ padding: '9px 15px', fontSize: 12.5, opacity: dirty ? 1 : 0.5 }}>
+      <button className="btn btn-primary" disabled={!dirty || busy} onClick={save} style={{ padding: '9px 15px', fontSize: 12, opacity: dirty ? 1 : 0.5 }}>
         {busy ? 'Saving…' : 'Save'}
       </button>
-      <button className="btn btn-ghost" disabled={busy} onClick={toggleActive} title={u.active ? 'Remove all data access (keeps the record)' : 'Restore access'} style={{ padding: '9px 12px', fontSize: 12.5, color: u.active ? '#B5532F' : '#4E7C3F' }}>
+      <button className="btn btn-ghost" disabled={busy} onClick={toggleActive} title={u.active ? 'Remove all data access (keeps the record)' : 'Restore access'} style={{ padding: '9px 12px', fontSize: 12, color: u.active ? 'var(--red)' : '#4E7C3F' }}>
         {u.active ? 'Deactivate' : 'Activate'}
       </button>
-      <button disabled={busy} onClick={remove} title="Delete this profile (irreversible)" style={{ padding: '9px 11px', fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: busy ? 'default' : 'pointer' }}>Remove</button>
+      <button disabled={busy} onClick={remove} title="Delete this profile (irreversible)" style={{ padding: '9px 11px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: busy ? 'default' : 'pointer' }}>Remove</button>
     </div>
   )
 }
@@ -310,7 +310,7 @@ function RolesManager({ onToast }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
         <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="New role name (e.g. Volunteer Nurturer)"
           onKeyDown={(e) => e.key === 'Enter' && addRole()} style={{ ...inputStyle, flex: 1, minWidth: 220 }} />
-        <button className="btn btn-primary" disabled={busy || !newLabel.trim()} onClick={addRole} style={{ padding: '9px 16px', fontSize: 13 }}>＋ Add role</button>
+        <button className="btn btn-primary" disabled={busy || !newLabel.trim()} onClick={addRole} style={{ padding: '9px 16px', fontSize: 14 }}>＋ Add role</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {roles.map((r) => <RoleCard key={r.id} role={r} onToast={onToast} onChanged={load} />)}
@@ -360,10 +360,10 @@ function RoleCard({ role, onToast, onChanged }) {
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
         <input value={label} disabled={!editable} onChange={(e) => setLabel(e.target.value)} onBlur={rename}
           style={{ ...inputStyle, minWidth: 180, fontWeight: 600, opacity: editable ? 1 : 0.7 }} />
-        {role.is_system && <span className="pill" style={{ background: '#EDE4D6', color: '#8C7E6B', fontSize: 10.5 }}>system · all access</span>}
-        {!role.active && <span className="pill" style={{ background: '#FBE6E0', color: '#B5532F', fontSize: 10.5 }}>inactive</span>}
+        {role.is_system && <span className="pill" style={{ background: '#EDE4D6', color: '#8C7E6B', fontSize: 12 }}>system · all access</span>}
+        {!role.active && <span className="pill" style={{ background: '#FBE6E0', color: 'var(--red)', fontSize: 12 }}>inactive</span>}
         {!role.is_system && (
-          <button className="btn btn-ghost" disabled={busy} onClick={toggleActive} style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 11px', color: role.active ? '#B5532F' : '#4E7C3F' }}>
+          <button className="btn btn-ghost" disabled={busy} onClick={toggleActive} style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 11px', color: role.active ? 'var(--red)' : '#4E7C3F' }}>
             {role.active ? 'Deactivate' : 'Reactivate'}
           </button>
         )}
@@ -374,7 +374,7 @@ function RoleCard({ role, onToast, onChanged }) {
           return (
             <button key={s.k} disabled={!editable || busy} onClick={() => toggleSection(s.k)}
               style={{ fontSize: 12, padding: '6px 11px', borderRadius: 8, cursor: editable ? 'pointer' : 'default',
-                border: on ? '1px solid #2F6E5E' : '1px solid var(--border)', background: on ? '#E9F0EF' : '#fff', color: on ? '#2F6E5E' : 'var(--muted)', fontWeight: on ? 600 : 400 }}>
+                border: on ? '1px solid var(--green)' : '1px solid var(--border)', background: on ? '#E9F0EF' : '#fff', color: on ? 'var(--green)' : 'var(--muted)', fontWeight: on ? 600 : 400 }}>
               {on ? '✓ ' : ''}{s.label}
             </button>
           )
@@ -457,27 +457,27 @@ function Centres({ onToast }) {
         {real.map((c) => (
           <div key={c.id} className="rowhover" style={{ display: 'flex', gap: 12, padding: '14px 18px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 150 }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>{c.name || c.id}{!c.active && <span style={{ fontSize: 11, color: '#B5532F', marginLeft: 8 }}>inactive</span>}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>id: {c.id}</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{c.name || c.id}{!c.active && <span style={{ fontSize: 12, color: 'var(--red)', marginLeft: 8 }}>inactive</span>}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>id: {c.id}</div>
             </div>
-            <button className="btn btn-ghost" style={{ padding: '8px 12px', fontSize: 12.5 }} onClick={() => toggleActive(c)}>{c.active ? 'Deactivate' : 'Activate'}</button>
-            <button onClick={() => removeCentre(c)} style={{ padding: '8px 12px', fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Delete</button>
+            <button className="btn btn-ghost" style={{ padding: '8px 12px', fontSize: 12 }} onClick={() => toggleActive(c)}>{c.active ? 'Deactivate' : 'Activate'}</button>
+            <button onClick={() => removeCentre(c)} style={{ padding: '8px 12px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Delete</button>
           </div>
         ))}
         {real.length === 0 && <div style={{ padding: 20 }}><Empty label="No centres yet — add one below." /></div>}
       </div>
 
       <div className="card" style={{ padding: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Add a centre</div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>Add a centre</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Centre name (e.g. Bommasandra)" style={{ ...inputStyle, flex: 2, minWidth: 180 }} />
           <input value={newId} onChange={(e) => setNewId(e.target.value)} placeholder="short id (e.g. bommasandra)" style={{ ...inputStyle, flex: 1, minWidth: 140 }} />
-          <button className="btn btn-primary" disabled={busy} onClick={addCentre} style={{ padding: '9px 16px', fontSize: 12.5 }}>{busy ? 'Adding…' : 'Add centre'}</button>
+          <button className="btn btn-primary" disabled={busy} onClick={addCentre} style={{ padding: '9px 16px', fontSize: 12 }}>{busy ? 'Adding…' : 'Add centre'}</button>
         </div>
       </div>
 
       {sentinels.length > 0 && (
-        <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>
+        <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>
           System rows (not editable): {sentinels.map((s) => `${s.name || s.id}`).join(' · ')}
         </div>
       )}
@@ -546,35 +546,35 @@ function Pincodes({ onToast }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+      <div style={{ fontSize: 12, color: 'var(--muted)' }}>
         The map is read live by the database — adding or removing a pincode re-scopes coordinators immediately. Unmapped pincodes stay unmapped (only RCO/Admin sees them).
       </div>
       <div className="card" style={{ overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr auto', gap: 12, padding: '11px 18px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr auto', gap: 12, padding: '11px 18px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 12, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
           <span>Pincode</span><span>Centre</span><span></span>
         </div>
         {map.map((r) => (
           <div key={r.pincode} className="rowhover" style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr auto', gap: 12, padding: '11px 18px', borderBottom: '1px solid #F1E9DB', alignItems: 'center' }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.pincode}</div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>{r.pincode}</div>
             <select value={r.centre} disabled={busy} onChange={(e) => setCentreFor(r.pincode, e.target.value)} style={selStyle}>
               {!centres.some((c) => c.id === r.centre) && <option value={r.centre}>{r.centre} (unknown)</option>}
               {centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
             </select>
-            <button onClick={() => removePin(r.pincode)} disabled={busy} title="Remove" style={{ padding: '7px 11px', fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>✕</button>
+            <button onClick={() => removePin(r.pincode)} disabled={busy} title="Remove" style={{ padding: '7px 11px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>✕</button>
           </div>
         ))}
         {map.length === 0 && <div style={{ padding: 20 }}><Empty label="No pincodes mapped yet." /></div>}
       </div>
 
       <div className="card" style={{ padding: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Add a pincode</div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>Add a pincode</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <input value={newPin} onChange={(e) => setNewPin(e.target.value)} placeholder="Pincode (e.g. 560102)" inputMode="numeric" style={{ ...inputStyle, flex: 1, minWidth: 140 }} />
           <select value={newCentre} onChange={(e) => setNewCentre(e.target.value)} style={{ ...selStyle, flex: 1, minWidth: 160 }}>
             <option value="">— centre —</option>
             {centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
           </select>
-          <button className="btn btn-primary" disabled={busy} onClick={addPin} style={{ padding: '9px 16px', fontSize: 12.5 }}>Add</button>
+          <button className="btn btn-primary" disabled={busy} onClick={addPin} style={{ padding: '9px 16px', fontSize: 12 }}>Add</button>
         </div>
       </div>
     </div>

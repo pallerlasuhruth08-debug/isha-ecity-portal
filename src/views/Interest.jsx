@@ -5,6 +5,8 @@ import { Pad, ErrorCard, Loading, Empty, Chip, PagerBar } from '../components/Vi
 import CampaignForm from '../components/CampaignForm'
 import SidePanel, { PanelHeader } from '../components/SidePanel'
 import EventInterestPanel from '../components/EventInterestPanel'
+import KebabMenu from '../components/KebabMenu'
+import { useBreakpoint } from '../lib/useBreakpoint'
 import { multiFieldOr } from '../lib/searchFilter'
 
 const STATUS_PILL = {
@@ -47,6 +49,7 @@ const mapVp = (v) => ({ key: 'vp:' + v.person_id, kind: 'volunteering', table: '
 const mapIe = (r) => ({ key: 'ie:' + r.id, kind: 'volunteering', table: 'ie_completion_volunteer', id: r.id, idCol: 'id', personId: null, name: r.full_name || 'Unknown', phone: r.phone || '', status: r.status || 'new', ieo: true, tags: ['IEO'], availability: '—', activity: r.program_name || 'Inner Engineering Online', activityList: [], notes: r.notes, src: r.source, date: r.ie_date, origin: { label: r.program_name || 'Inner Engineering Online', date: r.ie_date, verb: 'completed' } })
 
 export default function Interest({ onToast, eventScopeId = null, onScopeConsumed, recipientDraft = null, onRecipientsDone }) {
+  const { isPhone } = useBreakpoint()
   const [advItems, setAdvItems] = useState([]) // advanced grouped-by-person (small, bounded)
   const [vpCount, setVpCount] = useState(0)
   const [ieCount, setIeCount] = useState(0)
@@ -254,28 +257,36 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
     onToast(`Exported ${shown.length} rows.`)
   }
 
-  const btn = { padding: '9px 13px', fontSize: 12.5 }
+  const btn = { padding: '9px 13px', fontSize: 12 }
 
   return (
     <Pad>
       {recipientDraft && (
         <div className="card" style={{ padding: '12px 16px', marginBottom: 14, background: '#FBF1E4', borderColor: '#E7C9B8', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 13, color: '#9C4A14', fontWeight: 600 }}>Adding volunteer interests to “{recipientDraft.campaignName}” — select approved people, then Add to campaign.</div>
+          <div style={{ fontSize: 14, color: 'var(--rust)', fontWeight: 600 }}>Adding volunteer interests to “{recipientDraft.campaignName}” — select approved people, then Add to campaign.</div>
           <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onRecipientsDone && onRecipientsDone()}>Cancel</button>
         </div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="interest-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        <div className="scroll-tabs" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', minWidth: 0 }}>
           {TABS.map((t) => (<Chip key={t.key} on={tab === t.key} label={t.label} count={counts[t.key] || 0} onClick={() => setTab(t.key)} />))}
           {tab !== 'advanced' && tab !== 'events' && (
             <button onClick={() => setIeoOnly((v) => !v)} className="btn" style={{ padding: '6px 11px', fontSize: 12, borderRadius: 20, background: ieoOnly ? '#2F6E5E' : '#fff', color: ieoOnly ? '#fff' : 'var(--ink-soft)', border: ieoOnly ? 'none' : '1px solid var(--border)' }}>IEO only</button>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn btn-ghost" style={btn} onClick={() => setScanOpen(true)}>Scan / match form</button>
-          <button className="btn btn-ghost" style={btn} onClick={() => setAddOpen(true)}>Add / import</button>
-          <button className="btn btn-ghost" style={btn} onClick={exportCsv}>Export</button>
-        </div>
+        {isPhone ? (
+          <KebabMenu items={[
+            { label: 'Scan / match form', onClick: () => setScanOpen(true) },
+            { label: 'Add / import', onClick: () => setAddOpen(true) },
+            { label: 'Export', onClick: exportCsv },
+          ]} />
+        ) : (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost" style={btn} onClick={() => setScanOpen(true)}>Scan / match form</button>
+            <button className="btn btn-ghost" style={btn} onClick={() => setAddOpen(true)}>Add / import</button>
+            <button className="btn btn-ghost" style={btn} onClick={exportCsv}>Export</button>
+          </div>
+        )}
       </div>
       {err && <ErrorCard>Couldn't load interest inbox: {err}</ErrorCard>}
 
@@ -287,14 +298,14 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
             <div key={it.key} className="rowhover" onClick={() => setSelItem(it)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', borderBottom: '1px solid #F1E9DB', cursor: 'pointer', background: it.key === selItem?.key ? '#FBF1E6' : 'transparent' }}>
               <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(it.name)}</div>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</div>
-                <div style={{ fontSize: 11.5, color: it.phone ? 'var(--muted)' : '#B5532F' }}>{it.phone || 'No phone on record'}</div>
+                <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</div>
+                <div style={{ fontSize: 12, color: it.phone ? 'var(--muted)' : 'var(--red)' }}>{it.phone || 'No phone on record'}</div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 3, flexWrap: 'wrap' }}>
                   <span className="pill" style={SEG_PILL[it.kind]}>{it.kind === 'advanced' ? 'Advanced' : 'Volunteering'}</span>
-                  {it.ieo && <span className="pill" style={pill('#E9F0EF', '#2F6E5E')}>IEO</span>}
+                  {it.ieo && <span className="pill" style={pill('#E9F0EF', 'var(--green)')}>IEO</span>}
                   {it.kind === 'advanced'
-                    ? it.programmes.map((p) => <span key={p.id} className="pill" style={pill('#F3E3D2', '#9C4A14')}>{p.program.toUpperCase()}</span>)
-                    : <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{ago(it.date)}</span>}
+                    ? it.programmes.map((p) => <span key={p.id} className="pill" style={pill('#F3E3D2', 'var(--rust)')}>{p.program.toUpperCase()}</span>)
+                    : <span style={{ fontSize: 12, color: 'var(--muted)' }}>{ago(it.date)}</span>}
                 </div>
               </div>
               {it.kind === 'volunteering' && <span className="pill" style={STATUS_PILL[it.status] || STATUS_PILL.new}>{it.status}</span>}
@@ -308,22 +319,22 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
         <SidePanel onClose={() => setSelItem(null)}>
           <PanelHeader onClose={() => setSelItem(null)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-                  <div style={{ width: 48, height: 48, borderRadius: '50%', background: avatarFor(2), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, fontWeight: 600 }}>{initials(sel.name)}</div>
+                  <div style={{ width: 46, height: 46, borderRadius: '50%', background: avatarFor(2), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 600 }}>{initials(sel.name)}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 3px' }}>{sel.name}</h2>
-                    <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{sel.kind === 'advanced' ? `${sel.programmes.length} programme(s)` : sel.activity} · via {sel.src || 'unknown'}</div>
+                    <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 3px' }}>{sel.name}</h2>
+                    <div style={{ fontSize: 14, color: 'var(--muted)' }}>{sel.kind === 'advanced' ? `${sel.programmes.length} programme(s)` : sel.activity} · via {sel.src || 'unknown'}</div>
                   </div>
                   <span className="pill" style={SEG_PILL[sel.kind]}>{sel.kind === 'advanced' ? 'Advanced' : 'Volunteering'}</span>
-                  {sel.ieo && <span className="pill" style={pill('#E9F0EF', '#2F6E5E')}>IEO</span>}
+                  {sel.ieo && <span className="pill" style={pill('#E9F0EF', 'var(--green)')}>IEO</span>}
                 </div>
           </PanelHeader>
           <div style={{ padding: '20px 26px', display: 'flex', flexDirection: 'column', gap: 16 }}>
                 {sel.origin && (
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 14, background: '#FBF6EC', border: '1px dashed var(--border)', borderRadius: 9, padding: '10px 13px' }}>
-                    <div style={{ width: 26, height: 26, borderRadius: 6, background: '#F3E3D2', color: '#9C4A14', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <div style={{ width: 26, height: 26, borderRadius: 6, background: '#F3E3D2', color: 'var(--rust)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 21c4-2.5 7-6 7-10a7 7 0 0 0-14 0c0 4 3 7.5 7 10Z" /></svg>
                     </div>
-                    <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>
+                    <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>
                       <strong style={{ color: 'var(--ink)' }}>From:</strong> {sel.origin.label}
                       {fmtDate(sel.origin.date) ? ` · ${sel.origin.verb} ${fmtDate(sel.origin.date)}` : ''}
                     </div>
@@ -334,7 +345,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
                 <>
                   <div className="card" style={{ padding: 20 }}>
                     <SecH>Form responses</SecH>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 22px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: isPhone ? '1fr' : '1fr 1fr', gap: '14px 22px' }}>
                       <F label="Phone" value={sel.phone || 'No phone on record'} />
                       <F label="Availability" value={sel.availability} />
                       <F label="Preferred activity" value={sel.activity} />
@@ -353,8 +364,8 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
                   <F label="Phone" value={sel.phone || 'No phone on record'} />
                   <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {sel.programmes.map((p) => (
-                      <div key={p.id} style={{ paddingTop: 12, borderTop: '1px solid #F2EBDD' }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{p.program.toUpperCase()} <span style={{ fontWeight: 400, color: 'var(--muted)' }}>· added {ago(p.date)}</span></div>
+                      <div key={p.id} style={{ paddingTop: 12, borderTop: '1px solid var(--border-soft)' }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{p.program.toUpperCase()} <span style={{ fontWeight: 400, color: 'var(--muted)' }}>· added {ago(p.date)}</span></div>
                         <Stepper labels={['New', 'Reached out', 'Registered']} idx={stepOf(p.status)} busy={busy} onStep={(i) => setAdvStep(p, i)} />
                       </div>
                     ))}
@@ -364,24 +375,36 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
 
               <div className="card" style={{ padding: 20 }}>
                 <SecH>Actions</SecH>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, alignItems: 'center' }}>
                   <a className="btn btn-primary" href={sel.phone ? `tel:${sel.phone}` : undefined} style={{ ...btn, textDecoration: 'none', opacity: sel.phone ? 1 : 0.5, pointerEvents: sel.phone ? 'auto' : 'none' }}>Call</a>
                   <a className="btn btn-ghost" href={sel.phone ? `https://wa.me/91${waNum(sel.phone)}` : undefined} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', opacity: sel.phone ? 1 : 0.5, pointerEvents: sel.phone ? 'auto' : 'none' }}>Message</a>
-                  <button className="btn btn-ghost" style={btn} disabled={busy} onClick={logContact}>Log contact</button>
-                  {sel.kind === 'advanced'
-                    ? <button className="btn btn-ghost" style={btn} disabled={busy} onClick={markMeditator}>Mark → Meditators</button>
-                    : <button className="btn btn-ghost" style={btn} disabled={busy} onClick={convertVolunteer}>Convert to volunteer</button>}
-                  <button className="btn btn-ghost" style={btn} disabled={busy} onClick={addToCallList}>Add to call list</button>
+                  {isPhone ? (
+                    <KebabMenu items={[
+                      { label: 'Log contact', onClick: logContact, disabled: busy },
+                      sel.kind === 'advanced'
+                        ? { label: 'Mark → Meditators', onClick: markMeditator, disabled: busy }
+                        : { label: 'Convert to volunteer', onClick: convertVolunteer, disabled: busy },
+                      { label: 'Add to call list', onClick: addToCallList, disabled: busy },
+                    ]} />
+                  ) : (
+                    <>
+                      <button className="btn btn-ghost" style={btn} disabled={busy} onClick={logContact}>Log contact</button>
+                      {sel.kind === 'advanced'
+                        ? <button className="btn btn-ghost" style={btn} disabled={busy} onClick={markMeditator}>Mark → Meditators</button>
+                        : <button className="btn btn-ghost" style={btn} disabled={busy} onClick={convertVolunteer}>Convert to volunteer</button>}
+                      <button className="btn btn-ghost" style={btn} disabled={busy} onClick={addToCallList}>Add to call list</button>
+                    </>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <select value={nurSel} onChange={(e) => setNurSel(e.target.value)} style={{ flex: 1, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff' }}>
+                  <select value={nurSel} onChange={(e) => setNurSel(e.target.value)} style={{ flex: 1, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff' }}>
                     <option value="">Assign nurturer…</option>
                     {nurturers.map((n) => (<option key={n.id} value={n.id}>{n.full_name}</option>))}
                   </select>
                   <button className="btn btn-ghost" style={btn} disabled={busy || !nurSel} onClick={assignNurturer}>Assign</button>
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
-                  <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addTag()} placeholder="Add a tag…" style={{ flex: 1, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12.5, fontFamily: 'inherit', background: '#fff', outline: 'none' }} />
+                  <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addTag()} placeholder="Add a tag…" style={{ flex: 1, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', outline: 'none' }} />
                   <button className="btn btn-ghost" style={btn} disabled={busy} onClick={addTag}>Add tag</button>
                 </div>
               </div>
@@ -397,10 +420,10 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
 }
 
 function F({ label, value }) {
-  return (<div><div style={{ fontSize: 10.5, color: 'var(--muted-2)', marginBottom: 4 }}>{label}</div><div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', wordBreak: 'break-word' }}>{value}</div></div>)
+  return (<div><div style={{ fontSize: 12, color: 'var(--muted-2)', marginBottom: 4 }}>{label}</div><div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', wordBreak: 'break-word' }}>{value}</div></div>)
 }
 function SecH({ children }) {
-  return <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', marginBottom: 13 }}>{children}</div>
+  return <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', marginBottom: 13 }}>{children}</div>
 }
 function Stepper({ labels, idx, busy, onStep }) {
   return (
@@ -409,8 +432,8 @@ function Stepper({ labels, idx, busy, onStep }) {
         const active = idx >= i
         return (
           <div key={label} style={{ display: 'contents' }}>
-            {i > 0 && <div style={{ flex: 1, height: 2, background: active ? '#C2691F' : '#EFE7D8' }} />}
-            <button disabled={busy} onClick={() => onStep(i)} style={{ border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600, padding: '7px 13px', borderRadius: 9, background: active ? '#C2691F' : '#F1EADD', color: active ? '#fff' : '#8C7E6B' }}>{label}</button>
+            {i > 0 && <div style={{ flex: 1, height: 2, background: active ? 'var(--orange)' : '#EFE7D8' }} />}
+            <button disabled={busy} onClick={() => onStep(i)} style={{ border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, padding: '7px 13px', borderRadius: 9, background: active ? 'var(--orange)' : '#F1EADD', color: active ? '#fff' : 'var(--muted)' }}>{label}</button>
           </div>
         )
       })}
@@ -522,12 +545,12 @@ export function AddImport({ onClose, onToast, onDone, lockEventId = null }) {
     } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }
   }
 
-  const field = { width: '100%', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 10, fontSize: 13.5, fontFamily: 'inherit', background: '#fff', outline: 'none' }
+  const field = { width: '100%', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 10, fontSize: 14, fontFamily: 'inherit', background: '#fff', outline: 'none' }
   return (
     <Modal onClose={onClose} title="Add / import interest">
       {err && <ErrBox>{err}</ErrBox>}
       {lockEventId ? (
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 14 }}>Adding volunteer interest to <strong>this event</strong> · phone-keyed, deduped.</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>Adding volunteer interest to <strong>this event</strong> · phone-keyed, deduped.</div>
       ) : (
         <>
           <Lbl>Target segment</Lbl>
@@ -550,7 +573,7 @@ export function AddImport({ onClose, onToast, onDone, lockEventId = null }) {
       )}
       <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
         {[{ k: 'search', l: 'Search & add' }, { k: 'single', l: 'Add one' }, { k: 'import', l: 'Import CSV' }].map((t) => (
-          <button key={t.k} onClick={() => setMode(t.k)} className="btn" style={{ padding: '7px 12px', fontSize: 12.5, background: mode === t.k ? '#241B14' : '#fff', color: mode === t.k ? '#F6ECDC' : 'var(--ink-soft)', border: mode === t.k ? 'none' : '1px solid var(--border)' }}>{t.l}</button>
+          <button key={t.k} onClick={() => setMode(t.k)} className="btn" style={{ padding: '7px 12px', fontSize: 12, background: mode === t.k ? '#241B14' : '#fff', color: mode === t.k ? '#F6ECDC' : 'var(--ink-soft)', border: mode === t.k ? 'none' : '1px solid var(--border)' }}>{t.l}</button>
         ))}
       </div>
       {mode === 'search' ? (
@@ -558,18 +581,18 @@ export function AddImport({ onClose, onToast, onDone, lockEventId = null }) {
           {segment === 'advanced' && <input value={program} onChange={(e) => setProgram(e.target.value)} placeholder="Programme (bsp/shoonya/samyama)" style={{ ...field, marginBottom: 8 }} />}
           <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="Search by name or phone…" style={field} />
           <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10, marginTop: 10 }}>
-            {searching && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--muted-2)' }}>Searching…</div>}
-            {!searching && debouncedQ.length < 2 && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--muted-2)' }}>Type a name or phone to find volunteers, meditators or anyone on record.</div>}
-            {!searching && debouncedQ.length >= 2 && results.length === 0 && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--muted-2)' }}>No matches.</div>}
+            {searching && <div style={{ padding: 14, fontSize: 12, color: 'var(--muted-2)' }}>Searching…</div>}
+            {!searching && debouncedQ.length < 2 && <div style={{ padding: 14, fontSize: 12, color: 'var(--muted-2)' }}>Type a name or phone to find volunteers, meditators or anyone on record.</div>}
+            {!searching && debouncedQ.length >= 2 && results.length === 0 && <div style={{ padding: 14, fontSize: 12, color: 'var(--muted-2)' }}>No matches.</div>}
             {results.map((p, i) => (
-              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: '1px solid #F4EEE2' }}>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name || '?')}</div>
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: '1px solid var(--border-soft)' }}>
+                <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name || '?')}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.full_name || '(no name)'}</div>
-                  <div style={{ fontSize: 11.5, color: p.phone ? 'var(--muted)' : '#B5532F' }}>
+                  <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.full_name || '(no name)'}</div>
+                  <div style={{ fontSize: 12, color: p.phone ? 'var(--muted)' : 'var(--red)' }}>
                     {p.phone || 'no phone'}
-                    {p.is_volunteer && <span style={{ marginLeft: 6, color: '#9C4A14' }}>· Volunteer</span>}
-                    {p.is_meditator && <span style={{ marginLeft: 6, color: '#2F6E5E' }}>· Meditator</span>}
+                    {p.is_volunteer && <span style={{ marginLeft: 6, color: 'var(--rust)' }}>· Volunteer</span>}
+                    {p.is_meditator && <span style={{ marginLeft: 6, color: 'var(--green)' }}>· Meditator</span>}
                   </div>
                 </div>
                 {added[p.id] ? (
@@ -685,11 +708,11 @@ export function ScanMatch({ onClose, onToast, onDone, lockEventId = null }) {
     } catch (e) { onToast('Could not save: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
-  const field = { width: '100%', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 10, fontSize: 13.5, fontFamily: 'inherit', background: '#fff', outline: 'none' }
-  const RC = { link: '#4E7C3F', create: '#C2691F', review: '#B5532F', no_phone: '#8C7E6B' }
+  const field = { width: '100%', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 10, fontSize: 14, fontFamily: 'inherit', background: '#fff', outline: 'none' }
+  const RC = { link: '#4E7C3F', create: 'var(--orange)', review: 'var(--red)', no_phone: 'var(--muted)' }
   return (
     <Modal onClose={onClose} title="Scan / match form">
-      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
         Scan a photo of the handed-out form (Google Vision reads name + phone), or type them. Matched by <strong>phone</strong>; name is a confirmation signal only — never a merge key.
       </div>
       <div style={{ marginBottom: 14 }}>
@@ -697,10 +720,10 @@ export function ScanMatch({ onClose, onToast, onDone, lockEventId = null }) {
           {ocrBusy ? 'Reading form…' : '📷 Scan form photo'}
           <input type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
         </label>
-        {ocrErr && <div style={{ fontSize: 12, color: '#B5532F', marginTop: 6 }}>{ocrErr}</div>}
+        {ocrErr && <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 6 }}>{ocrErr}</div>}
       </div>
       {lockEventId ? (
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>Scanning into <strong>this event’s</strong> interest pool.</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>Scanning into <strong>this event’s</strong> interest pool.</div>
       ) : (
         <>
           <Lbl>Target segment</Lbl>
@@ -727,9 +750,9 @@ export function ScanMatch({ onClose, onToast, onDone, lockEventId = null }) {
       </div>
       {result && (
         <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 10, background: '#FBF6EC', border: '1px solid var(--border)', borderLeft: `4px solid ${RC[result.rule]}` }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: RC[result.rule], marginBottom: result.can || result.override ? 10 : 0 }}>{result.label}</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: RC[result.rule], marginBottom: result.can || result.override ? 10 : 0 }}>{result.label}</div>
           {result.can && <button className="btn btn-primary" disabled={busy} onClick={() => confirm(false)}>{result.rule === 'create' ? 'Create + add' : 'Link + add'}</button>}
-          {result.override && <button className="btn btn-ghost" disabled={busy} onClick={() => confirm(true)} style={{ color: '#B5532F' }}>Override — link anyway (reviewed)</button>}
+          {result.override && <button className="btn btn-ghost" disabled={busy} onClick={() => confirm(true)} style={{ color: 'var(--red)' }}>Override — link anyway (reviewed)</button>}
         </div>
       )}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
@@ -743,14 +766,14 @@ function Modal({ title, children, onClose }) {
   return (
     <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 120, padding: 20 }} onClick={onClose}>
       <div className="card modal-sheet" style={{ width: 480, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 24 }} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ fontSize: 19, fontWeight: 600, margin: '0 0 14px' }}>{title}</h2>
+        <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 14px' }}>{title}</h2>
         {children}
       </div>
     </div>
   )
 }
-function Lbl({ children }) { return <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted-2)', display: 'block', marginBottom: 6 }}>{children}</label> }
-function ErrBox({ children }) { return <div style={{ background: '#FBE6E0', color: '#B5532F', padding: '10px 12px', borderRadius: 9, fontSize: 12.5, marginBottom: 12 }}>{children}</div> }
+function Lbl({ children }) { return <label style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted-2)', display: 'block', marginBottom: 6 }}>{children}</label> }
+function ErrBox({ children }) { return <div style={{ background: '#FBE6E0', color: 'var(--red)', padding: '10px 12px', borderRadius: 9, fontSize: 12, marginBottom: 12 }}>{children}</div> }
 function Actions({ onClose, busy, onSubmit, label }) {
   return (
     <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>

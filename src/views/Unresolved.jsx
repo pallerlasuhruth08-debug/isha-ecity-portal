@@ -64,7 +64,7 @@ export default function Unresolved({ me, isCoordinator = false, onToast }) {
   if (!isCoordinator) {
     return (
       <Pad>
-        <div className="card" style={{ padding: 22, fontSize: 13.5, color: 'var(--muted)' }}>
+        <div className="card" style={{ padding: 22, fontSize: 14, color: 'var(--muted)' }}>
           The unresolved walk-in queue is worked by coordinators. You don’t have coordinator access on this account.
         </div>
       </Pad>
@@ -86,7 +86,7 @@ export default function Unresolved({ me, isCoordinator = false, onToast }) {
 
       {tab === 'unresolved' && (
         <>
-          <p style={{ margin: '0 0 18px', fontSize: 13.5, color: 'var(--muted)', maxWidth: 620 }}>
+          <p className="mobile-hide" style={{ margin: '0 0 18px', fontSize: 14, color: 'var(--muted)', maxWidth: 620 }}>
             Walk-ins captured at events that couldn’t be matched on the spot. Match each to an existing person, or promote it to a provisional person — the attendance re-links automatically, nothing is re-entered.
           </p>
           {rows.length === 0 && <Empty label="Nothing unresolved — the queue is clear." />}
@@ -94,7 +94,7 @@ export default function Unresolved({ me, isCoordinator = false, onToast }) {
             {rows.map((r) => (
               <div key={r.id} className="card" style={{ padding: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{r.captured_name || '(no name captured)'}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>{r.captured_name || '(no name captured)'}</div>
                   <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginTop: 3 }}>
                     {[r.captured_phone, r.captured_email].filter(Boolean).join(' · ') || 'no contact captured'}
                     {(r.captured_phone2 || r.captured_email2) && <span style={{ color: 'var(--muted-2)' }}> · alt {[r.captured_phone2, r.captured_email2].filter(Boolean).join(' / ')}</span>}
@@ -112,7 +112,7 @@ export default function Unresolved({ me, isCoordinator = false, onToast }) {
 
       {tab === 'na' && (
         <>
-          <p style={{ margin: '0 0 18px', fontSize: 13.5, color: 'var(--muted)', maxWidth: 620 }}>
+          <p className="mobile-hide" style={{ margin: '0 0 18px', fontSize: 14, color: 'var(--muted)', maxWidth: 620 }}>
             Records with a placeholder name (NA / no name). Fill the real name — matched from a phone/email twin where one exists, otherwise typed in by hand. Names are never auto-guessed.
           </p>
           {naRows === null && <Loading label="Loading records…" />}
@@ -187,7 +187,7 @@ function NaRow({ person, onSaved, onToast }) {
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter real name…" style={{ border: '1px solid var(--border)', borderRadius: 9, padding: '8px 11px', fontSize: 13, fontFamily: 'inherit', outline: 'none', width: 200 }} />
         <button className="btn btn-ghost" disabled={busy} onClick={findTwin} style={{ fontSize: 12, padding: '7px 11px' }} title="Search people by this phone/email">Find match</button>
-        <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={save} style={{ fontSize: 12.5, padding: '7px 13px' }}>Save</button>
+        <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={save} style={{ fontSize: 12, padding: '7px 13px' }}>Save</button>
       </div>
     </div>
   )
@@ -271,12 +271,12 @@ function ResolveDialog({ entry, me, onClose, onResolved, onToast }) {
 
   const inputStyle = { width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 12px', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }
   const tab = (k, label) => (
-    <button onClick={() => setMode(k)} className="btn" style={{ padding: '7px 13px', fontSize: 12.5, background: mode === k ? '#241B14' : '#fff', color: mode === k ? '#F6ECDC' : 'var(--ink-soft)', border: mode === k ? 'none' : '1px solid var(--border)' }}>{label}</button>
+    <button onClick={() => setMode(k)} className="btn" style={{ padding: '7px 13px', fontSize: 12, background: mode === k ? '#241B14' : '#fff', color: mode === k ? '#F6ECDC' : 'var(--ink-soft)', border: mode === k ? 'none' : '1px solid var(--border)' }}>{label}</button>
   )
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
-      <div className="card" style={{ width: 480, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)', maxHeight: '88vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
+      <div className="card modal-sheet" style={{ width: 480, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)', maxHeight: '88vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 4px' }}>Resolve walk-in</h3>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 4 }}>{entry.captured_name || '(no name)'} · {[entry.captured_phone, entry.captured_email].filter(Boolean).join(' · ') || 'no contact'}</div>
         <div style={{ fontSize: 12, color: 'var(--muted-2)', marginBottom: 16 }}>{entry.activity?.name}</div>
@@ -294,12 +294,12 @@ function ResolveDialog({ entry, me, onClose, onResolved, onToast }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {results.map((p) => (
                 <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 10 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#C2691F', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name || '?')}</div>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--orange)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name || '?')}</div>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{p.full_name || '(no name)'}</div>
+                    <div style={{ fontSize: 16, fontWeight: 600 }}>{p.full_name || '(no name)'}</div>
                     <div style={{ fontSize: 12, color: 'var(--muted)' }}>{p.phone || 'no phone'}{p.is_volunteer ? ' · volunteer' : ''}{p.is_meditator ? ' · meditator' : ''}</div>
                   </div>
-                  <button className="btn btn-primary" disabled={busy} onClick={() => linkTo(p.id, p.full_name)} style={{ padding: '7px 12px', fontSize: 12.5 }}>Link</button>
+                  <button className="btn btn-primary" disabled={busy} onClick={() => linkTo(p.id, p.full_name)} style={{ padding: '7px 12px', fontSize: 12 }}>Link</button>
                 </div>
               ))}
             </div>

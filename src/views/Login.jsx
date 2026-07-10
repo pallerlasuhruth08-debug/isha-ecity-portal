@@ -120,7 +120,7 @@ export default function Login() {
             onChange={(e) => setPassword(e.target.value)}
             style={field}
           />
-          <button type="submit" className="btn btn-primary" disabled={busy} style={{ justifyContent: 'center', padding: '12px', fontSize: 14 }}>
+          <button type="submit" className="btn btn-primary tap44" disabled={busy} style={{ justifyContent: 'center', padding: '12px', fontSize: 14 }}>
             {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
           </button>
         </form>
@@ -131,7 +131,7 @@ export default function Login() {
           <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
         </div>
 
-        <button className="btn btn-ghost" onClick={google} style={{ width: '100%', justifyContent: 'center', padding: '11px' }}>
+        <button className="btn btn-ghost tap44" onClick={google} style={{ width: '100%', justifyContent: 'center', padding: '11px' }}>
           <svg width="17" height="17" viewBox="0 0 48 48">
             <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.7 30.1 0 24 0 14.6 0 6.4 5.4 2.5 13.2l7.8 6.1C12.2 13.5 17.6 9.5 24 9.5z" />
             <path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9.1h12.4c-.5 2.9-2.1 5.4-4.6 7.1l7.2 5.6C43.6 37.7 46.1 31.7 46.1 24.6z" />

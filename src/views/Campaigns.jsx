@@ -5,6 +5,7 @@ import { initials, avatarFor } from '../lib/ui'
 import { STATUS_ORDER, OUTCOME_TO_STATUS, pillFor } from '../lib/calllog'
 import { fillTemplate } from '../lib/phone'
 import { useBreakpoint } from '../lib/useBreakpoint'
+import { Pad, ErrorCard } from '../components/View'
 import ReachButtons from '../components/ReachButtons'
 import CallLogDialog from '../components/CallLogDialog'
 import CampaignScriptPanel from '../components/CampaignScriptPanel'
@@ -228,9 +229,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
   if (err)
     return (
       <Pad>
-        <div className="card" style={{ padding: 14, borderColor: '#E7C9B8', background: '#FBEEE6', color: '#9C4A14', fontSize: 13 }}>
-          Couldn't load campaigns: {err}
-        </div>
+        <ErrorCard>Couldn't load campaigns: {err}</ErrorCard>
       </Pad>
     )
 
@@ -261,7 +260,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
   return (
     <Pad>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
-        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 560 }}>
+        <p className="mobile-hide" style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 560 }}>
           Pinpointed campaigns for volunteers and meditators — matched to insights so the right programme reaches the right cohort at the right time.
         </p>
         {testCount > 0 && (
@@ -341,18 +340,18 @@ function EventLinkControl({ campaign, eventName, isCoordinator, reload, onToast 
   }
 
   return (
-    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #F2EBDD', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Event link:</span>
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-soft)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 12, color: 'var(--muted)' }}>Event link:</span>
       {campaign.event_id ? (
         <span className="pill" style={{ background: '#F6E8D8', color: '#C2691F' }}>↻ {eventName || 'linked event'}</span>
       ) : (
-        <span style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>None — standalone campaign</span>
+        <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>None — standalone campaign</span>
       )}
       {isCoordinator && (
         editing ? (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <select disabled={busy} defaultValue={campaign.event_id || ''} onChange={(e) => setEvent(e.target.value || null)}
-              style={{ fontSize: 12.5, padding: '6px 9px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: 'var(--ink)', cursor: 'pointer' }}>
+              style={{ fontSize: 12, padding: '6px 9px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: 'var(--ink)', cursor: 'pointer' }}>
               <option value="">— No event (standalone) —</option>
               {(events || []).map((e) => <option key={e.id} value={e.id}>{e.name}{e.activity_date ? ` · ${e.activity_date}` : ''}</option>)}
             </select>
@@ -431,27 +430,27 @@ function CampaignSplits({ campaignId, contacts, splits, reload, onToast }) {
 
   if (splits.length === 0) {
     return (
-      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #F2EBDD' }}>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>Split the call list into groups, each with its own volunteer-portal link.</div>
+      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-soft)' }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Split the call list into groups, each with its own volunteer-portal link.</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input type="number" min={2} max={contacts.length} value={n} onChange={(e) => setN(Number(e.target.value))}
-            style={{ width: 70, padding: '7px 9px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontFamily: 'inherit' }} />
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>groups from {contacts.length} people</span>
-          <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: '6px 12px' }} disabled={busy || contacts.length < 2} onClick={createSplits}>{busy ? 'Splitting…' : 'Split into groups'}</button>
+            style={{ width: 70, padding: '7px 9px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 14, fontFamily: 'inherit' }} />
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>groups from {contacts.length} people</span>
+          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }} disabled={busy || contacts.length < 2} onClick={createSplits}>{busy ? 'Splitting…' : 'Split into groups'}</button>
         </div>
       </div>
     )
   }
 
   return (
-    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #F2EBDD' }}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', marginBottom: 10 }}>Splits</div>
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-soft)' }}>
+      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', marginBottom: 10 }}>Splits</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {splits.map((s) => {
           const rows = contacts.filter((c) => c.splitNumber === s.split_number)
           const called = rows.filter((c) => c.logs.length > 0).length
           return (
-            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12.5 }}>
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12 }}>
               <span style={{ fontWeight: 600 }}>Split {s.split_number}</span>
               <span style={{ color: 'var(--muted)' }}>{rows.length} people · {called} called</span>
               <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} disabled={busy} onClick={() => copyLink(s.share_token)}>Copy link</button>
@@ -468,13 +467,9 @@ function Metric({ v, label, color }) {
   return (
     <div>
       <div style={{ fontFamily: "'Newsreader',serif", fontSize: 20, fontWeight: 600, lineHeight: 1, color: color || 'var(--ink)' }}>{v}</div>
-      <div style={{ fontSize: 11, color: 'var(--muted-2)', marginTop: 3 }}>{label}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted-2)', marginTop: 3 }}>{label}</div>
     </div>
   )
-}
-
-function Pad({ children }) {
-  return <div className="main-pad" style={{ padding: '26px 32px 60px', overflowY: 'auto' }}>{children}</div>
 }
 
 // Compact labelled stat used in the phone caller cards (the desktop table shows
@@ -482,8 +477,8 @@ function Pad({ children }) {
 function CallerStat({ v, label, color }) {
   return (
     <div>
-      <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1, color: color || '#3A3024' }}>{v}</div>
-      <div style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 2 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 600, lineHeight: 1, color: color || 'var(--ink-soft)' }}>{v}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted-2)', marginTop: 2 }}>{label}</div>
     </div>
   )
 }
@@ -597,22 +592,22 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
       <div className="card" style={{ padding: 24, marginBottom: 22 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 0 }}>
-            <h2 style={{ fontSize: 23, fontWeight: 600, margin: '0 0 4px' }}>{c.name}</h2>
-            <div style={{ fontSize: 13, color: 'var(--muted)' }}>{c.audience || c.goal || '—'}</div>
+            <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>{c.name}</h2>
+            <div style={{ fontSize: 14, color: 'var(--muted)' }}>{c.audience || c.goal || '—'}</div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="pill" style={{ background: TYPE_PILL[typeOf(c)].background, color: TYPE_PILL[typeOf(c)].color }}>{TYPE_PILL[typeOf(c)].label}</span>
-            {c.is_test && <span className="pill" style={{ background: '#F6E0CE', color: '#B5532F' }}>test</span>}
+            {c.is_test && <span className="pill" style={{ background: '#F6E0CE', color: 'var(--red)' }}>test</span>}
             <span className="pill" style={CAMP_STATUS_PILL[c.status] || CAMP_STATUS_PILL.active}>{c.status}</span>
             {isCoordinator && (
-              <button onClick={() => setEditing(true)} className="btn btn-ghost" style={{ fontSize: 12.5, padding: '7px 12px' }}>Edit</button>
+              <button onClick={() => setEditing(true)} className="btn btn-ghost" style={{ fontSize: 12, padding: '7px 12px' }}>Edit</button>
             )}
             {isCoordinator && c.is_test && (
-              <button disabled={busyDel} onClick={deleteTestCampaign} style={{ fontSize: 12.5, padding: '7px 12px', fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: busyDel ? 'default' : 'pointer' }}>Delete test campaign</button>
+              <button disabled={busyDel} onClick={deleteTestCampaign} style={{ fontSize: 12, padding: '7px 12px', fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: busyDel ? 'default' : 'pointer' }}>Delete test campaign</button>
             )}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 26, marginTop: 18, paddingTop: 18, borderTop: '1px solid #F2EBDD', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 26, marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-soft)', flexWrap: 'wrap' }}>
           <Metric v={c.reach} label="reached" />
           <Metric v={c.responsePct} label="responded" color="#4E7C3F" />
           <Metric v={c.enrolled} label="enrolled" />
@@ -621,7 +616,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
         <EventLinkControl campaign={c} eventName={eventNames[c.event_id]?.name} isCoordinator={isCoordinator} reload={reload} onToast={onToast} />
         {isCoordinator && <CampaignSplits campaignId={c.id} contacts={c.contacts} splits={splits} reload={reload} onToast={onToast} />}
         {c.edited_at && (
-          <div style={{ marginTop: 12, fontSize: 11.5, color: 'var(--muted-2)' }}>
+          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted-2)' }}>
             Last edited {new Date(c.edited_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}
             {actorNames[c.edited_by] ? ` by ${actorNames[c.edited_by]}` : ''}
           </div>
@@ -644,26 +639,26 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 3px' }}>Call list</h3>
-          <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--muted)' }}>
-            Everyone in this cohort to be reached out to — and where each one stands.
-            {isCoordinator && unassignedCount > 0 && <span style={{ color: '#B5532F', fontWeight: 600 }}> · {unassignedCount} unassigned</span>}
+          <p style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--muted)' }}>
+            <span className="mobile-hide">Everyone in this cohort to be reached out to — and where each one stands.{isCoordinator && unassignedCount > 0 ? ' · ' : ''}</span>
+            {isCoordinator && unassignedCount > 0 && <span style={{ color: 'var(--red)', fontWeight: 600 }}>{unassignedCount} unassigned</span>}
           </p>
         </div>
         {isCoordinator && (
           <div style={{ position: 'relative' }}>
-            <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setAddOpen((v) => !v)}>+ Add recipients</button>
+            <button className="btn btn-primary" style={{ fontSize: 12, padding: '8px 14px' }} onClick={() => setAddOpen((v) => !v)}>+ Add recipients</button>
             {addOpen && (
               <>
                 <div onClick={() => setAddOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
                 <div className="card" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 41, minWidth: 210, padding: 6, boxShadow: 'var(--shadow-lg)' }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', padding: '8px 10px 4px' }}>Add from…</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', padding: '8px 10px 4px' }}>Add from…</div>
                   {[
                     { src: 'interest', label: c.event_id ? 'Volunteer Interests (this event)' : 'Volunteer Interests' },
                     { src: 'volunteers', label: 'Volunteers' },
                     { src: 'meditators', label: 'Meditators' },
                   ].map((o) => (
                     <button key={o.src} onClick={() => { setAddOpen(false); onAddRecipients?.(c.id, c.name, o.src) }}
-                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 10px', fontSize: 13, fontWeight: 500, border: 'none', background: 'transparent', color: 'var(--ink)', cursor: 'pointer', borderRadius: 8 }}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 10px', fontSize: 14, fontWeight: 500, border: 'none', background: 'transparent', color: 'var(--ink)', cursor: 'pointer', borderRadius: 8 }}
                       onMouseEnter={(e) => (e.currentTarget.style.background = '#F6EFE2')} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>{o.label}</button>
                   ))}
                 </div>
@@ -672,12 +667,12 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           </div>
         )}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+      <div className="scroll-tabs" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
         {chips.map((f) => {
           const on = callFilter === f.key
           const n = f.key === 'all' ? c.contacts.length : counts[f.key] || 0
           return (
-            <button key={f.key} onClick={() => setCallFilter(f.key)} className="btn" style={{ padding: '7px 13px', fontSize: 12.5, borderRadius: 20, background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', border: on ? 'none' : '1px solid var(--border)' }}>
+            <button key={f.key} onClick={() => setCallFilter(f.key)} className="btn" style={{ padding: '7px 13px', fontSize: 12, borderRadius: 20, background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', border: on ? 'none' : '1px solid var(--border)' }}>
               {f.label} <span style={{ opacity: 0.6 }}>{n}</span>
             </button>
           )
@@ -685,7 +680,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
       </div>
       <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
         {!isPhone && (
-          <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12, padding: '13px 22px', background: '#FAF4EA', borderBottom: '1px solid var(--border-soft)', fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12, padding: '13px 22px', background: '#FAF4EA', borderBottom: '1px solid var(--border-soft)', fontSize: 12, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>
             <span>Contact</span>
             <span>Phone</span>
             <span>Assigned to</span>
@@ -694,18 +689,18 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             {isCoordinator && <span>Actions</span>}
           </div>
         )}
-        {shown.length === 0 && <div style={{ padding: 26, textAlign: 'center', fontSize: 13, color: 'var(--muted-2)' }}>No contacts in this status.</div>}
+        {shown.length === 0 && <div style={{ padding: 26, textAlign: 'center', fontSize: 14, color: 'var(--muted-2)' }}>No contacts in this status.</div>}
 
         {isPhone && shown.map((p, i) => (
-          <div key={p.journeyId} className="rowhover" style={{ padding: 14, borderBottom: '1px solid #F4EEE2' }}>
+          <div key={p.journeyId} className="rowhover" style={{ padding: 14, borderBottom: '1px solid var(--border-soft)' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11 }}>
-              <div style={{ width: 38, height: 38, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(p.name)}</div>
+              <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.name)}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontSize: 14.5, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                   <span className="pill" style={pillFor(p.status)}>{p.status}</span>
                 </div>
-                <div style={{ fontSize: 12.5, color: p.phone ? 'var(--muted)' : 'var(--muted-2)', marginTop: 2 }}>{p.phone || 'no phone on record'}</div>
+                <div style={{ fontSize: 12, color: p.phone ? 'var(--muted)' : 'var(--muted-2)', marginTop: 2 }}>{p.phone || 'no phone on record'}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Last touch: {p.last}{isCoordinator && p.logs[0] ? ` · by ${actorNames[p.logs[0].logged_by] || '—'}` : ''}</div>
               </div>
             </div>
@@ -715,55 +710,55 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
                   value={p.callerKey || ''}
                   disabled={busyId === p.journeyId}
                   onChange={(e) => reassign(p, c.callerPool.find((x) => x.key === e.target.value) || null)}
-                  style={{ width: '100%', minHeight: 40, fontSize: 12.5, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: p.callerKey ? '#3A3024' : '#B5532F' }}
+                  style={{ width: '100%', minHeight: 40, fontSize: 12, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: p.callerKey ? 'var(--ink-soft)' : 'var(--red)' }}
                 >
                   <option value="">— unassigned —</option>
                   {c.callerPool.map((cp) => <option key={cp.key} value={cp.key}>{cp.name}{cp.source === 'nurturing_team' ? ' · Team' : ' · Volunteer'}</option>)}
                 </select>
               ) : (
-                <div style={{ fontSize: 12.5, color: '#3A3024' }}>Assigned to: {p.assigned}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>Assigned to: {p.assigned}</div>
               )}
             </div>
             {isCoordinator && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
                 <ReachButtons phone={p.phone} messaging={messaging} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
-                {!messaging && <button className="btn btn-ghost" style={{ padding: '9px 14px', fontSize: 12.5, minHeight: 40 }} onClick={() => setLogFor(p)}>Log</button>}
-                <button title="Remove from campaign" disabled={busyId === p.journeyId} onClick={() => removeRecipient(p)} style={{ padding: '9px 12px', fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer', marginLeft: 'auto', minHeight: 40 }}>✕ Remove</button>
+                {!messaging && <button className="btn btn-ghost" style={{ padding: '9px 14px', fontSize: 12, minHeight: 44 }} onClick={() => setLogFor(p)}>Log</button>}
+                <button title="Remove from campaign" disabled={busyId === p.journeyId} onClick={() => removeRecipient(p)} style={{ padding: '9px 12px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer', marginLeft: 'auto', minHeight: 44 }}>✕ Remove</button>
               </div>
             )}
           </div>
         ))}
 
         {!isPhone && shown.map((p, i) => (
-          <div key={p.journeyId} className="rowhover" style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12, padding: '13px 22px', borderBottom: '1px solid #F4EEE2', alignItems: 'center' }}>
+          <div key={p.journeyId} className="rowhover" style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12, padding: '13px 22px', borderBottom: '1px solid var(--border-soft)', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
-              <div style={{ width: 32, height: 32, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>{initials(p.name)}</div>
-              <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+              <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.name)}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
             </div>
-            <div style={{ fontSize: 13, color: p.phone ? 'var(--ink-soft)' : 'var(--muted-2)' }}>{p.phone || 'no phone on record'}</div>
-            <div style={{ fontSize: 13, color: '#3A3024' }}>
+            <div style={{ fontSize: 14, color: p.phone ? 'var(--ink-soft)' : 'var(--muted-2)' }}>{p.phone || 'no phone on record'}</div>
+            <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>
               {isCoordinator ? (
                 <select
                   value={p.callerKey || ''}
                   disabled={busyId === p.journeyId}
                   onChange={(e) => reassign(p, c.callerPool.find((x) => x.key === e.target.value) || null)}
-                  style={{ maxWidth: '100%', fontSize: 12.5, padding: '5px 6px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: p.callerKey ? '#3A3024' : '#B5532F' }}
+                  style={{ maxWidth: '100%', fontSize: 12, padding: '5px 6px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: p.callerKey ? 'var(--ink-soft)' : 'var(--red)' }}
                 >
                   <option value="">— unassigned —</option>
                   {c.callerPool.map((cp) => <option key={cp.key} value={cp.key}>{cp.name}{cp.source === 'nurturing_team' ? ' · Team' : ' · Volunteer'}</option>)}
                 </select>
               ) : p.assigned}
             </div>
-            <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{p.last}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{p.last}</div>
             <div>
               <span className="pill" style={pillFor(p.status)}>{p.status}</span>
-              {isCoordinator && p.logs[0] && <div style={{ fontSize: 10, color: 'var(--muted-2)', marginTop: 3 }}>by {actorNames[p.logs[0].logged_by] || '—'}</div>}
+              {isCoordinator && p.logs[0] && <div style={{ fontSize: 12, color: 'var(--muted-2)', marginTop: 3 }}>by {actorNames[p.logs[0].logged_by] || '—'}</div>}
             </div>
             {isCoordinator && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <ReachButtons phone={p.phone} messaging={messaging} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
                 {!messaging && <button className="btn btn-ghost" style={{ padding: '6px 9px', fontSize: 12 }} onClick={() => setLogFor(p)}>Log</button>}
-                <button title="Remove from campaign" disabled={busyId === p.journeyId} onClick={() => removeRecipient(p)} style={{ padding: '6px 8px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>✕</button>
+                <button title="Remove from campaign" disabled={busyId === p.journeyId} onClick={() => removeRecipient(p)} style={{ padding: '6px 8px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>✕</button>
               </div>
             )}
           </div>
@@ -773,14 +768,14 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
       {/* removed (soft-deleted) recipients — history preserved */}
       {isCoordinator && c.removed.length > 0 && (
         <div style={{ marginBottom: 28 }}>
-          <button onClick={() => setShowRemoved((s) => !s)} className="btn btn-ghost" style={{ fontSize: 12.5, padding: '6px 12px' }}>
+          <button onClick={() => setShowRemoved((s) => !s)} className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }}>
             {showRemoved ? 'Hide' : 'Show'} {c.removed.length} removed
           </button>
           {showRemoved && (
             <div className="card" style={{ overflow: 'hidden', marginTop: 10, opacity: 0.85 }}>
               {c.removed.map((p) => (
-                <div key={p.journeyId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '11px 22px', borderBottom: '1px solid #F4EEE2' }}>
-                  <div style={{ fontSize: 13, color: 'var(--muted)' }}><s>{p.name}</s> · {p.phone || 'no phone'} · {p.logs.length} log{p.logs.length !== 1 ? 's' : ''} kept</div>
+                <div key={p.journeyId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '11px 22px', borderBottom: '1px solid var(--border-soft)' }}>
+                  <div style={{ fontSize: 14, color: 'var(--muted)' }}><s>{p.name}</s> · {p.phone || 'no phone'} · {p.logs.length} log{p.logs.length !== 1 ? 's' : ''} kept</div>
                   <button disabled={busyId === p.journeyId} onClick={() => restoreRecipient(p)} className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}>Restore</button>
                 </div>
               ))}
@@ -795,15 +790,15 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 3px' }}>Callers</h3>
-          <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--muted)' }}>The volunteers &amp; team calling this cohort.</p>
+          <p style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--muted)' }}>The volunteers &amp; team calling this cohort.</p>
         </div>
         {isCoordinator && (
-          <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setAddCaller(true)}>+ Add caller</button>
+          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 14px' }} onClick={() => setAddCaller(true)}>+ Add caller</button>
         )}
       </div>
       <div className="card" style={{ overflow: 'hidden' }}>
         {!isPhone && (
-          <div style={{ display: 'grid', gridTemplateColumns: callerCols, gap: 12, padding: '13px 22px', background: '#FAF4EA', borderBottom: '1px solid var(--border-soft)', fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: callerCols, gap: 12, padding: '13px 22px', background: '#FAF4EA', borderBottom: '1px solid var(--border-soft)', fontSize: 12, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>
             <span>Caller</span>
             <span>Assigned</span>
             <span>Contacted</span>
@@ -812,17 +807,17 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             {isCoordinator && <span></span>}
           </div>
         )}
-        {c.callerList.length === 0 && <div style={{ padding: 26, textAlign: 'center', fontSize: 13, color: 'var(--muted-2)' }}>No callers assigned yet.</div>}
+        {c.callerList.length === 0 && <div style={{ padding: 26, textAlign: 'center', fontSize: 14, color: 'var(--muted-2)' }}>No callers assigned yet.</div>}
 
         {isPhone && c.callerList.map((k, i) => (
-          <div key={k.name} className="rowhover" style={{ padding: 14, borderBottom: '1px solid #F4EEE2' }}>
+          <div key={k.name} className="rowhover" style={{ padding: 14, borderBottom: '1px solid var(--border-soft)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-              <div style={{ width: 36, height: 36, borderRadius: '50%', background: avatarFor(i + 2), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 600, flexShrink: 0 }}>{initials(k.name)}</div>
-              <div style={{ fontSize: 14, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.name}</div>
-              {isCoordinator && k.key && <button title="Remove caller (recipients become unassigned)" disabled={busyId === 'caller:' + k.key} onClick={() => removeCaller(c.callerPool.find((x) => x.key === k.key) || { key: k.key, name: k.name })} style={{ padding: '8px 12px', fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer', minHeight: 40 }}>Remove</button>}
+              <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i + 2), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(k.name)}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.name}</div>
+              {isCoordinator && k.key && <button title="Remove caller (recipients become unassigned)" disabled={busyId === 'caller:' + k.key} onClick={() => removeCaller(c.callerPool.find((x) => x.key === k.key) || { key: k.key, name: k.name })} style={{ padding: '8px 12px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer', minHeight: 40 }}>Remove</button>}
             </div>
             <div style={{ display: 'flex', gap: 18, marginTop: 10, flexWrap: 'wrap' }}>
-              <CallerStat v={k.assigned} label="assigned" color="#9C4A14" />
+              <CallerStat v={k.assigned} label="assigned" color="var(--rust)" />
               <CallerStat v={k.contacted} label="contacted" />
               <CallerStat v={k.responded} label="responded" />
               <CallerStat v={k.rate} label="reply rate" />
@@ -831,18 +826,18 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
         ))}
 
         {!isPhone && c.callerList.map((k, i) => (
-          <div key={k.name} className="rowhover" style={{ display: 'grid', gridTemplateColumns: callerCols, gap: 12, padding: '14px 22px', borderBottom: '1px solid #F4EEE2', alignItems: 'center' }}>
+          <div key={k.name} className="rowhover" style={{ display: 'grid', gridTemplateColumns: callerCols, gap: 12, padding: '14px 22px', borderBottom: '1px solid var(--border-soft)', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
               <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i + 2), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(k.name)}</div>
-              <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.name}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.name}</div>
             </div>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: '#9C4A14' }}>{k.assigned}</div>
-            <div style={{ fontSize: 13.5, color: '#3A3024' }}>{k.contacted}</div>
-            <div style={{ fontSize: 13.5, color: '#3A3024' }}>{k.responded}</div>
-            <div style={{ fontSize: 13.5, fontWeight: 600 }}>{k.rate}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--rust)' }}>{k.assigned}</div>
+            <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{k.contacted}</div>
+            <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{k.responded}</div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>{k.rate}</div>
             {isCoordinator && (
               <div>
-                {k.key && <button title="Remove caller (recipients become unassigned)" disabled={busyId === 'caller:' + k.key} onClick={() => removeCaller(c.callerPool.find((x) => x.key === k.key) || { key: k.key, name: k.name })} style={{ padding: '5px 9px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Remove</button>}
+                {k.key && <button title="Remove caller (recipients become unassigned)" disabled={busyId === 'caller:' + k.key} onClick={() => removeCaller(c.callerPool.find((x) => x.key === k.key) || { key: k.key, name: k.name })} style={{ padding: '5px 9px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Remove</button>}
               </div>
             )}
           </div>

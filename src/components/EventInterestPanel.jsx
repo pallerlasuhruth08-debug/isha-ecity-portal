@@ -295,10 +295,10 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
         {isPhone ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
             <Checkbox state={pageHeaderState} onClick={togglePage} />
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select this page'}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select this page'}</span>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, background: 'var(--panel)', alignItems: 'center' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--border)', fontSize: 12, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, background: 'var(--panel)', alignItems: 'center' }}>
             <Checkbox state={pageHeaderState} onClick={togglePage} />
             <span>Volunteer</span>
             <span>Phone</span>
@@ -318,13 +318,13 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
             <div style={{ paddingTop: 2, minHeight: 44, display: 'flex', alignItems: 'center' }} onClick={(e) => { e.stopPropagation(); r.person?.id && sel.toggle(r.person.id) }}>
               <Checkbox state={r.person?.id ? sel.isSelected(r.person.id) : 'none'} />
             </div>
-            <div style={{ width: 38, height: 38, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(r.person?.full_name || '?')}</div>
+            <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(r.person?.full_name || '?')}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person?.full_name || 'Unknown'}</div>
+                <div style={{ fontSize: 16, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person?.full_name || 'Unknown'}</div>
                 <span className="pill" style={EI_STATUS_MAP[r.status || 'interested']?.pill}>{EI_STATUS_MAP[r.status || 'interested']?.label}</span>
               </div>
-              <div style={{ fontSize: 12.5, color: r.person?.phone ? 'var(--muted)' : '#B5532F', marginTop: 2 }}>{r.person?.phone || 'no phone'}</div>
+              <div style={{ fontSize: 12, color: r.person?.phone ? 'var(--muted)' : 'var(--red)', marginTop: 2 }}>{r.person?.phone || 'no phone'}</div>
               {showEventCol && r.activity && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{r.activity.name}</div>}
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{availLabel(r, daysByEvent)}</div>
             </div>
@@ -340,12 +340,12 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
               <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(r.person?.full_name || '?')}</div>
-              <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person?.full_name || 'Unknown'}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person?.full_name || 'Unknown'}</div>
             </div>
-            <div style={{ fontSize: 12.5, color: r.person?.phone ? 'var(--ink-soft)' : '#B5532F' }}>{r.person?.phone || 'no phone'}</div>
+            <div style={{ fontSize: 14, color: r.person?.phone ? 'var(--ink-soft)' : 'var(--red)' }}>{r.person?.phone || 'no phone'}</div>
             <div><span className="pill" style={EI_STATUS_MAP[r.status || 'interested']?.pill}>{EI_STATUS_MAP[r.status || 'interested']?.label}</span></div>
-            {showEventCol && <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.activity?.name || '—'}</div>}
-            <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{availLabel(r, daysByEvent)}</div>
+            {showEventCol && <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.activity?.name || '—'}</div>}
+            <div style={{ fontSize: 14, color: 'var(--muted)' }}>{availLabel(r, daysByEvent)}</div>
           </div>
         ))}
 
@@ -393,7 +393,7 @@ function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailabil
   const allSelected = days.length > 0 && days.every((d) => avail.includes(d))
   const toggleDay = (d) => onAvailability(avail.includes(d) ? avail.filter((x) => x !== d) : [...avail, d].sort())
   const toggleAll = () => onAvailability(allSelected ? [] : [...days])
-  const chip = (on) => ({ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 8, cursor: 'pointer', border: on ? '1px solid #C2691F' : '1px solid var(--border)', background: on ? '#F6E8D8' : '#fff', color: on ? '#C2691F' : 'var(--muted)' })
+  const chip = (on) => ({ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 8, cursor: 'pointer', border: on ? '1px solid var(--orange)' : '1px solid var(--border)', background: on ? '#F6E8D8' : '#fff', color: on ? 'var(--orange)' : 'var(--muted)' })
   const actions = isCoordinator ? actionsFor(status, r.contacted_at) : []
 
   async function run(to) { setBusy(true); try { await onAction(to) } finally { setBusy(false) } }
@@ -404,7 +404,7 @@ function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailabil
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ width: 46, height: 46, borderRadius: '50%', background: avatarFor(1), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 600 }}>{initials(r.person?.full_name || '?')}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h2 style={{ fontSize: 19, fontWeight: 600, margin: '0 0 3px' }}>{r.person?.full_name || 'Unknown'}</h2>
+            <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 3px' }}>{r.person?.full_name || 'Unknown'}</h2>
             <span className="pill" style={EI_STATUS_MAP[status]?.pill}>{EI_STATUS_MAP[status]?.label}</span>
           </div>
         </div>
@@ -429,7 +429,7 @@ function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailabil
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {actions.map((a) => (
                 <button key={a.to + a.label} disabled={busy} onClick={() => run(a.to)}
-                  style={{ fontSize: 13, fontWeight: 600, padding: '9px 15px', borderRadius: 9, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
+                  style={{ fontSize: 14, fontWeight: 600, padding: '9px 15px', borderRadius: 9, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
                     border: a.primary ? 'none' : '1px solid var(--border)', background: a.primary ? 'linear-gradient(150deg, var(--orange-2), var(--orange-3))' : '#fff', color: a.primary ? '#fff' : 'var(--ink-soft)' }}>{a.label}</button>
               ))}
             </div>
@@ -448,8 +448,8 @@ function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailabil
                   ))}
                 </>
               ) : (
-                avail.length ? avail.map((d) => <span key={d} className="pill" style={pill('#F6E8D8', '#C2691F')}>Day {days.indexOf(d) + 1} · {fmtDay(d)}</span>)
-                  : <span style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>Not set</span>
+                avail.length ? avail.map((d) => <span key={d} className="pill" style={pill('#F6E8D8', 'var(--orange)')}>Day {days.indexOf(d) + 1} · {fmtDay(d)}</span>)
+                  : <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>Not set</span>
               )}
             </div>
           </div>
@@ -458,9 +458,9 @@ function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailabil
         <div className="card" style={{ padding: 18 }}>
           <SecH>Comments</SecH>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} placeholder="Notes on availability, preferences, etc…"
-            style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 13, fontFamily: 'inherit', background: '#fff', color: 'var(--ink)', outline: 'none', resize: 'vertical' }} />
+            style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 14, fontFamily: 'inherit', background: '#fff', color: 'var(--ink)', outline: 'none', resize: 'vertical' }} />
           {isCoordinator && (
-            <button className="btn btn-ghost" style={{ marginTop: 10, fontSize: 12.5 }} disabled={note === (r.note || '')} onClick={() => onSaveNote(note)}>Save comment</button>
+            <button className="btn btn-ghost" style={{ marginTop: 10, fontSize: 12 }} disabled={note === (r.note || '')} onClick={() => onSaveNote(note)}>Save comment</button>
           )}
         </div>
       </div>
@@ -469,8 +469,8 @@ function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailabil
 }
 
 function F({ label, value }) {
-  return (<div><div style={{ fontSize: 10.5, color: 'var(--muted-2)', marginBottom: 4 }}>{label}</div><div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', wordBreak: 'break-word' }}>{value}</div></div>)
+  return (<div><div style={{ fontSize: 12, color: 'var(--muted-2)', marginBottom: 4 }}>{label}</div><div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', wordBreak: 'break-word' }}>{value}</div></div>)
 }
 function SecH({ children }) {
-  return <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', marginBottom: 12 }}>{children}</div>
+  return <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', marginBottom: 12 }}>{children}</div>
 }

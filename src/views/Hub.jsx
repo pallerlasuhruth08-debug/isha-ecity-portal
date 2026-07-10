@@ -62,11 +62,11 @@ export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStar
   return (
     <Pad>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
-        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 520 }}>
+        <p className="mobile-hide" style={{ margin: 0, fontSize: 14, color: 'var(--muted)', maxWidth: 520 }}>
           Every event and everything linked to it — planning, interest, campaigns and attendance. Overdue phases across all events surface up top.
         </p>
         {isCoordinator && onCreateEvent && (
-          <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={onCreateEvent}>＋ Create event</button>
+          <button className="btn btn-primary" style={{ fontSize: 12, padding: '8px 14px' }} onClick={onCreateEvent}>＋ Create event</button>
         )}
       </div>
       <EventList events={events} phasesByEvent={phasesByEvent} onOpen={setOpenId} />
@@ -106,9 +106,9 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
         <div style={{ minWidth: 0, flex: '1 1 240px', overflow: 'hidden' }}>
           <h2 style={{ fontSize: 22, fontWeight: 600, margin: 0, fontFamily: "'Newsreader',serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {ev.name}{ev.series_id && <span title="Recurring occurrence" style={{ marginLeft: 8, fontSize: 15, color: 'var(--muted-2)' }}>↻</span>}
+            {ev.name}{ev.series_id && <span title="Recurring occurrence" style={{ marginLeft: 8, fontSize: 16, color: 'var(--muted-2)' }}>↻</span>}
           </h2>
-          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rangeLabel(ev.start_date || ev.activity_date, ev.end_date)} · {ev.center_id}</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rangeLabel(ev.start_date || ev.activity_date, ev.end_date)} · {ev.center_id}</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
           {(() => {
@@ -123,7 +123,7 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
       <div className="scroll-tabs" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
         {TABS.map((t) => (
           <button key={t.k} className="tap44" onClick={() => setTab(t.k)}
-            style={{ padding: '9px 14px', fontSize: 13, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', color: tab === t.k ? 'var(--ink)' : 'var(--muted)', borderBottom: tab === t.k ? '2px solid var(--orange)' : '2px solid transparent', marginBottom: -1, whiteSpace: 'nowrap' }}>
+            style={{ padding: '9px 14px', fontSize: 14, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', color: tab === t.k ? 'var(--ink)' : 'var(--muted)', borderBottom: tab === t.k ? '2px solid var(--orange)' : '2px solid transparent', marginBottom: -1, whiteSpace: 'nowrap' }}>
             {t.label}
           </button>
         ))}
@@ -151,8 +151,8 @@ function EventInterestTab({ ev, me, isCoordinator, onToast }) {
     <div>
       {isCoordinator && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn btn-primary tap44" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setAddOpen(true)}>＋ Add / Import Interest</button>
-          <span style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>Add or import against this event — stays right here.</span>
+          <button className="btn btn-primary tap44" style={{ fontSize: 12, padding: '8px 14px' }} onClick={() => setAddOpen(true)}>＋ Add / Import Interest</button>
+          <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>Add or import against this event — stays right here.</span>
         </div>
       )}
       <EventInterestPanel uid={me?.id} lockEventId={ev.id} reloadKey={reloadKey} onToast={onToast} isCoordinator={isCoordinator} />
@@ -176,14 +176,14 @@ function EventCampaignsTab({ ev, isCoordinator, onOpenCampaign, onStartCampaign 
     <div>
       {isCoordinator && (
         <div style={{ position: 'relative', marginBottom: 14 }}>
-          <button className="btn btn-primary tap44" style={{ fontSize: 12.5, padding: '8px 14px' }} onClick={() => setMenu((m) => !m)}>＋ Create campaign</button>
+          <button className="btn btn-primary tap44" style={{ fontSize: 12, padding: '8px 14px' }} onClick={() => setMenu((m) => !m)}>＋ Create campaign</button>
           {menu && (
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setMenu(false)} />
               <div style={{ position: 'absolute', top: 40, left: 0, background: '#fff', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow-lg)', padding: 6, zIndex: 50, width: 230 }}>
-                <div style={{ fontSize: 11, color: 'var(--muted-2)', padding: '4px 8px' }}>Pick who to call — you’ll select them next; they become the call list.</div>
-                <div className="rowhover" style={{ padding: '9px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600 }} onClick={() => { setMenu(false); onStartCampaign && onStartCampaign(ev.id, ev.name, 'volunteer') }}>Recruit volunteers →</div>
-                <div className="rowhover" style={{ padding: '9px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600 }} onClick={() => { setMenu(false); onStartCampaign && onStartCampaign(ev.id, ev.name, 'meditator') }}>Invite meditators →</div>
+                <div style={{ fontSize: 12, color: 'var(--muted-2)', padding: '4px 8px' }}>Pick who to call — you’ll select them next; they become the call list.</div>
+                <div className="rowhover" style={{ padding: '9px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }} onClick={() => { setMenu(false); onStartCampaign && onStartCampaign(ev.id, ev.name, 'volunteer') }}>Recruit volunteers →</div>
+                <div className="rowhover" style={{ padding: '9px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }} onClick={() => { setMenu(false); onStartCampaign && onStartCampaign(ev.id, ev.name, 'meditator') }}>Invite meditators →</div>
               </div>
             </>
           )}
@@ -195,7 +195,7 @@ function EventCampaignsTab({ ev, isCoordinator, onOpenCampaign, onStartCampaign 
         <div className="card" style={{ padding: 16 }}>
           {camps.map((c) => (
             <Row key={c.id} onClick={() => onOpenCampaign && onOpenCampaign(c.id)}
-              main={<>{c.name}{c.is_test && <span className="pill" style={{ ...pill('#F6E0CE', '#B5532F'), marginLeft: 6, fontSize: 10 }}>test</span>}</>}
+              main={<>{c.name}{c.is_test && <span className="pill" style={{ ...pill('#F6E0CE', 'var(--red)'), marginLeft: 6, fontSize: 12 }}>test</span>}</>}
               side={<span className="pill" style={statusPill(c.status)}>{c.status}</span>} />
           ))}
         </div>
@@ -302,9 +302,9 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: -2, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Teams</span>
+        <span style={{ fontSize: 14, fontWeight: 600 }}>Teams</span>
         <button onClick={() => setShowInfo((s) => !s)} title="Teams are this event's activity blocks — create teams, set members &amp; POCs here; a team's dates &amp; attendance mode are set in Planning (same block)."
-          style={{ width: 18, height: 18, borderRadius: '50%', border: '1px solid var(--border)', background: showInfo ? '#EDE4D6' : '#fff', color: 'var(--muted)', fontSize: 11, cursor: 'pointer', lineHeight: 1, padding: 0 }}>ⓘ</button>
+          style={{ width: 18, height: 18, borderRadius: '50%', border: '1px solid var(--border)', background: showInfo ? '#EDE4D6' : '#fff', color: 'var(--muted)', fontSize: 12, cursor: 'pointer', lineHeight: 1, padding: 0 }}>ⓘ</button>
         {blocks.length > 0 && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             <button className="btn btn-ghost tap44" disabled={exporting} onClick={() => exportRoster('csv')} style={{ fontSize: 12, padding: '6px 11px', opacity: exporting ? 0.6 : 1 }}>⬇ CSV</button>
@@ -491,21 +491,21 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
     <div className="card" style={{ padding: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{block.heading}{block.activity_type_id && typeLabel(block.activity_type_id) ? <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {typeLabel(block.activity_type_id)}</span> : null}</div>
-          {pocs.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>POC: {pocs.map((m) => people[m.person_id]?.full_name).filter(Boolean).join(', ')}</div>}
+          <div style={{ fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{block.heading}{block.activity_type_id && typeLabel(block.activity_type_id) ? <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {typeLabel(block.activity_type_id)}</span> : null}</div>
+          {pocs.length > 0 && <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>POC: {pocs.map((m) => people[m.person_id]?.full_name).filter(Boolean).join(', ')}</div>}
         </div>
         <span className="pill" style={{ ...(full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')), flexShrink: 0 }}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
 
         {/* Desktop: inline actions when space allows. */}
         <div className="desktop-only" style={{ gap: 8, flexShrink: 0 }}>
           {isCoordinator && (
-            <button className="tap44" onClick={() => setAdding((a) => !a)} title="Add member" style={{ fontSize: 11.5, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? '#C2691F' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
+            <button className="tap44" onClick={() => setAdding((a) => !a)} title="Add member" style={{ fontSize: 12, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? 'var(--orange)' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
           )}
           {isCoordinator && (
             <button className="tap44" onClick={() => setEditing(true)} title="Edit team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
           )}
           {isCoordinator && (
-            <button className="tap44" disabled={busy} onClick={removeTeam} title="Delete / archive team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>🗑</button>
+            <button className="tap44" disabled={busy} onClick={removeTeam} title="Delete / archive team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>🗑</button>
           )}
           <button className="tap44" onClick={() => setShowComments((s) => !s)} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: showComments ? '#EDE4D6' : '#fff', cursor: 'pointer' }}>💬</button>
         </div>
@@ -532,13 +532,13 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
             const p = people[m.person_id]
             return (
               <div key={m.person_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #F4EEE2' }}>
-                <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10.5, fontWeight: 600 }}>{initials(p?.full_name || '?')}</div>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{p?.full_name || 'Unknown'}</div>
-                {m.poc && <span className="pill" style={{ ...pill('#F3E3D2', '#9C4A14'), fontSize: 10 }}>POC</span>}
+                <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>{initials(p?.full_name || '?')}</div>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>{p?.full_name || 'Unknown'}</div>
+                {m.poc && <span className="pill" style={{ ...pill('#F3E3D2', 'var(--rust)'), fontSize: 12 }}>POC</span>}
                 {isCoordinator && (
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                    <button className="tap44" disabled={busy} onClick={() => togglePoc(m.person_id, p?.full_name, m.poc)} style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: m.poc ? '#9C4A14' : 'var(--muted)', cursor: 'pointer' }}>{m.poc ? '★ POC' : '☆ POC'}</button>
-                    <button className="tap44" disabled={busy} onClick={() => removeMember(m.person_id, p?.full_name)} style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Remove</button>
+                    <button className="tap44" disabled={busy} onClick={() => togglePoc(m.person_id, p?.full_name, m.poc)} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: m.poc ? 'var(--rust)' : 'var(--muted)', cursor: 'pointer' }}>{m.poc ? '★ POC' : '☆ POC'}</button>
+                    <button className="tap44" disabled={busy} onClick={() => removeMember(m.person_id, p?.full_name)} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Remove</button>
                   </div>
                 )}
               </div>
@@ -574,17 +574,17 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
                 return (
                   <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, cursor: 'pointer' }} onClick={() => !busy && addMember(p)}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>{p.full_name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted-2)' }}>{p.phone || 'no phone'}</div>
+                      <div style={{ fontSize: 14, fontWeight: 500 }}>{p.full_name}</div>
+                      <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>{p.phone || 'no phone'}</div>
                       {inThisTeam ? (
-                        <div style={{ fontSize: 11, fontWeight: 600, color: '#9C4A14' }}>Already a member of this team.</div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--rust)' }}>Already a member of this team.</div>
                       ) : teams.length ? (
-                        <div style={{ fontSize: 11, color: 'var(--muted-2)' }}>Already in: {teams.map((t) => t.name).join(' · ')}</div>
+                        <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>Already in: {teams.map((t) => t.name).join(' · ')}</div>
                       ) : (
-                        <div style={{ fontSize: 11, color: 'var(--muted-2)' }}>Not in any team yet</div>
+                        <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>Not in any team yet</div>
                       )}
                     </div>
-                    <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 11.5, color: memberIds.has(p.id) ? 'var(--muted)' : 'var(--orange)', fontWeight: 600 }}>{memberIds.has(p.id) ? 'on team' : '+ add'}</span>
+                    <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 12, color: memberIds.has(p.id) ? 'var(--muted)' : 'var(--orange)', fontWeight: 600 }}>{memberIds.has(p.id) ? 'on team' : '+ add'}</span>
                   </div>
                 )
               })}
@@ -600,8 +600,8 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
 function Row({ avatar, main, side, onClick }) {
   return (
     <div className={onClick ? 'rowhover' : undefined} onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #F4EEE2', cursor: onClick ? 'pointer' : 'default' }}>
-      {avatar && <div style={{ width: 28, height: 28, borderRadius: '50%', background: avatarFor(avatar.i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{initials(avatar.name || '?')}</div>}
-      <div style={{ fontSize: 13, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{main}</div>
+      {avatar && <div style={{ width: 28, height: 28, borderRadius: '50%', background: avatarFor(avatar.i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(avatar.name || '?')}</div>}
+      <div style={{ fontSize: 14, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{main}</div>
       <div style={{ marginLeft: 'auto', flexShrink: 0 }}>{side}</div>
     </div>
   )

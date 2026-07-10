@@ -10,6 +10,7 @@ import { fmtDay, groupPhases } from '../lib/planning'
 import { ensureSeriesWindow } from '../lib/series'
 import EventList from '../components/EventList'
 import KebabMenu from '../components/KebabMenu'
+import { useBreakpoint } from '../lib/useBreakpoint'
 
 // ────────────────────────────────────────────────────────────────────────────
 // BOUNDARY (do not remove): Event CREATION now lives at the SINGLE site-toolbar
@@ -80,7 +81,7 @@ export default function Events({ me, isCoordinator = false, onToast, openEventId
   return (
     <Pad>
       {/* Attendance list. Event creation lives on the Event Hub now, not here. */}
-      <p style={{ margin: '0 0 14px', fontSize: 13.5, color: 'var(--muted)' }}>Mark show / no-show for planned volunteers and capture walk-ins on the day.</p>
+      <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--muted)' }}>Mark show / no-show for planned volunteers and capture walk-ins on the day.</p>
       {err && <ErrorCard>Couldn't load events: {err}</ErrorCard>}
       {loading ? <Loading label="Loading events…" /> : (
         <EventList events={acts} phasesByEvent={phasesByEvent} onOpen={setOpenId} />
@@ -158,9 +159,9 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#5C5142' }}>Activity type</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)' }}>Activity type</span>
             <select value={activity.activity_type_id || ''} disabled={!isCoordinator || busyAction} onChange={(e) => onTypeSelect(e.target.value)}
-              style={{ fontSize: 13, padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)' }}>
+              style={{ fontSize: 14, padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)' }}>
               <option value="">— none —</option>
               {types.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
             </select>
@@ -174,7 +175,7 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
         {/* attendance (show/no-show + walk-ins only — no to-dos here) */}
         <div className="card" style={{ padding: 20 }}>
           {unresolvedCount > 0 && (
-            <div style={{ fontSize: 12.5, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 9, padding: '8px 11px', marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--rust)', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 9, padding: '8px 11px', marginBottom: 12 }}>
               {unresolvedCount} unresolved walk-in{unresolvedCount > 1 ? 's' : ''} — resolve in the <strong>Unresolved</strong> queue.
             </div>
           )}
@@ -191,13 +192,13 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
         <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={() => setTypeChange(null)}>
           <div className="card modal-sheet" style={{ width: 440, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 8px' }}>Change event type?</h3>
-            <div style={{ fontSize: 13.5, color: 'var(--ink-soft)', lineHeight: 1.55, marginBottom: 16 }}>
+            <div style={{ fontSize: 14, color: 'var(--ink-soft)', lineHeight: 1.55, marginBottom: 16 }}>
               This event has <strong>{totalAtt}</strong> attendance record(s) captured under <strong>{typeLabel(activity.activity_type_id)}</strong>. Changing the event to <strong>{typeLabel(typeChange.newId)}</strong> — what should happen to those already-captured records?
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button className="btn btn-primary" disabled={busyAction} onClick={() => applyTypeChange(typeChange.newId, false)} style={{ padding: '11px', fontSize: 13.5 }}>Keep their captured type (recommended)</button>
-              <button className="btn btn-ghost" disabled={busyAction} onClick={() => applyTypeChange(typeChange.newId, true)} style={{ padding: '11px', fontSize: 13.5, color: '#B5532F' }}>Update all {totalAtt} to “{typeLabel(typeChange.newId)}” (overwrites history)</button>
-              <button className="btn btn-ghost" disabled={busyAction} onClick={() => setTypeChange(null)} style={{ padding: '8px', fontSize: 12.5, color: 'var(--muted)' }}>Cancel</button>
+              <button className="btn btn-primary" disabled={busyAction} onClick={() => applyTypeChange(typeChange.newId, false)} style={{ padding: '11px', fontSize: 14 }}>Keep their captured type (recommended)</button>
+              <button className="btn btn-ghost" disabled={busyAction} onClick={() => applyTypeChange(typeChange.newId, true)} style={{ padding: '11px', fontSize: 14, color: 'var(--red)' }}>Update all {totalAtt} to “{typeLabel(typeChange.newId)}” (overwrites history)</button>
+              <button className="btn btn-ghost" disabled={busyAction} onClick={() => setTypeChange(null)} style={{ padding: '8px', fontSize: 12, color: 'var(--muted)' }}>Cancel</button>
             </div>
           </div>
         </div>
@@ -289,7 +290,7 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
                 )}
                 {isCoordinator && (
                   <button className="tap44" disabled={busy} onClick={(e) => removeSession(e, s)} title={(counts[s.id] || 0) > 0 ? 'Archive session (has records)' : 'Delete empty session'}
-                    style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>🗑</button>
+                    style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>🗑</button>
                 )}
               </div>
 
@@ -319,8 +320,8 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
   )
 }
 
-const _lbl = { fontSize: 12, fontWeight: 600, color: '#5C5142', display: 'block', marginBottom: 5 }
-const _fld = { fontSize: 13, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)', width: '100%' }
+const _lbl = { fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', display: 'block', marginBottom: 5 }
+const _fld = { fontSize: 14, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)', width: '100%' }
 
 export function CreateSessionForm({ activity, session = null, attnCount = 0, types = [], me, onClose, onCreated, onToast }) {
   const editing = !!session
@@ -413,18 +414,18 @@ export function CreateSessionForm({ activity, session = null, attnCount = 0, typ
           <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={onClose}>✕ Close</button>
         </div>
         {locked && (
-          <div style={{ fontSize: 11.5, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 8, padding: '7px 10px', marginBottom: 12 }}>
+          <div style={{ fontSize: 12, color: 'var(--rust)', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 8, padding: '7px 10px', marginBottom: 12 }}>
             🔒 This session has {attnCount} captured record(s). Activity type and date are locked (changing them would corrupt that history); title and centre stay editable.
           </div>
         )}
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16 }}>{activity.name} · {fmtDay(spanStart)}{spanEnd !== spanStart ? `–${fmtDay(spanEnd)}` : ''}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>{activity.name} · {fmtDay(spanStart)}{spanEnd !== spanStart ? `–${fmtDay(spanEnd)}` : ''}</div>
 
         <div style={{ marginBottom: 14 }}>
           <span style={_lbl}>They attended as</span>
           <div style={{ display: 'flex', gap: 8 }}>
             {[['volunteer', 'Volunteer'], ['meditator', 'Participant']].map(([k, label]) => (
-              <button key={k} onClick={() => setKind(k)} style={{ flex: 1, padding: '9px', fontSize: 13, fontWeight: 600, borderRadius: 9, cursor: 'pointer',
-                border: kind === k ? '1px solid #C2691F' : '1px solid var(--border)', background: kind === k ? '#F6E8D8' : '#fff', color: kind === k ? '#C2691F' : 'var(--muted)' }}>{label}</button>
+              <button key={k} onClick={() => setKind(k)} style={{ flex: 1, padding: '9px', fontSize: 14, fontWeight: 600, borderRadius: 9, cursor: 'pointer',
+                border: kind === k ? '1px solid var(--orange)' : '1px solid var(--border)', background: kind === k ? '#F6E8D8' : '#fff', color: kind === k ? 'var(--orange)' : 'var(--muted)' }}>{label}</button>
             ))}
           </div>
         </div>
@@ -444,7 +445,7 @@ export function CreateSessionForm({ activity, session = null, attnCount = 0, typ
         </div>
 
         {outside && (
-          <div style={{ fontSize: 12.5, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 9, padding: '9px 11px', marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: 'var(--rust)', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 9, padding: '9px 11px', marginBottom: 14 }}>
             This date is {nBefore ? `${nBefore} day${nBefore > 1 ? 's' : ''} before the event start` : `${nAfter} day${nAfter > 1 ? 's' : ''} after the event end`} — confirm this is correct.
             <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 7, cursor: 'pointer', fontWeight: 600 }}>
               <input type="checkbox" checked={confirmedFar} onChange={(e) => setConfirmedFar(e.target.checked)} /> Yes, this date is intentional
@@ -457,8 +458,8 @@ export function CreateSessionForm({ activity, session = null, attnCount = 0, typ
           {addingType ? (
             <div style={{ display: 'flex', gap: 8 }}>
               <input autoFocus value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="New activity type (e.g. Kitchen)" onKeyDown={(e) => e.key === 'Enter' && createType()} style={_fld} />
-              <button className="btn btn-primary" disabled={busy || !newType.trim()} onClick={createType} style={{ fontSize: 12.5, padding: '8px 12px' }}>Add</button>
-              <button className="btn btn-ghost" onClick={() => { setAddingType(false); setNewType('') }} style={{ fontSize: 12.5, padding: '8px 10px' }}>Cancel</button>
+              <button className="btn btn-primary" disabled={busy || !newType.trim()} onClick={createType} style={{ fontSize: 12, padding: '8px 12px' }}>Add</button>
+              <button className="btn btn-ghost" onClick={() => { setAddingType(false); setNewType('') }} style={{ fontSize: 12, padding: '8px 10px' }}>Cancel</button>
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 8 }}>
@@ -466,7 +467,7 @@ export function CreateSessionForm({ activity, session = null, attnCount = 0, typ
                 <option value="">— pick {kind === 'meditator' ? 'participant' : 'volunteer'} activity —</option>
                 {typeOpts.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
               </select>
-              {!locked && <button className="btn btn-ghost" onClick={() => setAddingType(true)} style={{ fontSize: 12.5, padding: '8px 12px', whiteSpace: 'nowrap' }}>＋ New type</button>}
+              {!locked && <button className="btn btn-ghost" onClick={() => setAddingType(true)} style={{ fontSize: 12, padding: '8px 12px', whiteSpace: 'nowrap' }}>＋ New type</button>}
             </div>
           )}
         </div>
@@ -628,10 +629,10 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
     <div>
       <button className="btn btn-ghost" style={{ fontSize: 13, marginBottom: 12 }} onClick={onBack}>← All sessions</button>
       <div className="card" style={{ padding: 14, marginBottom: 12, background: 'var(--panel)' }}>
-        <div style={{ fontSize: 15, fontWeight: 600 }}>{session.title || typeLabel?.(session.activity_type_id) || 'Attendance'}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{fmtDay(session.session_date)} · {session.center_id || '—'} · {session.type === 'meditator' ? 'participant' : 'volunteer'}{session.activity_type_id ? ` · ${typeLabel?.(session.activity_type_id)}` : ''}</div>
+        <div style={{ fontSize: 16, fontWeight: 600 }}>{session.title || typeLabel?.(session.activity_type_id) || 'Attendance'}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtDay(session.session_date)} · {session.center_id || '—'} · {session.type === 'meditator' ? 'participant' : 'volunteer'}{session.activity_type_id ? ` · ${typeLabel?.(session.activity_type_id)}` : ''}</div>
         {!captureOpen && (
-          <div style={{ fontSize: 12, color: '#9C4A14', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 8, padding: '7px 10px', marginTop: 8 }}>
+          <div style={{ fontSize: 12, color: 'var(--rust)', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 8, padding: '7px 10px', marginTop: 8 }}>
             🔒 Attendance capture opens on {fmtDay(session.session_date)}. The session is set up; marking people present unlocks on the day.
           </div>
         )}
@@ -642,7 +643,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
           activity matches this session. Tapping marks present + inherits their team's type. */}
       {refMembers.filter((m) => !presentIds.has(m.id)).length > 0 && (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 5 }}>Team members for this activity · tap to mark present (not auto-marked)</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 5 }}>Team members for this activity · tap to mark present (not auto-marked)</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {refMembers.filter((m) => !presentIds.has(m.id)).map((m) => (
               <button key={m.id} disabled={busy} onClick={() => mark(m, { activityTypeId: session.activity_type_id })}
@@ -655,7 +656,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
           (defaults to the session's — change it only when someone did something else). */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div style={{ flex: 1, minWidth: 150 }}>
-          <span style={{ ..._lbl, marginBottom: 3, fontSize: 11 }}>Activity for next person</span>
+          <span style={{ ..._lbl, marginBottom: 3, fontSize: 12 }}>Activity for next person</span>
           {addingType ? (
             <div style={{ display: 'flex', gap: 6 }}>
               <input autoFocus value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="New activity type" onKeyDown={(e) => e.key === 'Enter' && createType()} style={_fld} />
@@ -673,7 +674,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
           )}
         </div>
         <div style={{ flex: 1, minWidth: 130 }}>
-          <span style={{ ..._lbl, marginBottom: 3, fontSize: 11 }}>Centre</span>
+          <span style={{ ..._lbl, marginBottom: 3, fontSize: 12 }}>Centre</span>
           <select value={ovrCentre} onChange={(e) => setOvrCentre(e.target.value)} style={_fld}>
             {!centres.some((c) => c.id === ovrCentre) && ovrCentre && <option value={ovrCentre}>{ovrCentre}</option>}
             {centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
@@ -690,8 +691,8 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
           <div className="card" style={{ position: 'absolute', top: 46, left: 0, right: 0, zIndex: 20, boxShadow: 'var(--shadow-lg)', padding: 6 }}>
             {results.map((p) => (
               <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', borderRadius: 8, cursor: busy ? 'default' : 'pointer' }} onClick={() => !busy && mark(p)}>
-                <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>{initials(p.full_name)}</div>
-                <div><div style={{ fontSize: 13, fontWeight: 500 }}>{p.full_name}</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>{p.phone || 'no phone'}</div></div>
+                <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>{initials(p.full_name)}</div>
+                <div><div style={{ fontSize: 14, fontWeight: 500 }}>{p.full_name}</div><div style={{ fontSize: 12, color: 'var(--muted)' }}>{p.phone || 'no phone'}</div></div>
                 <span style={{ marginLeft: 'auto', fontSize: 12, color: presentIds.has(p.id) ? 'var(--muted)' : 'var(--orange)', fontWeight: 600 }}>{presentIds.has(p.id) ? 'present' : busy ? '…' : '+ present'}</span>
               </div>
             ))}
@@ -699,10 +700,10 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
               <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <input autoFocus value={newP.name} onChange={(e) => setNewP({ ...newP, name: e.target.value })} placeholder="Full name" style={_fld} />
                 <input value={newP.phone} onChange={(e) => setNewP({ ...newP, phone: e.target.value })} placeholder="Phone (optional)" style={_fld} />
-                <button className="btn btn-primary" disabled={busy || !newP.name.trim()} onClick={createAndMark} style={{ fontSize: 12.5, padding: '8px' }}>Add & mark present</button>
+                <button className="btn btn-primary" disabled={busy || !newP.name.trim()} onClick={createAndMark} style={{ fontSize: 12, padding: '8px' }}>Add & mark present</button>
               </div>
             ) : (
-              <div className="rowhover" style={{ padding: '8px 10px', borderRadius: 8, cursor: 'pointer', color: 'var(--orange)', fontWeight: 600, fontSize: 12.5 }}
+              <div className="rowhover" style={{ padding: '8px 10px', borderRadius: 8, cursor: 'pointer', color: 'var(--orange)', fontWeight: 600, fontSize: 12 }}
                 onClick={() => setNewP({ name: /\d/.test(q) ? '' : q, phone: /\d/.test(q) ? q.replace(/\D/g, '') : '' })}>＋ Not listed — add new person</div>
             )}
           </div>
@@ -712,18 +713,18 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
 
       {present === null ? <Loading label="Loading…" /> : present.length === 0 ? <Empty label="No one marked present yet." /> : (
         <div>
-          <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 6 }}>{present.length} present</div>
+          <div style={{ fontSize: 12, color: 'var(--muted-2)', marginBottom: 6 }}>{present.length} present</div>
           {present.map((r, i) => (
             <div key={r.id} style={{ padding: '9px 0', borderBottom: '1px solid #F4EEE2' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>{initials(r.person?.full_name || '?')}</div>
+                <div style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>{initials(r.person?.full_name || '?')}</div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{r.person?.full_name || 'Unknown'}</div>
-                  {ovrDiffers(r) && <div style={{ fontSize: 11, color: '#C2691F' }}>{nameOf(r.activity_type_id)}{r.center_id && r.center_id !== session.center_id ? ` · ${r.center_id}` : ''}</div>}
+                  <div style={{ fontSize: 14, fontWeight: 500 }}>{r.person?.full_name || 'Unknown'}</div>
+                  {ovrDiffers(r) && <div style={{ fontSize: 12, color: 'var(--orange)' }}>{nameOf(r.activity_type_id)}{r.center_id && r.center_id !== session.center_id ? ` · ${r.center_id}` : ''}</div>}
                 </div>
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <button onClick={() => setOpenComment(openComment === r.person_id ? null : r.person_id)} title="Comments" style={{ fontSize: 12.5, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>💬</button>
-                  <button disabled={busy} onClick={() => removeRow(r)} title="Remove this attendance" style={{ fontSize: 11.5, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: '#B5532F', cursor: 'pointer' }}>Remove</button>
+                  <button onClick={() => setOpenComment(openComment === r.person_id ? null : r.person_id)} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>💬</button>
+                  <button disabled={busy} onClick={() => removeRow(r)} title="Remove this attendance" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Remove</button>
                 </div>
               </div>
               {openComment === r.person_id && (
@@ -746,6 +747,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
 // attendance count for the delete gate (attendance-bearing events archive, never
 // hard-delete) and owns the edit form.
 export function EventActions({ activity, me, isCoordinator, onToast, onChanged, onDeleted }) {
+  const { isPhone } = useBreakpoint()
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [attCount, setAttCount] = useState(null)
@@ -784,18 +786,33 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
 
   return (
     <>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12.5, padding: '7px 12px' }} onClick={() => setEditing(true)}>Edit</button>
-        {activity.archived_at
-          ? <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12.5, padding: '7px 12px' }} onClick={() => setArchived(false)}>Unarchive</button>
-          : <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12.5, padding: '7px 12px' }} onClick={() => setArchived(true)}>Archive</button>}
-        <button
-          title={(attCount || 0) > 0 ? `Has ${attCount} attendance record(s) — archive instead` : 'Delete (no attendance)'}
-          disabled={busy}
-          onClick={hardDelete}
-          style={{ fontSize: 12.5, padding: '7px 12px', fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: (attCount || 0) > 0 ? 'var(--muted-2)' : '#B5532F', cursor: busy ? 'default' : 'pointer' }}
-        >Delete</button>
-      </div>
+      {isPhone ? (
+        <KebabMenu items={[
+          { label: 'Edit', onClick: () => setEditing(true), disabled: busy },
+          activity.archived_at
+            ? { label: 'Unarchive', onClick: () => setArchived(false), disabled: busy }
+            : { label: 'Archive', onClick: () => setArchived(true), disabled: busy },
+          {
+            label: 'Delete',
+            onClick: hardDelete,
+            disabled: busy || (attCount || 0) > 0,
+            danger: (attCount || 0) === 0,
+          },
+        ]} />
+      ) : (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: '7px 12px' }} onClick={() => setEditing(true)}>Edit</button>
+          {activity.archived_at
+            ? <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: '7px 12px' }} onClick={() => setArchived(false)}>Unarchive</button>
+            : <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: '7px 12px' }} onClick={() => setArchived(true)}>Archive</button>}
+          <button
+            title={(attCount || 0) > 0 ? `Has ${attCount} attendance record(s) — archive instead` : 'Delete (no attendance)'}
+            disabled={busy}
+            onClick={hardDelete}
+            style={{ fontSize: 12, padding: '7px 12px', fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: (attCount || 0) > 0 ? 'var(--muted-2)' : 'var(--red)', cursor: busy ? 'default' : 'pointer' }}
+          >Delete</button>
+        </div>
+      )}
       {editing && (
         <EditEventForm
           activity={activity}
@@ -845,12 +862,12 @@ function EditEventForm({ activity, me, onClose, onSaved, onToast }) {
   }
 
   const inputStyle = { width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 12px', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', background: '#fff', color: 'var(--ink)' }
-  const label = { display: 'block', fontSize: 12, fontWeight: 600, color: '#5C5142', marginBottom: 5, marginTop: 12 }
+  const label = { display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', marginBottom: 5, marginTop: 12 }
   return (
     <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
       <div className="card modal-sheet" style={{ width: 460, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)', maxHeight: '88vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 2px' }}>Edit event</h3>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>To change the type, use the Activity type selector on the event (it handles captured attendance).</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>To change the type, use the Activity type selector on the event (it handles captured attendance).</div>
         <label style={{ ...label, marginTop: 16 }}>Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} autoFocus />
         <label style={label}>Date</label>
@@ -915,13 +932,13 @@ function PlannedVolunteers({ activityId, eventDate, isCoordinator, me, onToast }
   }
 
   if (data === undefined || data.blocks.length === 0) return null
-  const STATUS = { assigned: { t: '—', c: 'var(--muted-2)' }, show: { t: 'showed', c: '#4E7C3F' }, no_show: { t: 'no-show', c: '#B5532F' }, dropped: { t: 'dropped', c: '#9C4A14' }, involved: { t: 'involved', c: '#C2691F' } }
+  const STATUS = { assigned: { t: '—', c: 'var(--muted-2)' }, show: { t: 'showed', c: '#4E7C3F' }, no_show: { t: 'no-show', c: 'var(--red)' }, dropped: { t: 'dropped', c: 'var(--rust)' }, involved: { t: 'involved', c: 'var(--orange)' } }
   const MODE_TAG = { per_day: 'per-day', span: 'span', involved_only: 'involved only' }
 
   return (
     <div className="card" style={{ padding: 20, marginTop: 16 }}>
       <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 4px' }}>Planned volunteers · attendance</h3>
-      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 14 }}>How presence is marked follows each block’s attendance mode. Involved-only credits participation without a reliability data point.</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>How presence is marked follows each block’s attendance mode. Involved-only credits participation without a reliability data point.</div>
       {data.blocks.map((b) => {
         const rows = data.asg.filter((a) => a.block_id === b.id)
         const mode = b.attendance_mode || 'per_day'
@@ -940,26 +957,26 @@ function PlannedVolunteers({ activityId, eventDate, isCoordinator, me, onToast }
         return (
           <div key={b.id} style={{ marginBottom: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 600 }}>{b.heading}</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{b.heading}</div>
               <span className="pill" style={{ background: '#F1EADD', color: '#8C7E6B', fontSize: 10 }}>{MODE_TAG[mode]}</span>
             </div>
             {groups.length === 0 ? <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>No one assigned.</div> : groups.map((g) => {
               const s = STATUS[g.status] || STATUS.assigned
               return (
                 <div key={g.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid #F4EEE2' }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 500, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{data.people[g.personId]?.full_name || 'Unknown'}</div>
-                  {mode === 'per_day' && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{fmtDay(g.day)}</span>}
+                  <div style={{ fontSize: 14, fontWeight: 500, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{data.people[g.personId]?.full_name || 'Unknown'}</div>
+                  {mode === 'per_day' && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtDay(g.day)}</span>}
                   {isCoordinator ? (
                     mode === 'involved_only' ? (
-                      <button onClick={() => markGroup(g, 'involved')} title="Credit participation (no presence check, no reliability)" style={{ padding: '4px 9px', fontSize: 11, fontWeight: 600, borderRadius: 6, border: '1px solid #E7C9B8', background: g.status === 'involved' ? '#F6E8D8' : '#fff', color: '#C2691F', cursor: 'pointer' }}>Involved</button>
+                      <button onClick={() => markGroup(g, 'involved')} title="Credit participation (no presence check, no reliability)" style={{ padding: '4px 9px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: '1px solid #E7C9B8', background: g.status === 'involved' ? '#F6E8D8' : '#fff', color: 'var(--orange)', cursor: 'pointer' }}>Involved</button>
                     ) : (
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button onClick={() => markGroup(g, 'show')} title={mode === 'span' ? 'Present for the whole block' : 'Showed'} style={{ padding: '4px 9px', fontSize: 11, fontWeight: 600, borderRadius: 6, border: '1px solid #CDE3C6', background: g.status === 'show' ? '#EAF2E5' : '#fff', color: '#4E7C3F', cursor: 'pointer' }}>{mode === 'span' ? 'Present' : 'Show'}</button>
-                        <button onClick={() => markGroup(g, 'no_show')} title="No-show (reopens the slot)" style={{ padding: '4px 9px', fontSize: 11, fontWeight: 600, borderRadius: 6, border: '1px solid #E7C9B8', background: g.status === 'no_show' ? '#FBE6E0' : '#fff', color: '#B5532F', cursor: 'pointer' }}>{mode === 'span' ? 'Absent' : 'No-show'}</button>
+                        <button onClick={() => markGroup(g, 'show')} title={mode === 'span' ? 'Present for the whole block' : 'Showed'} style={{ padding: '4px 9px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: '1px solid #CDE3C6', background: g.status === 'show' ? '#EAF2E5' : '#fff', color: '#4E7C3F', cursor: 'pointer' }}>{mode === 'span' ? 'Present' : 'Show'}</button>
+                        <button onClick={() => markGroup(g, 'no_show')} title="No-show (reopens the slot)" style={{ padding: '4px 9px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: '1px solid #E7C9B8', background: g.status === 'no_show' ? '#FBE6E0' : '#fff', color: 'var(--red)', cursor: 'pointer' }}>{mode === 'span' ? 'Absent' : 'No-show'}</button>
                       </div>
                     )
                   ) : (
-                    <span style={{ fontSize: 11, fontWeight: 600, color: s.c, minWidth: 56, textAlign: 'right' }}>{s.t}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: s.c, minWidth: 56, textAlign: 'right' }}>{s.t}</span>
                   )}
                 </div>
               )

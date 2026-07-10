@@ -116,18 +116,18 @@ export default function CallerWorkspace({ me, onToast }) {
     if (!c) return <Pad><Empty label="Campaign not found." /></Pad>
     return (
       <Pad>
-        <div onClick={() => setOpenCampaign(null)} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 600, color: 'var(--orange)', cursor: 'pointer', marginBottom: 16 }}>
+        <div onClick={() => setOpenCampaign(null)} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 600, color: 'var(--orange)', cursor: 'pointer', marginBottom: 16 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
           My campaigns
         </div>
         <div className="card" style={{ padding: 22, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
           <div>
             <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>{c.name}</h2>
-            <div style={{ fontSize: 13, color: 'var(--muted)' }}>{c.audience}</div>
+            <div style={{ fontSize: 14, color: 'var(--muted)' }}>{c.audience}</div>
           </div>
           <div style={{ display: 'flex', gap: 22 }}>
-            <Stat v={c.assigned} label="assigned to me" color="#9C4A14" />
-            <Stat v={c.toCall} label="to call" color="#C2691F" />
+            <Stat v={c.assigned} label="assigned to me" color="var(--rust)" />
+            <Stat v={c.toCall} label="to call" color="var(--orange)" />
             <Stat v={c.logged} label="logged" color="#4E7C3F" />
           </div>
         </div>
@@ -137,7 +137,7 @@ export default function CallerWorkspace({ me, onToast }) {
 
         <div className="card" style={{ overflow: 'hidden' }}>
           {!isPhone && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 260px 90px', gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 260px 90px', gap: 12, padding: '13px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)', fontSize: 12, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>
               <span>Contact</span>
               <span>Status</span>
               <span>Reach out</span>
@@ -156,14 +156,14 @@ export default function CallerWorkspace({ me, onToast }) {
               return (
                 <div key={j.id} className="rowhover" style={{ padding: 14, borderBottom: '1px solid #F1E9DB' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11 }}>
-                    <div style={{ width: 38, height: 38, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{initials(name)}</div>
+                    <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(name)}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ fontSize: 14.5, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
+                        <div style={{ fontSize: 16, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
                         <span className="pill" style={pillFor(status)}>{status}</span>
                       </div>
-                      <div style={{ fontSize: 12.5, color: phone ? 'var(--muted)' : 'var(--muted-2)', marginTop: 2 }}>{phone || 'no phone on record'}</div>
-                      {last && <div style={{ fontSize: 11, color: 'var(--muted-2)', marginTop: 3 }}>{logs.length} log{logs.length > 1 ? 's' : ''} · {fmtWhen(last.logged_at)} · by {actorNames[last.logged_by] || '—'}</div>}
+                      <div style={{ fontSize: 12, color: phone ? 'var(--muted)' : 'var(--muted-2)', marginTop: 2 }}>{phone || 'no phone on record'}</div>
+                      {last && <div style={{ fontSize: 12, color: 'var(--muted-2)', marginTop: 3 }}>{logs.length} log{logs.length > 1 ? 's' : ''} · {fmtWhen(last.logged_at)} · by {actorNames[last.logged_by] || '—'}</div>}
                     </div>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10, alignItems: 'center' }}>
@@ -182,15 +182,15 @@ export default function CallerWorkspace({ me, onToast }) {
             return (
               <div key={j.id} className="rowhover" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 260px 90px', gap: 12, padding: '13px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>{initials(name)}</div>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(name)}</div>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
+                    <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
                     <div style={{ fontSize: 12, color: phone ? 'var(--ink-soft)' : 'var(--muted-2)' }}>{phone || 'no phone on record'}</div>
                   </div>
                 </div>
                 <div>
                   <span className="pill" style={pillFor(status)}>{status}</span>
-                  {last && <div style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 4 }}>{logs.length} log{logs.length > 1 ? 's' : ''} · {fmtWhen(last.logged_at)} · by {actorNames[last.logged_by] || '—'}</div>}
+                  {last && <div style={{ fontSize: 12, color: 'var(--muted-2)', marginTop: 4 }}>{logs.length} log{logs.length > 1 ? 's' : ''} · {fmtWhen(last.logged_at)} · by {actorNames[last.logged_by] || '—'}</div>}
                 </div>
                 <ReachButtons
                   phone={phone}
@@ -228,11 +228,11 @@ export default function CallerWorkspace({ me, onToast }) {
     <Pad>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap', marginBottom: 18 }}>
         <div>
-          <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)' }}>The campaigns you're calling for, and how many calls are assigned to you.</p>
+          <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)' }}>The campaigns you're calling for, and how many calls are assigned to you.</p>
         </div>
         <div style={{ display: 'flex', gap: 24 }}>
-          <Stat v={totals.assigned} label="calls assigned" color="#9C4A14" />
-          <Stat v={totals.toCall} label="still to call" color="#C2691F" />
+          <Stat v={totals.assigned} label="calls assigned" color="var(--rust)" />
+          <Stat v={totals.toCall} label="still to call" color="var(--orange)" />
         </div>
       </div>
 
@@ -240,11 +240,11 @@ export default function CallerWorkspace({ me, onToast }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 16 }}>
         {campaigns.map((c) => (
           <div key={c.id} className="rowhover card" style={{ padding: 21, cursor: 'pointer' }} onClick={() => setOpenCampaign(c.id)}>
-            <div style={{ fontSize: 15.5, fontWeight: 600, marginBottom: 3 }}>{c.name}</div>
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 3 }}>{c.name}</div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>{c.audience}</div>
-            <div style={{ display: 'flex', gap: 22, paddingTop: 14, borderTop: '1px solid #F2EBDD' }}>
-              <Stat v={c.assigned} label="assigned" color="#9C4A14" small />
-              <Stat v={c.toCall} label="to call" color="#C2691F" small />
+            <div style={{ display: 'flex', gap: 22, paddingTop: 14, borderTop: '1px solid var(--border-soft)' }}>
+              <Stat v={c.assigned} label="assigned" color="var(--rust)" small />
+              <Stat v={c.toCall} label="to call" color="var(--orange)" small />
               <Stat v={c.logged} label="logged" color="#4E7C3F" small />
             </div>
           </div>
@@ -258,7 +258,7 @@ function Stat({ v, label, color, small }) {
   return (
     <div>
       <div style={{ fontFamily: "'Newsreader',serif", fontSize: small ? 22 : 26, fontWeight: 600, lineHeight: 1, color: color || 'var(--ink)' }}>{v}</div>
-      <div style={{ fontSize: 11, color: 'var(--muted-2)', marginTop: 3 }}>{label}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted-2)', marginTop: 3 }}>{label}</div>
     </div>
   )
 }

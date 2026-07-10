@@ -162,14 +162,15 @@ export default function Advance({ me, onToast }) {
   return (
     <Pad>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
-        <p style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 560 }}>
+        <p className="mobile-hide" style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 560 }}>
           Bhava Spandana, Shoonya, Samyama &amp; Guru Puja — track interest through to registration.
         </p>
-        <button className="btn" disabled={resolving} onClick={openCampaign}>{Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}</button>
+        {/* On mobile this becomes the sticky bottom CTA below instead of wrapping to two lines here. */}
+        {!isPhone && <button className="btn" disabled={resolving} onClick={openCampaign}>{Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}</button>}
       </div>
       {err && <ErrorCard>Couldn't load advance programmes: {err}</ErrorCard>}
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+      <div className="scroll-tabs" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
         {PROGRAMS.map((p) => (<Chip key={p.key} on={prog === p.key} label={p.label} count={progTotals[p.key] || 0} onClick={() => setProg(p.key)} />))}
       </div>
 
@@ -263,6 +264,22 @@ export default function Advance({ me, onToast }) {
         />
       )}
       {profileId && <PersonProfile personId={profileId} me={me} onClose={() => setProfileId(null)} onToast={onToast} onChanged={loadPage} />}
+
+      {isPhone && (
+        <>
+          <div style={{ height: 68 }} />
+          <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, padding: '10px 14px calc(10px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '1px solid var(--border)', zIndex: 120 }}>
+            <button
+              className="btn btn-primary"
+              disabled={resolving}
+              onClick={openCampaign}
+              style={{ width: '100%', height: 48, justifyContent: 'center', fontSize: 15 }}
+            >
+              {Icon.campaigns(16)} {resolving ? 'Preparing…' : 'Create campaign'}
+            </button>
+          </div>
+        </>
+      )}
     </Pad>
   )
 }
