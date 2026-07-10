@@ -21,6 +21,7 @@ import PublicVolunteerPortal from './views/PublicVolunteerPortal'
 import VolunteerPortalClaim from './views/VolunteerPortalClaim'
 import UtilityDrawer from './components/UtilityDrawer'
 import CreateEventModal from './components/CreateEventModal'
+import PwaUpdatePrompt from './components/PwaUpdatePrompt'
 import { TAB_TITLES, TAB_LABELS, tabsForSections } from './lib/roles'
 import { useSession } from './lib/useSession'
 import { useBreakpoint } from './lib/useBreakpoint'
@@ -51,13 +52,13 @@ function readVolunteerPortalRoute() {
 export default function App() {
   // Checked BEFORE any hook so the public pages bypass the auth gate entirely.
   const acceptId = readHashId('accept')
-  if (acceptId) return <PublicAccept blockId={acceptId} />
+  if (acceptId) return <><PublicAccept blockId={acceptId} /><PwaUpdatePrompt /></>
   const interestId = readHashId('interest')
-  if (interestId) return <PublicInterest eventId={interestId} />
+  if (interestId) return <><PublicInterest eventId={interestId} /><PwaUpdatePrompt /></>
   const volunteerToken = readHashToken('volunteer')
-  if (volunteerToken) return <PublicVolunteerPortal token={volunteerToken} />
+  if (volunteerToken) return <><PublicVolunteerPortal token={volunteerToken} /><PwaUpdatePrompt /></>
   const vpRoute = readVolunteerPortalRoute()
-  if (vpRoute) return <VolunteerPortalClaim token={vpRoute.token} splitId={vpRoute.splitId} />
+  if (vpRoute) return <><VolunteerPortalClaim token={vpRoute.token} splitId={vpRoute.splitId} /><PwaUpdatePrompt /></>
 
   const { session, profile, sections } = useSession()
 
@@ -68,7 +69,7 @@ export default function App() {
       </div>
     )
   }
-  if (session === null) return <Login />
+  if (session === null) return <><Login /><PwaUpdatePrompt /></>
 
   return <Portal profile={profile} email={session.user.email} sections={sections} />
 }
@@ -251,6 +252,7 @@ function Portal({ profile, email, sections }) {
       )}
 
       {toast && <div className="toast">{toast}</div>}
+      <PwaUpdatePrompt />
     </div>
   )
 }
