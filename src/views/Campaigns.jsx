@@ -312,9 +312,18 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 22, padding: '13px 0', borderTop: '1px solid #F2EBDD', borderBottom: '1px solid #F2EBDD', marginBottom: 13 }}>
-                <Metric v={e.reach} label="reached" />
-                <Metric v={e.responsePct} label="responded" color="#4E7C3F" />
-                <Metric v={e.enrolled} label="enrolled" />
+                {typeOf(c) === 'messaging' ? (
+                  <>
+                    <Metric v={e.reach} label="reached" />
+                    <Metric v={e.msgSent + e.msgResponded} label="sent" color="#8A6D1B" />
+                  </>
+                ) : (
+                  <>
+                    <Metric v={e.reach} label="reached" />
+                    <Metric v={e.responsePct} label="responded" color="#4E7C3F" />
+                    <Metric v={e.enrolled} label="enrolled" />
+                  </>
+                )}
               </div>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 12.5, lineHeight: 1.45, color: '#B0601E', background: '#FBF1E4', padding: '10px 12px', borderRadius: 10 }}>
                 {Icon.campaigns(15)}
