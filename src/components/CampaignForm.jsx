@@ -19,7 +19,7 @@ const DIST = [
 ]
 const ckey = (c) => `${c.source}:${c.id}`
 
-export default function CampaignForm({ audience = 'volunteer', personIds = [], segmentLabel = '', eventId = null, onClose, onCreated, onToast }) {
+export default function CampaignForm({ audience = 'volunteer', personIds = [], segmentLabel = '', eventId = null, defaultType = 'full', onClose, onCreated, onToast }) {
   const [name, setName] = useState('')
   const [goal, setGoal] = useState(segmentLabel || '')
   const [templates, setTemplates] = useState([])
@@ -28,7 +28,7 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
   const [script, setScript] = useState('')
   const [wa, setWa] = useState('')
   const [sms, setSms] = useState('')
-  const [campaignType, setCampaignType] = useState('full') // 'full' | 'messaging'
+  const [campaignType, setCampaignType] = useState(defaultType) // 'full' | 'messaging'
   const [schedule, setSchedule] = useState('')
 
   // caller sources

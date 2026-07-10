@@ -1,38 +1,43 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { Pad, ErrorCard, Loading, Empty, Chip, PagerPill } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerPill } from '../components/View'
 import CampaignForm from '../components/CampaignForm'
 import SidePanel, { PanelHeader } from '../components/SidePanel'
-import EventInterestPanel from '../components/EventInterestPanel'
+import { EI_STATUS, EI_STATUS_MAP } from '../components/EventInterestPanel'
 import KebabMenu from '../components/KebabMenu'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import { multiFieldOr } from '../lib/searchFilter'
+import { useTableSelection } from '../lib/useTableSelection'
+import { addRecipientsToCampaign } from '../lib/campaignRecipients'
+import { eventDays, fmtDay } from '../lib/planning'
 
-const STATUS_PILL = {
-  new: pill('#E9F0EF', '#2F6E5E'),
-  contacted: pill('#FBEAD9', '#C28A2A'),
-  registered: pill('#EAF2E5', '#4E7C3F'),
-  active: pill('#EAF2E5', '#4E7C3F'),
-  done: pill('#F1EADD', '#8C7E6B'),
-  dropped: pill('#FBE6E0', '#B5532F'),
-}
-const SEG_PILL = {
-  volunteering: pill('#F6E8D8', '#C2691F'),
-  advanced: pill('#F3E3D2', '#9C4A14'),
-}
-// Derived segments (filter combinations over real fields), not hardcoded categories.
-const TABS = [
-  { key: 'all', label: 'All' },
-  { key: 'volunteering', label: 'Volunteering Interest' },
-  { key: 'advanced', label: 'Advanced Program Interest' },
-  { key: 'events', label: 'Event Interests' },
+// Interest types are DERIVED from existing data, not a new schema field:
+//  - 'volunteering'  = volunteer_profiles rows whose `interests` text[] does NOT
+//                       mention "ashram", PLUS event-linked event_interest rows
+//                       (an event signup is still volunteering — the Event column
+//                       tells the two apart).
+//  - 'ashram'         = volunteer_profiles rows whose `interests` mentions "ashram".
+//                       There's no dedicated Ashram-volunteering table/field today;
+//                       this is a text-based split over the same standing-interest
+//                       data, computed in the interest_inbox_list view.
+//  - 'ieo'             = ie_completion_volunteer rows (Inner Engineering Online).
+//  - 'advanced'        = advanced_interest rows (one row per person+programme).
+const TYPE_PILLS = [
+  { v: 'volunteering', label: 'Volunteering' },
+  { v: 'ashram', label: 'Ashram Volunteering' },
+  { v: 'ieo', label: 'IEO – Volunteering' },
+  { v: 'advanced', label: 'Advanced Program' },
 ]
-const CONVERT = { volunteer_profiles: 'active', ie_completion_volunteer: 'active', advanced_interest: 'registered' }
-const stepOf = (s) => (['new', null, undefined].includes(s) ? 0 : s === 'contacted' ? 1 : 2)
+// Status vocabulary is shared VISUALLY (same 5-pill look as the old Event Interests
+// tab, imported from EventInterestPanel) but NOT in the database: volunteer_profiles /
+// ie_completion_volunteer / advanced_interest keep their own native status values
+// (new/contacted/active/registered/done) — the view maps those onto this 5-bucket
+// display model (status_bucket) for a consistent badge + filter row. Only event_interest
+// rows can ever actually be "Declined" or "No Response".
 const normPhone = (p) => (p || '').replace(/\D/g, '').slice(-10)
-const normName = (n) => (n || '').toLowerCase().replace(/\s+/g, ' ').trim()
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : null)
+const stepOf = (s) => (['new', null, undefined].includes(s) ? 0 : s === 'contacted' ? 1 : 2)
 
 function ago(d) {
   if (!d) return '—'
@@ -43,236 +48,352 @@ function ago(d) {
   return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
 const waNum = (p) => (p || '').replace(/\D/g, '').replace(/^0+/, '').slice(-10)
-const VP_SEL = 'person_id, status, interests, interest_source, interest_date, preferred_timing, screening_notes, person:people!volunteer_profiles_person_id_fkey(id, full_name, phone)'
-const IE_SEL = 'id, full_name, phone, ie_date, program_name, status, source, notes'
-const mapVp = (v) => ({ key: 'vp:' + v.person_id, kind: 'volunteering', table: 'volunteer_profiles', id: v.person_id, idCol: 'person_id', personId: v.person_id, name: v.person?.full_name || 'Unknown', phone: v.person?.phone || '', status: v.status || 'new', ieo: false, tags: [], availability: v.preferred_timing || '—', activity: (v.interests || []).join(', ') || '—', activityList: v.interests || [], notes: v.screening_notes, src: v.interest_source, date: v.interest_date, origin: { label: v.interest_source || 'Volunteering form', date: v.interest_date, verb: 'submitted' } })
-const mapIe = (r) => ({ key: 'ie:' + r.id, kind: 'volunteering', table: 'ie_completion_volunteer', id: r.id, idCol: 'id', personId: null, name: r.full_name || 'Unknown', phone: r.phone || '', status: r.status || 'new', ieo: true, tags: ['IEO'], availability: '—', activity: r.program_name || 'Inner Engineering Online', activityList: [], notes: r.notes, src: r.source, date: r.ie_date, origin: { label: r.program_name || 'Inner Engineering Online', date: r.ie_date, verb: 'completed' } })
+
+function actionsForEvent(status, contactedAt) {
+  const s = status || 'interested'
+  if (s === 'interested') return [{ label: 'Mark Contacted', to: 'contacted' }, { label: 'Approve', to: 'approved', primary: true }]
+  if (s === 'contacted') return [{ label: 'Approve', to: 'approved', primary: true }, { label: 'Declined', to: 'declined' }, { label: 'No Response', to: 'no_response' }]
+  if (s === 'approved') return [{ label: 'Undo', to: contactedAt ? 'contacted' : 'interested' }]
+  if (s === 'declined' || s === 'no_response') return [{ label: 'Re-contact', to: 'contacted' }]
+  return []
+}
+
+// Volunteers and meditators are not separate tables — both are flags (is_volunteer /
+// is_meditator) on `people`. So this single phone-key lookup already matches ANY existing
+// person (volunteer OR meditator OR neither); only a phone with no match anywhere creates a
+// provisional record, stamped source='interest_import'. Dedupe is inherent: an existing
+// meditator's phone hits their people row, so no second record is made.
+async function ensurePersonId(name, phone) {
+  const ph = normPhone(phone)
+  if (ph) {
+    const { data } = await supabase.from('people').select('id').eq('phone', ph).maybeSingle()
+    if (data) return data.id
+  }
+  const { data, error } = await supabase.from('people').insert({ full_name: name, phone: ph || null, source: 'interest_import' }).select('id').single()
+  if (error) throw error
+  return data.id
+}
 
 export default function Interest({ onToast, eventScopeId = null, onScopeConsumed, recipientDraft = null, onRecipientsDone }) {
   const { isPhone } = useBreakpoint()
-  const [advItems, setAdvItems] = useState([]) // advanced grouped-by-person (small, bounded)
-  const [vpCount, setVpCount] = useState(0)
-  const [ieCount, setIeCount] = useState(0)
-  const [eiCount, setEiCount] = useState(0) // event_interest rows — drives the Event Interests tab badge
-  const [pageItems, setPageItems] = useState([]) // current page (server-side window)
+
+  // Server-side pagination over the unified interest_inbox_list view (same pattern as
+  // Volunteers' volunteer_list view): count + range, reset to page 0 on filter change.
+  const [rows, setRows] = useState(null)
+  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(25)
-  const [ready, setReady] = useState(false)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
-  const [tab, setTab] = useState('all')
-  const [ieoOnly, setIeoOnly] = useState(false)
-  const [selItem, setSelItem] = useState(null)
-  const [newTag, setNewTag] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  const [search, setSearch] = useState('')
+  const [debounced, setDebounced] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
+  // Defaults to the untriaged queue (old Interest Inbox only ever showed status='new'
+  // volunteering interest) — everyone else is one pill tap away via the status row,
+  // not hidden entirely like before.
+  const [statusFilter, setStatusFilter] = useState('interested')
+  const [eventFilter, setEventFilter] = useState('all')
+  const [evList, setEvList] = useState([])
+
+  const sel = useTableSelection()
+  const reqSeq = useRef(0)
+
+  const [selRow, setSelRow] = useState(null)
   const [busy, setBusy] = useState(false)
   const [uid, setUid] = useState(null)
   const [nurturers, setNurturers] = useState([])
   const [nurSel, setNurSel] = useState('')
+  const [newTag, setNewTag] = useState('')
+  const [note, setNote] = useState('')
   const [campaignPid, setCampaignPid] = useState(null)
+  const [showForm, setShowForm] = useState(false)
+  const [formIds, setFormIds] = useState([])
+  const [resolving, setResolving] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
 
-  // Arriving from an event hub → jump to the Event Interests tab, scoped to it.
-  useEffect(() => { if (eventScopeId) setTab('events') }, [eventScopeId])
-  // Arriving to add recipients to a campaign → the Event Interests tab is the source.
-  useEffect(() => { if (recipientDraft) setTab('events') }, [recipientDraft])
-
-  const loadStatic = useCallback(async () => {
-    try {
-      const [advRes, vpc, iec, eic] = await Promise.all([
-        supabase.from('advanced_interest').select('id, program, status, interest_date, source, notes, person:people!advanced_interest_person_id_fkey(id, full_name, phone)').order('interest_date', { ascending: false }).limit(2000),
-        supabase.from('volunteer_profiles').select('person_id', { count: 'exact', head: true }).eq('status', 'new'),
-        supabase.from('ie_completion_volunteer').select('id', { count: 'exact', head: true }),
-        supabase.from('event_interest').select('id', { count: 'exact', head: true }),
-      ])
-      if (advRes.error) throw advRes.error
-      const byPerson = {}
-      for (const a of advRes.data || []) {
-        const pid = a.person?.id || 'x:' + a.id
-        const g = (byPerson[pid] ||= { key: 'adv:' + pid, kind: 'advanced', personId: a.person?.id || null, name: a.person?.full_name || 'Unknown', phone: a.person?.phone || '', src: a.source, date: a.interest_date, programmes: [], origin: { label: a.source || 'Advance programme', date: a.interest_date, verb: 'submitted' } })
-        g.programmes.push({ id: a.id, program: a.program, status: a.status || 'new', date: a.interest_date, source: a.source, notes: a.notes })
-        if (new Date(a.interest_date) > new Date(g.date)) { g.date = a.interest_date; g.origin.date = a.interest_date }
-      }
-      setAdvItems(Object.values(byPerson))
-      setVpCount(vpc.count || 0)
-      setIeCount(iec.count || 0)
-      setEiCount(eic.count || 0)
-      setReady(true)
-    } catch (e) { setErr(e.message || String(e)) }
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setUid(data.user?.id || null))
+    supabase.from('nurturers').select('id, full_name').order('full_name').then(({ data }) => setNurturers(data || []))
   }, [])
 
   useEffect(() => {
-    loadStatic()
-    supabase.auth.getUser().then(({ data }) => setUid(data.user?.id || null))
-    supabase.from('nurturers').select('id, full_name').order('full_name').then(({ data }) => setNurturers(data || []))
-  }, [loadStatic])
+    const t = setTimeout(() => setDebounced(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
 
-  useEffect(() => { setPage(0) }, [tab, ieoOnly, pageSize])
+  useEffect(() => { setPage(0); sel.clear() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [debounced, typeFilter, statusFilter, eventFilter])
+  useEffect(() => { setPage(0) }, [pageSize])
 
-  // Ordered sources for the active tab; each is server-side range-fetched.
-  const sources = useMemo(() => {
-    const vpSrc = { count: vpCount, fetch: async (off, lim) => { const { data } = await supabase.from('volunteer_profiles').select(VP_SEL).eq('status', 'new').order('interest_date', { ascending: false }).range(off, off + lim - 1); return (data || []).map(mapVp) } }
-    const ieSrc = { count: ieCount, fetch: async (off, lim) => { const { data } = await supabase.from('ie_completion_volunteer').select(IE_SEL).order('ie_date', { ascending: false, nullsFirst: false }).range(off, off + lim - 1); return (data || []).map(mapIe) } }
-    const advSrc = { count: advItems.length, fetch: async (off, lim) => advItems.slice(off, off + lim) }
-    if (tab === 'advanced') return [advSrc]
-    if (ieoOnly) return [ieSrc]
-    if (tab === 'volunteering') return [vpSrc, ieSrc]
-    return [vpSrc, ieSrc, advSrc]
-  }, [tab, ieoOnly, vpCount, ieCount, advItems])
+  // Arriving from an event hub's "Volunteer Interests" jump → scope to that event.
+  useEffect(() => { if (eventScopeId) { setEventFilter(eventScopeId); onScopeConsumed?.() } }, [eventScopeId, onScopeConsumed])
 
-  const total = sources.reduce((s, x) => s + x.count, 0)
-  const counts = { all: vpCount + ieCount + advItems.length, volunteering: vpCount + ieCount, advanced: advItems.length, events: eiCount }
-  const pageCount = Math.max(1, Math.ceil(total / pageSize))
-
+  // Distinct events for the event pill row — spans all pages, loaded once.
   useEffect(() => {
-    if (!ready) return
-    let alive = true
-    ;(async () => {
-      setLoading(true)
-      const out = []
-      let base = 0, remaining = pageSize, cursor = page * pageSize
-      for (const s of sources) {
-        const end = base + s.count
-        if (remaining > 0 && cursor >= base && cursor < end) {
-          const take = Math.min(remaining, end - cursor)
-          const items = await s.fetch(cursor - base, take)
-          out.push(...items); cursor += take; remaining -= take
-        }
-        base = end
-      }
-      if (alive) { setPageItems(out); setLoading(false) }
-    })()
-    return () => { alive = false }
-  }, [ready, sources, page, pageSize])
+    supabase.from('event_interest').select('activity:activities!event_interest_activity_id_fkey(id, name, activity_date, start_date, end_date)').limit(5000)
+      .then(({ data }) => {
+        const m = new Map()
+        for (const r of data || []) if (r.activity) m.set(r.activity.id, r.activity)
+        setEvList([...m.values()])
+      })
+  }, [reloadKey])
 
-  const shown = pageItems
-  const sel = selItem
+  const applyFilters = useCallback((q) => {
+    if (typeFilter !== 'all') q = q.eq('interest_type', typeFilter)
+    if (statusFilter !== 'all') q = q.eq('status_bucket', statusFilter)
+    if (eventFilter !== 'all') q = q.eq('event_id', eventFilter)
+    const searchOr = multiFieldOr(debounced, ['full_name', 'phone'])
+    if (searchOr) q = q.or(searchOr)
+    return q
+  }, [typeFilter, statusFilter, eventFilter, debounced])
 
-  const patchVol = (key, fields) => {
-    setPageItems((prev) => prev.map((x) => (x.key === key ? { ...x, ...fields } : x)))
-    setSelItem((s) => (s && s.key === key ? { ...s, ...fields } : s))
+  const fetchAllKeys = useCallback(async () => {
+    const keys = []
+    let from = 0
+    const CHUNK = 1000
+    for (let g = 0; g < 50; g++) {
+      let q = applyFilters(supabase.from('interest_inbox_list').select('key'))
+      q = q.order('key', { ascending: true }).range(from, from + CHUNK - 1)
+      const { data, error } = await q
+      if (error) throw error
+      const batch = (data || []).map((r) => r.key)
+      keys.push(...batch)
+      if (batch.length < CHUNK) break
+      from += CHUNK
+    }
+    return keys
+  }, [applyFilters])
+
+  const loadPage = useCallback(async () => {
+    setLoading(true); setErr(null)
+    const seq = ++reqSeq.current
+    try {
+      let q = applyFilters(supabase.from('interest_inbox_list').select('*', { count: 'exact' }))
+      q = q.order('sort_date', { ascending: false }).order('key', { ascending: true }).range(page * pageSize, page * pageSize + pageSize - 1)
+      const { data, count, error } = await q
+      if (error) throw error
+      if (seq !== reqSeq.current) return
+      setRows(data || [])
+      setTotal(count ?? 0)
+    } catch (e) {
+      if (seq !== reqSeq.current) return
+      setErr(e.message || String(e))
+      setRows([])
+    } finally {
+      if (seq === reqSeq.current) setLoading(false)
+    }
+  }, [applyFilters, page, pageSize])
+
+  useEffect(() => { loadPage() }, [loadPage, reloadKey])
+
+  const reload = () => setReloadKey((k) => k + 1)
+
+  const patchRow = (key, fields) => {
+    setRows((prev) => (prev || []).map((r) => (r.key === key ? { ...r, ...fields } : r)))
+    setSelRow((s) => (s && s.key === key ? { ...s, ...fields } : s))
   }
-  const patchAdvProg = (advKey, progId, fields) => {
-    const upd = (g) => (g.key === advKey ? { ...g, programmes: g.programmes.map((p) => (p.id === progId ? { ...p, ...fields } : p)) } : g)
-    setAdvItems((prev) => prev.map(upd))
-    setPageItems((prev) => prev.map(upd))
-    setSelItem((s) => (s && s.key === advKey ? upd(s) : s))
+
+  // Resolve a set of selected row keys down to canonical people ids — phone-keyed,
+  // deduped. Rows that already carry a person_id (volunteer_profiles / advanced_interest
+  // / event_interest) resolve for free; ie_completion_volunteer rows have no person_id
+  // (the table doesn't store one), so those resolve via ensurePersonId(name, phone) —
+  // matching an existing person by phone, or provisioning one, same as Add/Import does.
+  async function resolveKeysToPersonIds(keys) {
+    const found = []
+    for (let i = 0; i < keys.length; i += 500) {
+      const { data, error } = await supabase.from('interest_inbox_list').select('key, person_id, phone, full_name').in('key', keys.slice(i, i + 500))
+      if (error) throw error
+      found.push(...(data || []))
+    }
+    const ids = new Set()
+    for (const r of found) {
+      if (r.person_id) { ids.add(r.person_id); continue }
+      ids.add(await ensurePersonId(r.full_name, r.phone))
+    }
+    return [...ids]
   }
+
+  async function openCampaign() {
+    if (sel.count(total) === 0) { setFormIds([]); setShowForm(true); return }
+    setResolving(true)
+    try {
+      const keys = await sel.resolveIds(fetchAllKeys)
+      setFormIds(await resolveKeysToPersonIds(keys))
+      setShowForm(true)
+    } catch (e) { onToast('Could not resolve selection: ' + (e.message || e)) } finally { setResolving(false) }
+  }
+
+  async function addSelectedToCampaign() {
+    if (!recipientDraft || sel.count(total) === 0) return
+    setResolving(true)
+    try {
+      const keys = await sel.resolveIds(fetchAllKeys)
+      const ids = await resolveKeysToPersonIds(keys)
+      const { added, skipped } = await addRecipientsToCampaign(recipientDraft.campaignId, ids)
+      onToast(`Added ${added} to “${recipientDraft.campaignName}”${skipped ? ` · ${skipped} already in it` : ''}.`)
+      sel.clear()
+      onRecipientsDone?.()
+    } catch (e) { onToast('Could not add: ' + (e.message || e)) } finally { setResolving(false) }
+  }
+
+  async function ensurePersonFor(row) {
+    if (row.person_id) return row.person_id
+    const pid = await ensurePersonId(row.full_name, row.phone)
+    patchRow(row.key, { person_id: pid })
+    return pid
+  }
+
   async function addTag() {
     const tag = newTag.trim()
-    if (!tag || !sel) return
+    if (!tag || !selRow) return
     setBusy(true)
     try {
-      const pid = await ensurePerson(sel)
+      const pid = await ensurePersonFor(selRow)
       const { error } = await supabase.from('manual_tags').insert({ person_id: pid, tag })
       if (error) throw error
-      setNewTag(''); onToast(`Tag "${tag}" added to ${sel.name}.`)
+      setNewTag(''); onToast(`Tag "${tag}" added to ${selRow.full_name}.`)
     } catch (e) { onToast((e.message || '').includes('duplicate') ? 'Tag already exists.' : 'Could not add tag: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
-  async function ensurePerson(it) {
-    if (it.personId) return it.personId
-    const phone = normPhone(it.phone)
-    if (phone) {
-      const { data } = await supabase.from('people').select('id').eq('phone', phone).maybeSingle()
-      if (data) { patchVol(it.key, { personId: data.id }); return data.id }
-    }
-    const { data, error } = await supabase.from('people').insert({ full_name: it.name, phone: phone || null }).select('id').single()
-    if (error) throw error
-    patchVol(it.key, { personId: data.id })
-    return data.id
-  }
-
-  async function setVolStep(idx) {
-    const status = idx === 0 ? 'new' : idx === 1 ? 'contacted' : CONVERT[sel.table]
+  // Standing volunteering interest (volunteer_profiles) and IEO interest
+  // (ie_completion_volunteer) both converge on the SAME 3-step pipeline and terminal
+  // value ('active') — one function covers both sources.
+  async function setVolStep(row, idx) {
+    const status = idx === 0 ? 'new' : idx === 1 ? 'contacted' : 'active'
     setBusy(true)
     try {
-      const { error } = await supabase.from(sel.table).update({ status }).eq(sel.idCol, sel.id)
+      const { error } = await supabase.from(row.source_table).update({ status }).eq(row.id_col, row.source_id)
       if (error) throw error
-      patchVol(sel.key, { status })
-      onToast(`${sel.name} → ${['New', 'Reached out', 'Converted'][idx]}.`)
+      patchRow(row.key, { status_raw: status, status_bucket: status === 'active' ? 'approved' : status })
+      onToast(`${row.full_name} → ${['New', 'Reached out', 'Converted'][idx]}.`)
     } catch (e) { onToast('Could not update: ' + (e.message || e)) } finally { setBusy(false) }
   }
-  async function setAdvStep(prog, idx) {
+  async function setAdvStep(row, idx) {
     const status = idx === 0 ? 'new' : idx === 1 ? 'contacted' : 'registered'
     setBusy(true)
     try {
-      const { error } = await supabase.from('advanced_interest').update({ status }).eq('id', prog.id)
+      const { error } = await supabase.from('advanced_interest').update({ status }).eq('id', row.source_id)
       if (error) throw error
-      patchAdvProg(sel.key, prog.id, { status })
-      onToast(`${sel.name} · ${prog.program.toUpperCase()} → ${['New', 'Reached out', 'Registered'][idx]}.`)
+      patchRow(row.key, { status_raw: status, status_bucket: status === 'registered' ? 'approved' : status })
+      onToast(`${row.full_name} · ${(row.program || '').toUpperCase()} → ${['New', 'Reached out', 'Registered'][idx]}.`)
     } catch (e) { onToast('Could not update: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+  async function changeEventStatus(row, to) {
+    const patch = { status: to }
+    if (to === 'contacted') { patch.contacted_at = new Date().toISOString(); patch.contacted_by = uid || null; patch.approved_at = null; patch.approved_by = null }
+    else if (to === 'approved') { patch.approved_at = new Date().toISOString(); patch.approved_by = uid || null }
+    else if (to === 'interested') { patch.contacted_at = null; patch.contacted_by = null; patch.approved_at = null; patch.approved_by = null }
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('event_interest').update(patch).eq('id', row.source_id)
+      if (error) throw error
+      patchRow(row.key, { status_raw: to, status_bucket: to, contacted_at: 'contacted_at' in patch ? patch.contacted_at : row.contacted_at, approved_at: 'approved_at' in patch ? patch.approved_at : row.approved_at })
+      onToast(`${row.full_name} → ${EI_STATUS_MAP[to]?.label || to}.`)
+    } catch (e) { onToast('Could not update status: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+  async function saveEventAvailability(row, dates) {
+    try {
+      const { error } = await supabase.from('event_interest').update({ availability_dates: dates }).eq('id', row.source_id)
+      if (error) throw error
+      patchRow(row.key, { availability_dates: dates })
+    } catch (e) { onToast('Could not save availability: ' + (e.message || e)) }
+  }
+  async function saveNote() {
+    if (!selRow) return
+    const col = selRow.source === 'event' ? 'note' : selRow.source === 'volunteer_profile' ? 'screening_notes' : 'notes'
+    setBusy(true)
+    try {
+      const { error } = await supabase.from(selRow.source_table).update({ [col]: note }).eq(selRow.id_col, selRow.source_id)
+      if (error) throw error
+      patchRow(selRow.key, { note })
+      onToast('Comment saved.')
+    } catch (e) { onToast('Could not save comment: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
   async function logContact() {
     setBusy(true)
     try {
-      const pid = await ensurePerson(sel)
+      const pid = await ensurePersonFor(selRow)
       let jid
       const { data: ex } = await supabase.from('journeys').select('id').eq('person_id', pid).order('created_at', { ascending: false }).limit(1)
       if (ex && ex.length) jid = ex[0].id
       else { const { data: nj, error } = await supabase.from('journeys').insert({ person_id: pid, type: 'volunteer_nurture', status: 'active' }).select('id').single(); if (error) throw error; jid = nj.id }
       const { error } = await supabase.from('call_logs').insert({ journey_id: jid, person_id: pid, reachability: 'answered', remarks: 'Logged from Interest inbox', logged_by: uid })
       if (error) throw error
-      onToast(`Contact with ${sel.name} logged.`)
+      onToast(`Contact with ${selRow.full_name} logged.`)
     } catch (e) { onToast('Could not log: ' + (e.message || e)) } finally { setBusy(false) }
   }
   async function convertVolunteer() {
     setBusy(true)
     try {
-      const pid = await ensurePerson(sel)
+      const pid = await ensurePersonFor(selRow)
       let e = (await supabase.from('people').update({ is_volunteer: true }).eq('id', pid)).error; if (e) throw e
-      // Carry preferred activity over as skills (wireframe), without clobbering existing.
-      const payload = { person_id: pid, status: 'active', interest_source: sel.ieo ? 'ieo' : 'interest_inbox' }
-      if (sel.activityList && sel.activityList.length) payload.interests = sel.activityList
+      const payload = { person_id: pid, status: 'active', interest_source: selRow.source === 'ieo' ? 'ieo' : 'interest_inbox' }
+      if (selRow.interests && selRow.interests.length) payload.interests = selRow.interests
       e = (await supabase.from('volunteer_profiles').upsert(payload, { onConflict: 'person_id' })).error; if (e) throw e
-      if (sel.table !== 'volunteer_profiles') await supabase.from(sel.table).update({ status: 'active' }).eq(sel.idCol, sel.id)
-      patchVol(sel.key, { status: 'active' })
-      onToast(`${sel.name} converted to volunteer.`)
+      if (selRow.source !== 'volunteer_profile') await supabase.from(selRow.source_table).update({ status: 'active' }).eq(selRow.id_col, selRow.source_id)
+      patchRow(selRow.key, { status_raw: 'active', status_bucket: 'approved' })
+      onToast(`${selRow.full_name} converted to volunteer.`)
     } catch (e) { onToast('Could not convert: ' + (e.message || e)) } finally { setBusy(false) }
   }
   async function markMeditator() {
     setBusy(true)
-    try { const pid = await ensurePerson(sel); const { error } = await supabase.from('people').update({ is_meditator: true }).eq('id', pid); if (error) throw error; onToast(`${sel.name} marked as a meditator.`) }
+    try { const pid = await ensurePersonFor(selRow); const { error } = await supabase.from('people').update({ is_meditator: true }).eq('id', pid); if (error) throw error; onToast(`${selRow.full_name} marked as a meditator.`) }
     catch (e) { onToast('Could not mark: ' + (e.message || e)) } finally { setBusy(false) }
   }
   async function assignNurturer() {
     if (!nurSel) return onToast('Pick a nurturer first.')
     setBusy(true)
-    try { const pid = await ensurePerson(sel); const { error } = await supabase.from('nurturer_assignments').insert({ meditator_id: pid, nurturer_id: nurSel, assigned_by: uid }); if (error) throw error; onToast(`${sel.name} assigned to ${nurturers.find((n) => n.id === nurSel)?.full_name}.`); setNurSel('') }
+    try { const pid = await ensurePersonFor(selRow); const { error } = await supabase.from('nurturer_assignments').insert({ meditator_id: pid, nurturer_id: nurSel, assigned_by: uid }); if (error) throw error; onToast(`${selRow.full_name} assigned to ${nurturers.find((n) => n.id === nurSel)?.full_name}.`); setNurSel('') }
     catch (e) { onToast('Could not assign: ' + (e.message || e)) } finally { setBusy(false) }
   }
   async function addToCallList() {
     setBusy(true)
-    try { const pid = await ensurePerson(sel); setCampaignPid(pid) } catch (e) { onToast('Could not prepare: ' + (e.message || e)) } finally { setBusy(false) }
+    try { const pid = await ensurePersonFor(selRow); setCampaignPid(pid) } catch (e) { onToast('Could not prepare: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
   function exportCsv() {
-    const header = ['Name', 'Phone', 'Segment', 'Detail', 'Status']
-    const rows = shown.map((it) => it.kind === 'advanced'
-      ? [it.name, it.phone, 'Advanced Program', it.programmes.map((p) => p.program).join('|'), it.programmes.map((p) => p.status).join('|')]
-      : [it.name, it.phone, 'Volunteering' + (it.ieo ? ' (IEO)' : ''), it.activity, it.status])
-    const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `interest-${tab}.csv`; a.click(); URL.revokeObjectURL(a.href)
-    onToast(`Exported ${shown.length} rows.`)
+    const header = ['Name', 'Phone', 'Interest type', 'Status', 'Event']
+    const csvRows = (rows || []).map((r) => [r.full_name, r.phone, TYPE_PILLS.find((t) => t.v === r.interest_type)?.label || r.interest_type, EI_STATUS_MAP[r.status_bucket]?.label || r.status_bucket, r.event_name || '—'])
+    const csv = [header, ...csvRows].map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'interest-inbox.csv'; a.click(); URL.revokeObjectURL(a.href)
+    onToast(`Exported ${(rows || []).length} rows.`)
   }
 
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+  const selCount = sel.count(total)
+  const isFullySelected = sel.headerState(total) === 'all'
+  const pageIds = rows ? rows.map((r) => r.key) : []
+  const pageSelectedCount = pageIds.filter((id) => sel.isSelected(id)).length
+  const pageHeaderState = pageIds.length === 0 ? 'none' : pageSelectedCount === 0 ? 'none' : pageSelectedCount === pageIds.length ? 'all' : 'partial'
+  const togglePage = () => (pageSelectedCount === pageIds.length && pageIds.length > 0 ? sel.deselectIds(pageIds) : sel.selectIds(pageIds))
+
+  const activeEvent = evList.find((e) => e.id === eventFilter)
+  const segmentLabel = [
+    typeFilter !== 'all' ? TYPE_PILLS.find((t) => t.v === typeFilter)?.label : null,
+    statusFilter !== 'all' ? EI_STATUS_MAP[statusFilter]?.label : null,
+    activeEvent ? activeEvent.name : null,
+  ].filter(Boolean).join(' · ')
+
   const btn = { padding: '9px 13px', fontSize: 12 }
+  const filterChip = (on) => ({ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 20, cursor: 'pointer', border: on ? 'none' : '1px solid var(--border)', background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', whiteSpace: 'nowrap', flexShrink: 0 })
+  const divider = { width: 1, alignSelf: 'stretch', background: 'var(--border)', flexShrink: 0, margin: '2px 2px' }
+  const grid = '34px 2.2fr 1fr 1.4fr 1.2fr'
 
   return (
     <Pad>
       {recipientDraft && (
         <div className="card" style={{ padding: '12px 16px', marginBottom: 14, background: '#FBF1E4', borderColor: '#E7C9B8', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 14, color: 'var(--rust)', fontWeight: 600 }}>Adding volunteer interests to “{recipientDraft.campaignName}” — select approved people, then Add to campaign.</div>
+          <div style={{ fontSize: 14, color: 'var(--rust)', fontWeight: 600 }}>Adding to “{recipientDraft.campaignName}” — select people, then Add to campaign.</div>
           <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '5px 10px' }} onClick={() => onRecipientsDone && onRecipientsDone()}>Cancel</button>
         </div>
       )}
+
       <div className="interest-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
-        <div className="scroll-tabs" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', minWidth: 0 }}>
-          {TABS.map((t) => (<Chip key={t.key} on={tab === t.key} label={t.label} count={counts[t.key] || 0} onClick={() => setTab(t.key)} />))}
-          {tab !== 'advanced' && tab !== 'events' && (
-            <button onClick={() => setIeoOnly((v) => !v)} className="btn" style={{ padding: '6px 11px', fontSize: 12, borderRadius: 20, background: ieoOnly ? '#2F6E5E' : '#fff', color: ieoOnly ? '#fff' : 'var(--ink-soft)', border: ieoOnly ? 'none' : '1px solid var(--border)' }}>IEO only</button>
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: isPhone ? '11px 12px' : '8px 12px', minWidth: 190, flexBasis: isPhone ? '100%' : undefined }}>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or phone…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
         {isPhone ? (
           <KebabMenu items={[
@@ -290,117 +411,196 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       </div>
       {err && <ErrorCard>Couldn't load interest inbox: {err}</ErrorCard>}
 
-      {tab === 'events' ? <EventInterestPanel uid={uid} scopeEventId={eventScopeId} onScopeConsumed={onScopeConsumed} onToast={onToast} recipientDraft={recipientDraft} onRecipientsDone={onRecipientsDone} /> : (
-      <>
       <div style={{ marginBottom: 10, fontSize: 14, color: 'var(--muted)' }}>
-        {loading ? 'Loading…' : `${total} ${total === 1 ? 'person' : 'people'}`}
+        {loading ? 'Loading…' : `${total} volunteer interest${total === 1 ? '' : 's'}`}
       </div>
+
+      {/* One combined, never-wrapping scroll row: interest type · status · event. */}
+      <div className="scroll-tabs" style={{ display: 'flex', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', marginBottom: 12, alignItems: 'center' }}>
+        <button className="tap44" onClick={() => setTypeFilter('all')} style={filterChip(typeFilter === 'all')}>All</button>
+        {TYPE_PILLS.map((t) => (
+          <button key={t.v} className="tap44" onClick={() => setTypeFilter(t.v)} style={filterChip(typeFilter === t.v)}>{t.label}</button>
+        ))}
+        <div style={divider} />
+        {EI_STATUS.map((s) => (
+          <button key={s.v} className="tap44" onClick={() => setStatusFilter((cur) => (cur === s.v ? 'all' : s.v))} style={filterChip(statusFilter === s.v)}>{s.label}</button>
+        ))}
+        {evList.length > 0 && (
+          <>
+            <div style={divider} />
+            <button className="tap44" onClick={() => setEventFilter('all')} style={filterChip(eventFilter === 'all')}>All Events</button>
+            {evList.map((e) => (
+              <button key={e.id} className="tap44" onClick={() => setEventFilter((cur) => (cur === e.id ? 'all' : e.id))} style={filterChip(eventFilter === e.id)}>{e.name}</button>
+            ))}
+          </>
+        )}
+      </div>
+
       <div className="card" style={{ overflow: 'hidden' }}>
-          {loading && <Loading label="Loading interest inbox…" />}
-          {!loading && shown.length === 0 && <Empty label="Nothing to triage here." />}
-          {shown.map((it, i) => (
-            <div key={it.key} className="rowhover" onClick={() => setSelItem(it)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', borderBottom: '1px solid #F1E9DB', cursor: 'pointer', background: it.key === selItem?.key ? '#FBF1E6' : 'transparent' }}>
-              <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(it.name)}</div>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.name}</div>
-                <div style={{ fontSize: 12, color: it.phone ? 'var(--muted)' : 'var(--red)' }}>{it.phone || 'No phone on record'}</div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 3, flexWrap: 'wrap' }}>
-                  <span className="pill" style={SEG_PILL[it.kind]}>{it.kind === 'advanced' ? 'Advanced' : 'Volunteering'}</span>
-                  {it.ieo && <span className="pill" style={pill('#E9F0EF', 'var(--green)')}>IEO</span>}
-                  {it.kind === 'advanced'
-                    ? it.programmes.map((p) => <span key={p.id} className="pill" style={pill('#F3E3D2', 'var(--rust)')}>{p.program.toUpperCase()}</span>)
-                    : <span style={{ fontSize: 12, color: 'var(--muted)' }}>{ago(it.date)}</span>}
-                </div>
-              </div>
-              {it.kind === 'volunteering' && <span className="pill" style={STATUS_PILL[it.status] || STATUS_PILL.new}>{it.status}</span>}
+        {isPhone ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
+            <Checkbox state={pageHeaderState} onClick={(e) => { e.stopPropagation(); togglePage() }} />
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{selCount > 0 ? `${selCount} selected` : 'Select this page'}</span>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--border)', fontSize: 12, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, background: 'var(--panel)', alignItems: 'center' }}>
+            <Checkbox state={pageHeaderState} onClick={(e) => { e.stopPropagation(); togglePage() }} />
+            <span>Volunteer</span>
+            <span>Status</span>
+            <span>Interest type</span>
+            <span>Event</span>
+          </div>
+        )}
+
+        {loading && <Loading label="Loading interest inbox…" />}
+        {!loading && rows.length === 0 && <Empty label="Nothing to triage here." />}
+
+        {!loading && isPhone && rows.map((r, i) => (
+          <div key={r.key} className="rowhover" onClick={() => { setSelRow(r); setNote(r.note || '') }}
+            style={{ display: 'flex', gap: 12, padding: 14, borderBottom: '1px solid #F1E9DB', alignItems: 'flex-start', cursor: 'pointer', background: selRow?.key === r.key ? '#FBF1E6' : undefined }}>
+            <div style={{ paddingTop: 2, minHeight: 44, display: 'flex', alignItems: 'center' }}>
+              <Checkbox state={sel.isSelected(r.key)} onClick={(e) => { e.stopPropagation(); sel.toggle(r.key) }} />
             </div>
-          ))}
-        </div>
-      {!loading && total > 0 && <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} />}
-      </>
+            <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(r.full_name)}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ fontSize: 16, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.full_name}</div>
+                <span className="pill" style={EI_STATUS_MAP[r.status_bucket]?.pill}>{EI_STATUS_MAP[r.status_bucket]?.label || r.status_bucket}</span>
+              </div>
+              <div style={{ fontSize: 12, color: r.phone ? 'var(--muted)' : 'var(--red)', marginTop: 2 }}>{r.phone || 'No phone on record'}</div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
+                <span className="pill" style={pill('#F6E8D8', '#C2691F')}>{TYPE_PILLS.find((t) => t.v === r.interest_type)?.label || r.interest_type}</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{r.event_name || '—'}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {!loading && !isPhone && rows.map((r, i) => (
+          <div key={r.key} className="rowhover" onClick={() => { setSelRow(r); setNote(r.note || '') }}
+            style={{ display: 'grid', gridTemplateColumns: grid, gap: 14, padding: '13px 20px', borderBottom: '1px solid #F1E9DB', alignItems: 'center', cursor: 'pointer', background: selRow?.key === r.key ? '#FBF1E6' : undefined }}>
+            <Checkbox state={sel.isSelected(r.key)} onClick={(e) => { e.stopPropagation(); sel.toggle(r.key) }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+              <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(r.full_name)}</div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.full_name}</div>
+                <div style={{ fontSize: 12, color: r.phone ? 'var(--muted)' : 'var(--red)', marginTop: 1 }}>{r.phone || 'No phone on record'}</div>
+              </div>
+            </div>
+            <div><span className="pill" style={EI_STATUS_MAP[r.status_bucket]?.pill}>{EI_STATUS_MAP[r.status_bucket]?.label || r.status_bucket}</span></div>
+            <div><span className="pill" style={pill('#F6E8D8', '#C2691F')}>{TYPE_PILLS.find((t) => t.v === r.interest_type)?.label || r.interest_type}</span></div>
+            <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.event_name || '—'}</div>
+          </div>
+        ))}
+      </div>
+
+      {!loading && total > 0 && (
+        <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize}
+          selection={{
+            count: selCount, total, isFullySelected, onSelectAll: sel.selectAllMatching, onClear: sel.clear,
+            actions: [{
+              label: recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : (resolving ? 'Preparing…' : 'Create Campaign'),
+              onClick: recipientDraft ? addSelectedToCampaign : openCampaign, disabled: resolving, primary: true,
+            }],
+          }} />
       )}
 
-      {sel && (
-        <SidePanel onClose={() => setSelItem(null)}>
-          <PanelHeader onClose={() => setSelItem(null)}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-                  <div style={{ width: 46, height: 46, borderRadius: '50%', background: avatarFor(2), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 600 }}>{initials(sel.name)}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 3px' }}>{sel.name}</h2>
-                    <div style={{ fontSize: 14, color: 'var(--muted)' }}>{sel.kind === 'advanced' ? `${sel.programmes.length} programme(s)` : sel.activity} · via {sel.src || 'unknown'}</div>
-                  </div>
-                  <span className="pill" style={SEG_PILL[sel.kind]}>{sel.kind === 'advanced' ? 'Advanced' : 'Volunteering'}</span>
-                  {sel.ieo && <span className="pill" style={pill('#E9F0EF', 'var(--green)')}>IEO</span>}
-                </div>
+      {selRow && (
+        <SidePanel onClose={() => setSelRow(null)}>
+          <PanelHeader onClose={() => setSelRow(null)}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              <div style={{ width: 46, height: 46, borderRadius: '50%', background: avatarFor(2), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 600 }}>{initials(selRow.full_name)}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 3px' }}>{selRow.full_name}</h2>
+                <div style={{ fontSize: 14, color: 'var(--muted)' }}>{selRow.event_name || (selRow.program ? selRow.program.toUpperCase() : TYPE_PILLS.find((t) => t.v === selRow.interest_type)?.label)} · via {selRow.src || 'unknown'}</div>
+              </div>
+              <span className="pill" style={pill('#F6E8D8', '#C2691F')}>{TYPE_PILLS.find((t) => t.v === selRow.interest_type)?.label || selRow.interest_type}</span>
+              <span className="pill" style={EI_STATUS_MAP[selRow.status_bucket]?.pill}>{EI_STATUS_MAP[selRow.status_bucket]?.label || selRow.status_bucket}</span>
+            </div>
           </PanelHeader>
           <div style={{ padding: '20px 26px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {sel.origin && (
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 14, background: '#FBF6EC', border: '1px dashed var(--border)', borderRadius: 9, padding: '10px 13px' }}>
-                    <div style={{ width: 26, height: 26, borderRadius: 6, background: '#F3E3D2', color: 'var(--rust)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 21c4-2.5 7-6 7-10a7 7 0 0 0-14 0c0 4 3 7.5 7 10Z" /></svg>
-                    </div>
-                    <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>
-                      <strong style={{ color: 'var(--ink)' }}>From:</strong> {sel.origin.label}
-                      {fmtDate(sel.origin.date) ? ` · ${sel.origin.verb} ${fmtDate(sel.origin.date)}` : ''}
-                    </div>
-                  </div>
-                )}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', background: '#FBF6EC', border: '1px dashed var(--border)', borderRadius: 9, padding: '10px 13px' }}>
+              <div style={{ width: 26, height: 26, borderRadius: 6, background: '#F3E3D2', color: 'var(--rust)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 21c4-2.5 7-6 7-10a7 7 0 0 0-14 0c0 4 3 7.5 7 10Z" /></svg>
+              </div>
+              <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>
+                <strong style={{ color: 'var(--ink)' }}>From:</strong> {selRow.event_name || selRow.program?.toUpperCase() || TYPE_PILLS.find((t) => t.v === selRow.interest_type)?.label}
+                {fmtDate(selRow.sort_date) ? ` · added ${fmtDate(selRow.sort_date)}` : ''}
+              </div>
+            </div>
 
-              {sel.kind === 'volunteering' ? (
-                <>
-                  <div className="card" style={{ padding: 20 }}>
-                    <SecH>Form responses</SecH>
-                    <div style={{ display: 'grid', gridTemplateColumns: isPhone ? '1fr' : '1fr 1fr', gap: '14px 22px' }}>
-                      <F label="Phone" value={sel.phone || 'No phone on record'} />
-                      <F label="Availability" value={sel.availability} />
-                      <F label="Preferred activity" value={sel.activity} />
-                      <F label="Origin" value={sel.ieo ? 'IEO (Inner Engineering Online)' : sel.src || '—'} />
-                      <div style={{ gridColumn: '1 / -1' }}><F label="Notes" value={sel.notes || '—'} /></div>
-                    </div>
-                  </div>
-                  <div className="card" style={{ padding: '16px 20px' }}>
-                    <SecH>Status</SecH>
-                    <Stepper labels={['New', 'Reached out', 'Converted']} idx={stepOf(sel.status)} busy={busy} onStep={setVolStep} />
-                  </div>
-                </>
-              ) : (
+            {selRow.source === 'event' ? (
+              <>
                 <div className="card" style={{ padding: 20 }}>
-                  <SecH>Programmes &amp; status</SecH>
-                  <F label="Phone" value={sel.phone || 'No phone on record'} />
-                  <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {sel.programmes.map((p) => (
-                      <div key={p.id} style={{ paddingTop: 12, borderTop: '1px solid var(--border-soft)' }}>
-                        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{p.program.toUpperCase()} <span style={{ fontWeight: 400, color: 'var(--muted)' }}>· added {ago(p.date)}</span></div>
-                        <Stepper labels={['New', 'Reached out', 'Registered']} idx={stepOf(p.status)} busy={busy} onStep={(i) => setAdvStep(p, i)} />
-                      </div>
+                  <SecH>Contact &amp; event</SecH>
+                  <div style={{ display: 'grid', gridTemplateColumns: isPhone ? '1fr' : '1fr 1fr', gap: '14px 22px' }}>
+                    <F label="Phone" value={selRow.phone || 'No phone on record'} />
+                    <F label="Event" value={selRow.event_name || '—'} />
+                    {selRow.contacted_at && <F label="Contacted" value={`${fmtDate(selRow.contacted_at)} · ${ago(selRow.contacted_at)}`} />}
+                    {selRow.approved_at && <F label="Approved" value={`${fmtDate(selRow.approved_at)} · ${ago(selRow.approved_at)}`} />}
+                  </div>
+                </div>
+                <div className="card" style={{ padding: 18 }}>
+                  <SecH>Status</SecH>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {actionsForEvent(selRow.status_raw, selRow.contacted_at).map((a) => (
+                      <button key={a.to + a.label} disabled={busy} onClick={() => changeEventStatus(selRow, a.to)}
+                        style={{ fontSize: 14, fontWeight: 600, padding: '9px 15px', borderRadius: 9, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
+                          border: a.primary ? 'none' : '1px solid var(--border)', background: a.primary ? 'linear-gradient(150deg, var(--orange-2), var(--orange-3))' : '#fff', color: a.primary ? '#fff' : 'var(--ink-soft)' }}>{a.label}</button>
                     ))}
                   </div>
                 </div>
-              )}
-
-              <div className="card" style={{ padding: 20 }}>
-                <SecH>Actions</SecH>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, alignItems: 'center' }}>
-                  <a className="btn btn-primary" href={sel.phone ? `tel:${sel.phone}` : undefined} style={{ ...btn, textDecoration: 'none', opacity: sel.phone ? 1 : 0.5, pointerEvents: sel.phone ? 'auto' : 'none' }}>Call</a>
-                  <a className="btn btn-ghost" href={sel.phone ? `https://wa.me/91${waNum(sel.phone)}` : undefined} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', opacity: sel.phone ? 1 : 0.5, pointerEvents: sel.phone ? 'auto' : 'none' }}>Message</a>
-                  {isPhone ? (
-                    <KebabMenu items={[
-                      { label: 'Log contact', onClick: logContact, disabled: busy },
-                      sel.kind === 'advanced'
-                        ? { label: 'Mark → Meditators', onClick: markMeditator, disabled: busy }
-                        : { label: 'Convert to volunteer', onClick: convertVolunteer, disabled: busy },
-                      { label: 'Add to call list', onClick: addToCallList, disabled: busy },
-                    ]} />
-                  ) : (
-                    <>
-                      <button className="btn btn-ghost" style={btn} disabled={busy} onClick={logContact}>Log contact</button>
-                      {sel.kind === 'advanced'
-                        ? <button className="btn btn-ghost" style={btn} disabled={busy} onClick={markMeditator}>Mark → Meditators</button>
-                        : <button className="btn btn-ghost" style={btn} disabled={busy} onClick={convertVolunteer}>Convert to volunteer</button>}
-                      <button className="btn btn-ghost" style={btn} disabled={busy} onClick={addToCallList}>Add to call list</button>
-                    </>
-                  )}
+                <EventAvailability row={selRow} isPhone={isPhone} onSave={(dates) => saveEventAvailability(selRow, dates)} />
+              </>
+            ) : (
+              <>
+                <div className="card" style={{ padding: 20 }}>
+                  <SecH>Form responses</SecH>
+                  <div style={{ display: 'grid', gridTemplateColumns: isPhone ? '1fr' : '1fr 1fr', gap: '14px 22px' }}>
+                    <F label="Phone" value={selRow.phone || 'No phone on record'} />
+                    <F label="Availability" value={selRow.preferred_timing || '—'} />
+                    {selRow.source === 'advanced'
+                      ? <F label="Programme" value={(selRow.program || '—').toUpperCase()} />
+                      : <F label="Preferred activity" value={(selRow.interests || []).join(', ') || selRow.program || '—'} />}
+                    <F label="Origin" value={selRow.source === 'ieo' ? 'IEO (Inner Engineering Online)' : selRow.src || '—'} />
+                  </div>
                 </div>
+                <div className="card" style={{ padding: '16px 20px' }}>
+                  <SecH>Status</SecH>
+                  {selRow.source === 'advanced'
+                    ? <Stepper labels={['New', 'Reached out', 'Registered']} idx={stepOf(selRow.status_raw)} busy={busy} onStep={(i) => setAdvStep(selRow, i)} />
+                    : <Stepper labels={['New', 'Reached out', 'Converted']} idx={stepOf(selRow.status_raw)} busy={busy} onStep={(i) => setVolStep(selRow, i)} />}
+                </div>
+              </>
+            )}
+
+            <div className="card" style={{ padding: 20 }}>
+              <SecH>Actions</SecH>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+                <a className="btn btn-primary" href={selRow.phone ? `tel:${selRow.phone}` : undefined} style={{ ...btn, textDecoration: 'none', opacity: selRow.phone ? 1 : 0.5, pointerEvents: selRow.phone ? 'auto' : 'none' }}>Call</a>
+                <a className="btn btn-ghost" href={selRow.phone ? `https://wa.me/91${waNum(selRow.phone)}` : undefined} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', opacity: selRow.phone ? 1 : 0.5, pointerEvents: selRow.phone ? 'auto' : 'none' }}>Message</a>
+                {selRow.source !== 'event' && (isPhone ? (
+                  <KebabMenu items={[
+                    { label: 'Log contact', onClick: logContact, disabled: busy },
+                    selRow.source === 'advanced'
+                      ? { label: 'Mark → Meditators', onClick: markMeditator, disabled: busy }
+                      : { label: 'Convert to volunteer', onClick: convertVolunteer, disabled: busy },
+                    { label: 'Add to call list', onClick: addToCallList, disabled: busy },
+                  ]} />
+                ) : (
+                  <>
+                    <button className="btn btn-ghost" style={btn} disabled={busy} onClick={logContact}>Log contact</button>
+                    {selRow.source === 'advanced'
+                      ? <button className="btn btn-ghost" style={btn} disabled={busy} onClick={markMeditator}>Mark → Meditators</button>
+                      : <button className="btn btn-ghost" style={btn} disabled={busy} onClick={convertVolunteer}>Convert to volunteer</button>}
+                    <button className="btn btn-ghost" style={btn} disabled={busy} onClick={addToCallList}>Add to call list</button>
+                  </>
+                ))}
+                {selRow.source === 'event' && (
+                  <button className="btn btn-ghost" style={btn} disabled={busy} onClick={addToCallList}>Add to call list</button>
+                )}
+              </div>
+              {selRow.source !== 'event' && (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <select value={nurSel} onChange={(e) => setNurSel(e.target.value)} style={{ flex: 1, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff' }}>
                     <option value="">Assign nurturer…</option>
@@ -408,19 +608,62 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
                   </select>
                   <button className="btn btn-ghost" style={btn} disabled={busy || !nurSel} onClick={assignNurturer}>Assign</button>
                 </div>
+              )}
+              {selRow.source !== 'event' && (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
                   <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addTag()} placeholder="Add a tag…" style={{ flex: 1, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', outline: 'none' }} />
                   <button className="btn btn-ghost" style={btn} disabled={busy} onClick={addTag}>Add tag</button>
                 </div>
-              </div>
+              )}
+            </div>
+
+            <div className="card" style={{ padding: 18 }}>
+              <SecH>Comments</SecH>
+              <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} placeholder="Notes on availability, preferences, etc…"
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 14, fontFamily: 'inherit', background: '#fff', color: 'var(--ink)', outline: 'none', resize: 'vertical' }} />
+              <button className="btn btn-ghost" style={{ marginTop: 10, fontSize: 12 }} disabled={busy || note === (selRow.note || '')} onClick={saveNote}>Save comment</button>
+            </div>
           </div>
         </SidePanel>
       )}
 
-      {campaignPid && <CampaignForm audience={sel?.kind === 'advanced' ? 'meditator' : 'volunteer'} personIds={[campaignPid]} segmentLabel={sel?.name || ''} onClose={() => setCampaignPid(null)} onToast={onToast} />}
-      {addOpen && <AddImport onClose={() => setAddOpen(false)} onToast={onToast} onDone={() => { setAddOpen(false); loadStatic() }} />}
-      {scanOpen && <ScanMatch onClose={() => setScanOpen(false)} onToast={onToast} onDone={() => { setScanOpen(false); loadStatic() }} />}
+      {showForm && (
+        <CampaignForm audience="volunteer" personIds={formIds} eventId={eventFilter !== 'all' ? eventFilter : null}
+          defaultType="messaging" segmentLabel={`From Interest Inbox${segmentLabel ? ` · ${segmentLabel}` : ''}`}
+          onClose={() => setShowForm(false)} onToast={onToast} onCreated={() => sel.clear()} />
+      )}
+      {campaignPid && <CampaignForm audience={selRow?.source === 'advanced' ? 'meditator' : 'volunteer'} personIds={[campaignPid]} defaultType="messaging" segmentLabel={selRow?.full_name || ''} onClose={() => setCampaignPid(null)} onToast={onToast} />}
+      {addOpen && <AddImport onClose={() => setAddOpen(false)} onToast={onToast} onDone={() => { setAddOpen(false); reload() }} />}
+      {scanOpen && <ScanMatch onClose={() => setScanOpen(false)} onToast={onToast} onDone={() => { setScanOpen(false); reload() }} />}
     </Pad>
+  )
+}
+
+// Availability day chips for an event-linked interest row — mirrors EventInterestPanel's
+// InterestDetail availability editor, scoped to this one row's event.
+function EventAvailability({ row, isPhone, onSave }) {
+  const [days, setDays] = useState([])
+  useEffect(() => {
+    let alive = true
+    if (!row.event_id) { setDays([]); return }
+    supabase.from('activities').select('start_date, end_date, activity_date').eq('id', row.event_id).maybeSingle()
+      .then(({ data }) => { if (alive && data) setDays(eventDays(data.start_date || data.activity_date, data.end_date)) })
+    return () => { alive = false }
+  }, [row.event_id])
+  if (!days.length) return null
+  const avail = row.availability_dates || []
+  const allSelected = days.length > 0 && days.every((d) => avail.includes(d))
+  const toggleDay = (d) => onSave(avail.includes(d) ? avail.filter((x) => x !== d) : [...avail, d].sort())
+  const toggleAll = () => onSave(allSelected ? [] : [...days])
+  const chip = (on) => ({ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 8, cursor: 'pointer', border: on ? '1px solid var(--orange)' : '1px solid var(--border)', background: on ? '#F6E8D8' : '#fff', color: on ? 'var(--orange)' : 'var(--muted)' })
+  return (
+    <div className="card" style={{ padding: 18 }}>
+      <SecH>Availability</SecH>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {days.length > 1 && <button onClick={toggleAll} style={chip(allSelected)}>All Days</button>}
+        {days.map((d, di) => (<button key={d} onClick={() => toggleDay(d)} style={chip(avail.includes(d))}>Day {di + 1} · {fmtDay(d)}</button>))}
+      </div>
+    </div>
   )
 }
 
@@ -447,22 +690,6 @@ function Stepper({ labels, idx, busy, onStep }) {
 }
 
 // --- Add / import: pick target SEGMENT; always resolve to a canonical people row by phone ---
-// Volunteers and meditators are not separate tables — both are flags (is_volunteer /
-// is_meditator) on `people`. So this single phone-key lookup already matches ANY existing
-// person (volunteer OR meditator OR neither); only a phone with no match anywhere creates a
-// provisional record, stamped source='interest_import'. Dedupe is inherent: an existing
-// meditator's phone hits their people row, so no second record is made.
-async function ensurePersonId(name, phone) {
-  const ph = normPhone(phone)
-  if (ph) {
-    const { data } = await supabase.from('people').select('id').eq('phone', ph).maybeSingle()
-    if (data) return data.id
-  }
-  const { data, error } = await supabase.from('people').insert({ full_name: name, phone: ph || null, source: 'interest_import' }).select('id').single()
-  if (error) throw error
-  return data.id
-}
-
 export function AddImport({ onClose, onToast, onDone, lockEventId = null }) {
   const [mode, setMode] = useState('search') // 'search' | 'single' | 'import'
   const [segment, setSegment] = useState(lockEventId ? 'event' : 'volunteering')
@@ -502,7 +729,7 @@ export function AddImport({ onClose, onToast, onDone, lockEventId = null }) {
     return () => { alive = false }
   }, [mode, debouncedQ])
 
-  const parsed = useMemo(() => csv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => { const [nm, ph, pg] = l.split(',').map((s) => (s || '').trim()); return { name: nm, phone: ph, program: pg } }).filter((r) => r.name), [csv])
+  const parsed = csv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => { const [nm, ph, pg] = l.split(',').map((s) => (s || '').trim()); return { name: nm, phone: ph, program: pg } }).filter((r) => r.name)
 
   // Attach interest for an already-resolved person id, per the current segment.
   async function attachInterest(pid, prog) {
@@ -681,6 +908,8 @@ export function ScanMatch({ onClose, onToast, onDone, lockEventId = null }) {
     }
   }
 
+  const normName = (n) => (n || '').toLowerCase().replace(/\s+/g, ' ').trim()
+
   async function runMatch() {
     setBusy(true); setResult(null)
     try {
@@ -787,4 +1016,3 @@ function Actions({ onClose, busy, onSubmit, label }) {
     </div>
   )
 }
-
