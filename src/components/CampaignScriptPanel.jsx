@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { fillTemplate } from '../lib/phone'
+
+const PREVIEW_SAMPLE = { name: 'Priya Kumar', myName: 'Coordinator' }
 
 // Per-campaign call script + WhatsApp/SMS message templates (stored on the campaigns
 // row: script, whatsapp_template, sms_template). Read-only for callers; coordinators
@@ -45,9 +48,11 @@ export default function CampaignScriptPanel({ campaign, canEdit = false, onSaved
     const ta = { width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', fontSize: 13, fontFamily: 'inherit', outline: 'none', resize: 'vertical', boxSizing: 'border-box', lineHeight: 1.5, marginTop: 6 }
     return (
       <div className="card" style={{ padding: 20, marginBottom: 18 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Edit script & templates</h3>
-          <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>{'placeholders: {name}, {my_name}'}</div>
+        <h3 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 12px' }}>Edit script & templates</h3>
+        <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--ink-soft)', background: 'var(--panel)', border: '1px solid var(--border-soft)', borderRadius: 9, padding: '10px 12px', marginBottom: 14 }}>
+          <strong>Available variables:</strong><br />
+          <code>{'{{name}}'}</code> — recipient's first name &nbsp;·&nbsp; <code>{'{{full_name}}'}</code> — recipient's full name<br />
+          <span style={{ color: 'var(--muted-2)' }}>Example: "Namaskaram {'{{name}}'}, we would love to have you join us for…"</span>
         </div>
         {!hideScript && (
           <label style={{ display: 'block', ...sectionLabel, marginBottom: 0 }}>Call script
@@ -57,9 +62,11 @@ export default function CampaignScriptPanel({ campaign, canEdit = false, onSaved
         <label style={{ display: 'block', ...sectionLabel, marginTop: hideScript ? 0 : 14, marginBottom: 0 }}>WhatsApp template
           <textarea value={wa} onChange={(e) => setWa(e.target.value)} rows={3} style={ta} placeholder="Prefilled into the WhatsApp button…" />
         </label>
+        {wa.trim() && <TemplatePreview text={fillTemplate(wa, PREVIEW_SAMPLE)} />}
         <label style={{ display: 'block', ...sectionLabel, marginTop: 14, marginBottom: 0 }}>SMS template
           <textarea value={sms} onChange={(e) => setSms(e.target.value)} rows={3} style={ta} placeholder="Prefilled into the Message (SMS) button…" />
         </label>
+        {sms.trim() && <TemplatePreview text={fillTemplate(sms, PREVIEW_SAMPLE)} />}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
           <button className="btn btn-ghost" onClick={() => setEditing(false)}>Cancel</button>
           <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
@@ -92,6 +99,16 @@ export default function CampaignScriptPanel({ campaign, canEdit = false, onSaved
           {campaign.sms_template ? <div style={body}>{campaign.sms_template}</div> : <div style={empty}>Not set yet.</div>}
         </div>
       </div>
+    </div>
+  )
+}
+
+// Live preview with a sample recipient name -- updates as the coordinator types,
+// so they can see {{name}}/{{full_name}} resolve without sending a test message.
+function TemplatePreview({ text }) {
+  return (
+    <div style={{ marginTop: 6, fontSize: 12, color: 'var(--muted)', background: '#FBF6EC', border: '1px dashed var(--border)', borderRadius: 8, padding: '8px 10px', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+      <span style={{ fontWeight: 700, color: 'var(--muted-2)', textTransform: 'uppercase', fontSize: 10.5, letterSpacing: '.05em' }}>Preview</span>{'\n'}{text}
     </div>
   )
 }

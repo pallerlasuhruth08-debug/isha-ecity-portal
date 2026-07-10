@@ -7,6 +7,7 @@ import { pill } from './ui'
 export const MESSAGE_STATUS = [
   { v: 'to_message', label: 'To message', pill: pill('#F1EADD', '#8C7E6B') },
   { v: 'sent', label: 'Sent', pill: pill('#FCF4CB', '#8A6D1B') },
+  { v: 'no_whatsapp', label: 'No WhatsApp', pill: pill('#FBEAD9', '#C2691F') },
   { v: 'responded', label: 'Responded', pill: pill('#EAF2E5', '#4E7C3F') },
 ]
 export const MESSAGE_STATUS_MAP = Object.fromEntries(MESSAGE_STATUS.map((s) => [s.v, s]))

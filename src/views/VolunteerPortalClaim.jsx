@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { waHref, smsHref, hasDialable, fillTemplate } from '../lib/phone'
 import { initials, avatarFor } from '../lib/ui'
+import { MESSAGE_STATUS, pillForMessage, labelForMessage } from '../lib/messageStatus'
+import KebabMenu from '../components/KebabMenu'
 
 // Volunteer messaging portal — ONE link per campaign (campaigns.portal_token),
 // reached via #volunteer-portal/<token> or #volunteer-portal/<token>/batch/<batch_id>.
@@ -39,6 +41,8 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
 
   const [gate, setGate] = useState(undefined) // undefined=checking, {ok:true,...} | {ok:false,...}
   const [recipients, setRecipients] = useState(null)
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [celebrating, setCelebrating] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -137,6 +141,16 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
     localStorage.removeItem(credKey(token))
     setCaller(null); setSession(undefined); setBatchId(null); setAssignFailed(false)
     setName(''); setPhone(''); setErr(''); setEmail(''); setEmailErr(null)
+    setCelebrating(false)
+  }
+
+  function claimNextBatch(newBatchId) {
+    setCelebrating(false)
+    setBatchId(newBatchId)
+    setRecipients(null)
+    setStatusFilter('all')
+    window.location.hash = `volunteer-portal/${token}/batch/${newBatchId}`
+    setToast(`Here's your next outreach list, ${caller.name.split(' ')[0]}!`)
   }
 
   // Ownership gate — re-checked whenever we have a batch to show (direct link,
@@ -170,6 +184,15 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
     if (!caller || !batchId) return
     supabase.rpc('claim_portal_touch', { p_token: token, p_split_id: batchId, p_phone: caller.phone })
   }
+
+  // A batch is "done" once every recipient has been either messaged or marked
+  // no-WhatsApp -- nothing left for the volunteer to action.
+  const allResolved = !!recipients && recipients.length > 0 && recipients.every((r) => r.message_status !== 'to_message')
+  const resolvedStats = recipients ? {
+    total: recipients.length,
+    sent: recipients.filter((r) => r.message_status === 'sent' || r.message_status === 'responded').length,
+    noWa: recipients.filter((r) => r.message_status === 'no_whatsapp').length,
+  } : { total: 0, sent: 0, noWa: 0 }
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', padding: '24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -268,22 +291,45 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
               <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 4 }}>{info.campaign_name}</div>
               <div style={{ fontSize: 14, color: 'var(--ink-soft)', fontWeight: 600, marginBottom: 16 }}>
                 Your outreach list — {(recipients || []).length} people
-                {recipients && recipients.length > 0 && <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {recipients.filter((r) => r.message_status !== 'to_message').length} sent</span>}
+                {recipients && recipients.length > 0 && <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {recipients.filter((r) => r.message_status === 'sent' || r.message_status === 'responded').length} sent</span>}
               </div>
+
+              {recipients && recipients.length > 0 && (() => {
+                const counts = { all: recipients.length }
+                for (const s of MESSAGE_STATUS) counts[s.v] = recipients.filter((r) => r.message_status === s.v).length
+                const chip = (on) => ({ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 20, cursor: 'pointer', border: on ? 'none' : '1px solid var(--border)', background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', whiteSpace: 'nowrap', flexShrink: 0 })
+                return (
+                  <div className="scroll-tabs" style={{ display: 'flex', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', marginBottom: 14 }}>
+                    <button onClick={() => setStatusFilter('all')} style={chip(statusFilter === 'all')}>All {counts.all}</button>
+                    {MESSAGE_STATUS.map((s) => (
+                      <button key={s.v} onClick={() => setStatusFilter(s.v)} style={chip(statusFilter === s.v)}>{s.label} {counts[s.v]}</button>
+                    ))}
+                  </div>
+                )
+              })()}
+
               {recipients === null && <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 14, padding: 20 }}>Loading…</div>}
               {recipients && recipients.length === 0 && (
                 <div className="card" style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>No one in your list yet.</div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {(recipients || []).map((r) => (
+                {(recipients || []).filter((r) => statusFilter === 'all' || r.message_status === statusFilter).map((r) => (
                   <RecipientRow key={r.journey_id} r={r} token={token} splitId={batchId} phone={caller.phone} myName={caller.name} label={`${caller.name} · ${caller.phone}`}
                     onTouch={touchBatch}
                     onSent={(status) => setRecipients((prev) => prev.map((x) => (x.journey_id === r.journey_id ? { ...x, message_status: status } : x)))} />
                 ))}
               </div>
-              <div style={{ textAlign: 'center', marginTop: 24 }}>
+              <div style={{ textAlign: 'center', marginTop: 24, marginBottom: allResolved ? 64 : 0 }}>
                 <button onClick={signOut} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minHeight: 44, padding: '0 16px', background: 'none', border: 'none', color: 'var(--muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>Sign out</button>
               </div>
+
+              {allResolved && !celebrating && (
+                <button className="btn btn-primary done-sticky-btn" onClick={() => setCelebrating(true)} style={{ padding: '14px 22px', fontSize: 15, borderRadius: 999 }}>🎉 All done! Tap to finish</button>
+              )}
+              {celebrating && (
+                <CelebrationScreen name={caller.name} stats={resolvedStats} token={token} phone={caller.phone}
+                  onClaimed={claimNextBatch} onDismiss={() => setCelebrating(false)} />
+              )}
             </>
           )}
         </div>
@@ -299,22 +345,47 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
 }
 
 // Recipient row (a volunteer's own batch). WA/SMS taps keep the claim alive
-// (last_active_at); Sent is optimistic (flips immediately, reverts on failure).
+// (last_active_at); Sent is a proper toggle -- tapping it while already sent asks
+// for confirmation before reverting (guards against an accidental double-tap).
 function RecipientRow({ r, token, splitId, phone, myName, label, onTouch, onSent }) {
   const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [confirmingNoWa, setConfirmingNoWa] = useState(false)
   const [lastChannel, setLastChannel] = useState('whatsapp')
   const dialable = hasDialable(r.phone)
   const waText = fillTemplate(r.whatsapp_template, { name: r.person_name, myName })
   const smsText = fillTemplate(r.sms_template, { name: r.person_name, myName })
   const sent = r.message_status === 'sent' || r.message_status === 'responded'
 
-  async function toggleSent() {
+  async function setSentStatus(to) {
     const prev = r.message_status
-    if (sent) return // split-view Sent is one-way (mark sent); undo lives on the coordinator's row
     setBusy(true)
-    onSent('sent')
+    onSent(to)
     try {
-      const { data, error } = await supabase.rpc('claim_portal_mark_sent', { p_token: token, p_split_id: splitId, p_journey_id: r.journey_id, p_phone: phone, p_channel: lastChannel, p_caller_label: label })
+      const { data, error } = await supabase.rpc('claim_portal_mark_sent', { p_token: token, p_split_id: splitId, p_journey_id: r.journey_id, p_phone: phone, p_channel: lastChannel, p_caller_label: label, p_to: to })
+      if (error) throw error
+      if (data.status !== 'ok') throw new Error(data.status)
+    } catch {
+      onSent(prev)
+    } finally { setBusy(false) }
+  }
+
+  function tapSent() {
+    if (sent) { setConfirming(true); return }
+    setSentStatus('sent')
+  }
+  function confirmUndo() {
+    setConfirming(false)
+    setSentStatus('to_message')
+  }
+
+  async function confirmNoWhatsapp() {
+    setConfirmingNoWa(false)
+    const prev = r.message_status
+    setBusy(true)
+    onSent('no_whatsapp')
+    try {
+      const { data, error } = await supabase.rpc('claim_portal_mark_no_whatsapp', { p_token: token, p_split_id: splitId, p_journey_id: r.journey_id, p_phone: phone, p_caller_label: label })
       if (error) throw error
       if (data.status !== 'ok') throw new Error(data.status)
     } catch {
@@ -332,13 +403,127 @@ function RecipientRow({ r, token, splitId, phone, myName, label, onTouch, onSent
           <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person_name}</div>
           <div style={{ fontSize: 12, color: dialable ? 'var(--muted)' : 'var(--red)' }}>{r.phone || 'no phone on record'}</div>
         </div>
-        <span className="pill" style={sent ? { background: '#EAF2E5', color: '#4E7C3F' } : { background: '#F1EADD', color: '#8C7E6B' }}>{sent ? 'Sent' : 'To message'}</span>
+        <span className="pill" style={pillForMessage(r.message_status)}>{labelForMessage(r.message_status)}</span>
       </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <a href={smsHref(r.phone, smsText)} onClick={() => { setLastChannel('sms'); onTouch() }} aria-disabled={!dialable} style={{ ...btnBase, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>SMS</a>
-        <a href={waHref(r.phone, waText)} target="_blank" rel="noopener noreferrer" onClick={() => { setLastChannel('whatsapp'); onTouch() }} aria-disabled={!dialable} style={{ ...btnBase, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>WhatsApp</a>
-        <button onClick={toggleSent} disabled={busy || sent} style={{ ...btnBase, cursor: sent ? 'default' : 'pointer', border: '1px solid ' + (sent ? '#4E7C3F' : 'var(--border)'), background: sent ? '#EAF2E5' : '#fff', color: sent ? '#4E7C3F' : 'var(--ink-soft)' }}>{sent ? '✓ Sent' : 'Sent'}</button>
-      </div>
+
+      {confirming ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#FBF6EC', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--ink-soft)', flex: 1 }}>Mark as not sent?</span>
+          <button disabled={busy} onClick={confirmUndo} style={{ height: 30, padding: '0 10px', fontSize: 12, fontWeight: 600, borderRadius: 7, border: 'none', background: 'var(--red)', color: '#fff', cursor: 'pointer' }}>Yes, undo</button>
+          <button disabled={busy} onClick={() => setConfirming(false)} style={{ height: 30, padding: '0 10px', fontSize: 12, fontWeight: 600, borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }}>Cancel</button>
+        </div>
+      ) : confirmingNoWa ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#FBF6EC', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--ink-soft)', flex: 1 }}>Mark {r.person_name} as having no WhatsApp number? They will be skipped in this campaign.</span>
+          <button disabled={busy} onClick={confirmNoWhatsapp} style={{ height: 30, padding: '0 10px', fontSize: 12, fontWeight: 600, borderRadius: 7, border: 'none', background: '#C2691F', color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' }}>Yes</button>
+          <button disabled={busy} onClick={() => setConfirmingNoWa(false)} style={{ height: 30, padding: '0 10px', fontSize: 12, fontWeight: 600, borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }}>Cancel</button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 6 }}>
+          <a href={smsHref(r.phone, smsText)} onClick={() => { setLastChannel('sms'); onTouch() }} aria-disabled={!dialable} style={{ ...btnBase, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>SMS</a>
+          <a href={waHref(r.phone, waText)} target="_blank" rel="noopener noreferrer" onClick={() => { setLastChannel('whatsapp'); onTouch() }} aria-disabled={!dialable} style={{ ...btnBase, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>WhatsApp</a>
+          <button onClick={tapSent} disabled={busy} style={{ ...btnBase, border: '1px solid ' + (sent ? '#4E7C3F' : 'var(--border)'), background: sent ? '#EAF2E5' : '#fff', color: sent ? '#4E7C3F' : 'var(--ink-soft)' }}>{sent ? '✓ Sent' : 'Sent'}</button>
+          <KebabMenu buttonStyle={{ height: 36, width: 36, fontSize: 16 }} items={[
+            { label: '📵 No WhatsApp number', onClick: () => setConfirmingNoWa(true), disabled: busy || r.message_status === 'no_whatsapp' },
+          ]} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Full-screen "batch complete" celebration, reached by tapping the sticky done
+// button once every recipient is resolved. Three outcomes once the volunteer
+// acts: a fresh batch is claimed (screen closes, portal navigates to it), no
+// batches are left campaign-wide ('all_taken'), or the volunteer opts to stop
+// for the day ('done') -- the latter two render the same "come back tomorrow"
+// closing message, just reached by different paths.
+function CelebrationScreen({ name, stats, token, phone, onClaimed, onDismiss }) {
+  const [phase, setPhase] = useState('celebrate') // celebrate | claiming | all_taken | done
+  const [err, setErr] = useState(null)
+
+  async function claimAnother() {
+    setErr(null)
+    setPhase('claiming')
+    try {
+      const { data, error } = await supabase.rpc('claim_portal_claim_next_batch', { p_token: token, p_phone: phone })
+      if (error) throw error
+      if (data.status === 'ok') { onClaimed(data.batch_id); return }
+      if (data.status === 'all_taken') { setPhase('all_taken'); return }
+      throw new Error(data.status)
+    } catch (e) {
+      setErr('Could not claim a new list: ' + (e.message || e))
+      setPhase('celebrate')
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'linear-gradient(160deg, #2a2017, #241b14)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, overflow: 'hidden' }}>
+      <Confetti />
+      {(phase === 'celebrate' || phase === 'claiming') && (
+        <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', maxWidth: 420 }}>
+          <div style={{ fontSize: 56, marginBottom: 8 }}>🙏</div>
+          <div style={{ fontFamily: "'Newsreader',serif", fontSize: 26, fontWeight: 600, color: '#F6ECDC', marginBottom: 6 }}>Namaskaram {name.split(' ')[0]}!</div>
+          <div style={{ fontSize: 15, color: '#D8CBB4', marginBottom: 22, lineHeight: 1.5 }}>You've reached out to everyone on your list. Thank you for your seva!</div>
+          <div style={{ background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.14)', borderRadius: 16, padding: '18px 20px', marginBottom: 24, display: 'flex', justifyContent: 'center', gap: 28 }}>
+            <div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: '#F6ECDC' }}>{stats.total}</div>
+              <div style={{ fontSize: 11, color: '#B4A78C', textTransform: 'uppercase', letterSpacing: '.05em', marginTop: 2 }}>People</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: '#F6ECDC' }}>{stats.sent}</div>
+              <div style={{ fontSize: 11, color: '#B4A78C', textTransform: 'uppercase', letterSpacing: '.05em', marginTop: 2 }}>Messaged</div>
+            </div>
+            {stats.noWa > 0 && (
+              <div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#F6ECDC' }}>{stats.noWa}</div>
+                <div style={{ fontSize: 11, color: '#B4A78C', textTransform: 'uppercase', letterSpacing: '.05em', marginTop: 2 }}>No WhatsApp</div>
+              </div>
+            )}
+          </div>
+          {err && <div style={{ fontSize: 13, color: '#E79248', marginBottom: 14 }}>{err}</div>}
+          <button className="btn btn-primary" disabled={phase === 'claiming'} onClick={claimAnother} style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: 15, minHeight: 48, marginBottom: 10 }}>{phase === 'claiming' ? 'Finding your next list…' : 'Claim another batch'}</button>
+          <button disabled={phase === 'claiming'} onClick={() => setPhase('done')} style={{ width: '100%', textAlign: 'center', background: 'none', border: 'none', color: '#D8CBB4', fontSize: 14, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', minHeight: 44 }}>I'm done for today</button>
+        </div>
+      )}
+      {phase === 'all_taken' && (
+        <ClosingMessage title="🙏 All lists are taken care of!" body="Every outreach list for this campaign has already been claimed. Thank you for your seva today." onDismiss={onDismiss} />
+      )}
+      {phase === 'done' && (
+        <ClosingMessage title="🙏 Thank you for your seva today!" body="Come back tomorrow to help reach out to more people." onDismiss={onDismiss} />
+      )}
+    </div>
+  )
+}
+
+function ClosingMessage({ title, body, onDismiss }) {
+  return (
+    <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', maxWidth: 380 }}>
+      <div style={{ fontFamily: "'Newsreader',serif", fontSize: 22, fontWeight: 600, color: '#F6ECDC', marginBottom: 10 }}>{title}</div>
+      <div style={{ fontSize: 15, color: '#D8CBB4', marginBottom: 26, lineHeight: 1.5 }}>{body}</div>
+      <button className="btn btn-primary" onClick={onDismiss} style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: 15, minHeight: 48 }}>Close</button>
+    </div>
+  )
+}
+
+// CSS-only confetti -- a fixed set of pieces (computed once, not on every
+// render) falling on a staggered loop via the .confetti-piece keyframe.
+function Confetti() {
+  const [pieces] = useState(() => {
+    const colors = ['#E79248', '#C2691F', '#4E7C3F', '#F6ECDC', '#B5532F']
+    return Array.from({ length: 36 }, (_, i) => ({
+      left: Math.random() * 100,
+      delay: Math.random() * 2.5,
+      duration: 2.6 + Math.random() * 2,
+      color: colors[i % colors.length],
+      width: 6 + Math.random() * 6,
+    }))
+  })
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+      {pieces.map((p, i) => (
+        <span key={i} className="confetti-piece" style={{ left: `${p.left}%`, background: p.color, width: p.width, height: p.width * 1.6, animationDelay: `${p.delay}s`, animationDuration: `${p.duration}s` }} />
+      ))}
     </div>
   )
 }
