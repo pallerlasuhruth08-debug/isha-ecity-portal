@@ -72,6 +72,7 @@ function Portal({ profile, email, sections }) {
   const [pendingHubEventId, setPendingHubEventId] = useState(null) // open this event IN the hub
   const [campaignDraft, setCampaignDraft] = useState(null) // { eventId, eventName } — call-list build in progress
   const [recipientDraft, setRecipientDraft] = useState(null) // { campaignId, campaignName } — adding to an existing campaign
+  const [hubListMode, setHubListMode] = useState(true) // Hub reports list-vs-event-detail so the Topbar knows when to show "+ Create event"
   const toastTimer = useRef(null)
   const { isPhone } = useBreakpoint()
 
@@ -164,7 +165,7 @@ function Portal({ profile, email, sections }) {
       case 'planning':
         return <Planning me={profile} isCoordinator={isCoordinator} onToast={showToast} openEventId={pendingEventId} onEventConsumed={() => setPendingEventId(null)} />
       case 'hub':
-        return <Hub me={profile} isCoordinator={isCoordinator} onToast={showToast} openEventId={pendingHubEventId} onEventConsumed={() => setPendingHubEventId(null)} onOpenCampaign={openCampaign} onStartCampaign={startCampaignForEvent} onOpenInterestInbox={(id) => { setPendingInterestEventId(id); setView('interest') }} onCreateEvent={isCoordinator ? () => requestCreate(null, 'hub') : undefined} />
+        return <Hub me={profile} isCoordinator={isCoordinator} onToast={showToast} openEventId={pendingHubEventId} onEventConsumed={() => setPendingHubEventId(null)} onOpenCampaign={openCampaign} onStartCampaign={startCampaignForEvent} onOpenInterestInbox={(id) => { setPendingInterestEventId(id); setView('interest') }} onListModeChange={setHubListMode} onCreateEvent={isCoordinator ? () => requestCreate(null, 'hub') : undefined} />
       case 'unresolved':
         return <Unresolved me={profile} isCoordinator={isCoordinator} onToast={showToast} />
       case 'admin':
@@ -175,6 +176,15 @@ function Portal({ profile, email, sections }) {
         return <Placeholder view={activeView} title={TAB_LABELS[activeView]} />
     }
   }, [activeView, showToast, isCoordinator, isAdmin, profile, pendingEventId, requestCreate, openEventHub, openCampaign, startCampaignForEvent, endCampaignDraft, campaignDraft, recipientDraft, startAddRecipients, endRecipientDraft, pendingInterestEventId, pendingCampaignId, pendingHubEventId])
+
+  // Event Hub's "+ Create event" lives in the Topbar on desktop (right side, same
+  // row as the title) — only shown while Hub is showing the event LIST (not a
+  // specific event's detail). On phone it moves to Hub's own full-width sticky
+  // bottom CTA instead (same pattern as "Create campaign" elsewhere), since the
+  // Topbar row is too cramped there.
+  const topbarActions = activeView === 'hub' && hubListMode && isCoordinator && !isPhone ? (
+    <button className="btn btn-primary" style={{ height: 36, padding: '0 14px', fontSize: 12 }} onClick={() => requestCreate(null, 'hub')}>＋ Create event</button>
+  ) : null
 
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden', background: 'var(--bg)' }}>
@@ -189,6 +199,7 @@ function Portal({ profile, email, sections }) {
         <Topbar
           title={title}
           subtitle={subtitle}
+          actions={topbarActions}
           me={profile}
           email={email}
           onSignOut={() => supabase.auth.signOut()}

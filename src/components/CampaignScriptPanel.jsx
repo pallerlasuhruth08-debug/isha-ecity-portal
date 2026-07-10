@@ -70,10 +70,12 @@ export default function CampaignScriptPanel({ campaign, canEdit = false, onSaved
 
   return (
     <div className="card" style={{ padding: 20, marginBottom: 18 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>{hideScript ? 'Message templates' : 'Call script & message templates'}</h3>
-        {canEdit && <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12.5 }} onClick={startEdit}>Edit</button>}
-      </div>
+      {/* No heading here — the tab this lives under is already labelled "Script & Templates". */}
+      {canEdit && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+          <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12.5 }} onClick={startEdit}>Edit</button>
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 18 }}>
         {!hideScript && (
           <div>

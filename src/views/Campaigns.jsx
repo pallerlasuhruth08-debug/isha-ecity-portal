@@ -11,6 +11,8 @@ import CallLogDialog from '../components/CallLogDialog'
 import CampaignScriptPanel from '../components/CampaignScriptPanel'
 import AddCallerDialog from '../components/AddCallerDialog'
 import EditCampaignDialog from '../components/EditCampaignDialog'
+import KebabMenu from '../components/KebabMenu'
+import SidePanel, { PanelHeader } from '../components/SidePanel'
 
 const CAMP_STATUS_PILL = {
   active: { background: '#EAF2E5', color: '#4E7C3F' },
@@ -450,11 +452,13 @@ function CampaignSplits({ campaignId, contacts, splits, reload, onToast }) {
           const rows = contacts.filter((c) => c.splitNumber === s.split_number)
           const called = rows.filter((c) => c.logs.length > 0).length
           return (
-            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12 }}>
-              <span style={{ fontWeight: 600 }}>Split {s.split_number}</span>
-              <span style={{ color: 'var(--muted)' }}>{rows.length} people · {called} called</span>
-              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} disabled={busy} onClick={() => copyLink(s.share_token)}>Copy link</button>
-              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} disabled={busy} onClick={() => regenerate(s)}>Regenerate token</button>
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+              <span style={{ fontWeight: 600, flexShrink: 0 }}>Split {s.split_number}</span>
+              <span style={{ color: 'var(--muted)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rows.length} people · {called} called</span>
+              <button className="btn btn-ghost" style={{ height: 32, padding: '0 10px', fontSize: 12, flexShrink: 0 }} disabled={busy} onClick={() => copyLink(s.share_token)}>Copy</button>
+              <KebabMenu buttonStyle={{ height: 32, width: 32, fontSize: 14 }} items={[
+                { label: 'Regenerate token', onClick: () => regenerate(s), disabled: busy },
+              ]} />
             </div>
           )
         })}
@@ -486,6 +490,8 @@ function CallerStat({ v, label, color }) {
 function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = {}, splits = [], reload, onBack, callFilter, setCallFilter, onAddRecipients, onToast }) {
   const { isPhone } = useBreakpoint()
   const [logFor, setLogFor] = useState(null) // {journeyId, personId, name, phone}
+  const [assignFor, setAssignFor] = useState(null) // recipient row being reassigned (kebab → Assign caller)
+  const [detailFor, setDetailFor] = useState(null) // recipient row shown in the View-details panel
   const [showRemoved, setShowRemoved] = useState(false)
   const [busyId, setBusyId] = useState(null)
   const [addOpen, setAddOpen] = useState(false) // source-chooser popover
@@ -590,17 +596,30 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
 
       {/* header */}
       <div className="card" style={{ padding: 24, marginBottom: 22 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
-          <div style={{ minWidth: 0 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>{c.name}</h2>
-            <div style={{ fontSize: 14, color: 'var(--muted)' }}>{c.audience || c.goal || '—'}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <h2
+              style={{
+                fontSize: isPhone ? 20 : 22,
+                fontWeight: 600,
+                margin: '0 0 4px',
+                ...(isPhone
+                  ? { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }
+                  : { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }),
+              }}
+            >
+              {c.name}
+            </h2>
+            <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 10 }}>{c.audience || c.goal || '—'}</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <span className="pill" style={{ background: TYPE_PILL[typeOf(c)].background, color: TYPE_PILL[typeOf(c)].color }}>{TYPE_PILL[typeOf(c)].label}</span>
+              {c.is_test && <span className="pill" style={{ background: '#F6E0CE', color: 'var(--red)' }}>test</span>}
+              <span className="pill" style={CAMP_STATUS_PILL[c.status] || CAMP_STATUS_PILL.active}>{c.status}</span>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span className="pill" style={{ background: TYPE_PILL[typeOf(c)].background, color: TYPE_PILL[typeOf(c)].color }}>{TYPE_PILL[typeOf(c)].label}</span>
-            {c.is_test && <span className="pill" style={{ background: '#F6E0CE', color: 'var(--red)' }}>test</span>}
-            <span className="pill" style={CAMP_STATUS_PILL[c.status] || CAMP_STATUS_PILL.active}>{c.status}</span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
             {isCoordinator && (
-              <button onClick={() => setEditing(true)} className="btn btn-ghost" style={{ fontSize: 12, padding: '7px 12px' }}>Edit</button>
+              <button onClick={() => setEditing(true)} className="btn btn-ghost" style={{ fontSize: 12, padding: '7px 12px' }}>Edit ✎</button>
             )}
             {isCoordinator && c.is_test && (
               <button disabled={busyDel} onClick={deleteTestCampaign} style={{ fontSize: 12, padding: '7px 12px', fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: busyDel ? 'default' : 'pointer' }}>Delete test campaign</button>
@@ -623,34 +642,34 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
         )}
       </div>
 
-      {/* script + templates (coordinator can edit; callers see the same) */}
-      <CampaignScriptPanel campaign={c} canEdit={isCoordinator} onSaved={reload} onToast={onToast} hideScript={messaging} />
-
-      {/* Two tabs: the recipient call list and the caller roster. */}
+      {/* Three tabs: the recipient call list, the caller roster, and the call
+          script / message templates (previously a stacked section — same
+          content, just behind a tab now). */}
       <div className="scroll-tabs" style={{ display: 'flex', gap: 18, marginBottom: 16, borderBottom: '1px solid var(--border)' }}>
-        {[{ k: 'calls', label: `Call List (${c.contacts.length})` }, { k: 'callers', label: `Callers (${c.callerList.length})` }].map((t) => (
+        {[
+          { k: 'calls', label: `Call List (${c.contacts.length})` },
+          { k: 'callers', label: `Callers (${c.callerList.length})` },
+          { k: 'script', label: 'Script & Templates' },
+        ].map((t) => (
           <button key={t.k} onClick={() => setDetailTab(t.k)}
             style={{ padding: '10px 2px', marginBottom: -1, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', border: 'none', borderBottom: '2px solid ' + (detailTab === t.k ? 'var(--orange)' : 'transparent'), background: 'transparent', color: detailTab === t.k ? 'var(--ink)' : 'var(--muted)', cursor: 'pointer' }}>{t.label}</button>
         ))}
       </div>
 
+      {detailTab === 'script' && (
+        <CampaignScriptPanel campaign={c} canEdit={isCoordinator} onSaved={reload} onToast={onToast} hideScript={messaging} />
+      )}
+
       {detailTab === 'calls' && (<>
       {/* call list */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 3px' }}>Call list</h3>
-          <p style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--muted)' }}>
-            <span className="mobile-hide">Everyone in this cohort to be reached out to — and where each one stands.{isCoordinator && unassignedCount > 0 ? ' · ' : ''}</span>
-            {isCoordinator && unassignedCount > 0 && <span style={{ color: 'var(--red)', fontWeight: 600 }}>{unassignedCount} unassigned</span>}
-          </p>
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
         {isCoordinator && (
           <div style={{ position: 'relative' }}>
-            <button className="btn btn-primary" style={{ fontSize: 12, padding: '8px 14px' }} onClick={() => setAddOpen((v) => !v)}>+ Add recipients</button>
+            <button className="btn btn-primary" style={{ height: 36, padding: '0 14px', fontSize: 12 }} onClick={() => setAddOpen((v) => !v)}>+ Add recipients</button>
             {addOpen && (
               <>
                 <div onClick={() => setAddOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
-                <div className="card" style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 41, minWidth: 210, padding: 6, boxShadow: 'var(--shadow-lg)' }}>
+                <div className="card" style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 41, minWidth: 210, padding: 6, boxShadow: 'var(--shadow-lg)' }}>
                   <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', padding: '8px 10px 4px' }}>Add from…</div>
                   {[
                     { src: 'interest', label: c.event_id ? 'Volunteer Interests (this event)' : 'Volunteer Interests' },
@@ -666,14 +685,17 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             )}
           </div>
         )}
+        {isCoordinator && unassignedCount > 0 && (
+          <span className="pill" style={{ background: '#FBE6E0', color: 'var(--red)', fontWeight: 600 }}>{unassignedCount} unassigned ⚠</span>
+        )}
       </div>
-      <div className="scroll-tabs" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+      <div className="scroll-tabs" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', gap: 8, marginBottom: 14 }}>
         {chips.map((f) => {
           const on = callFilter === f.key
           const n = f.key === 'all' ? c.contacts.length : counts[f.key] || 0
           return (
-            <button key={f.key} onClick={() => setCallFilter(f.key)} className="btn" style={{ padding: '7px 13px', fontSize: 12, borderRadius: 20, background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', border: on ? 'none' : '1px solid var(--border)' }}>
-              {f.label} <span style={{ opacity: 0.6 }}>{n}</span>
+            <button key={f.key} onClick={() => setCallFilter(f.key)} className="btn" style={{ padding: '7px 13px', fontSize: 12, borderRadius: 20, background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', border: on ? 'none' : '1px solid var(--border)', flexShrink: 0 }}>
+              {f.label}{n > 0 && <span style={{ opacity: 0.6 }}> {n}</span>}
             </button>
           )
         })}
@@ -692,38 +714,26 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
         {shown.length === 0 && <div style={{ padding: 26, textAlign: 'center', fontSize: 14, color: 'var(--muted-2)' }}>No contacts in this status.</div>}
 
         {isPhone && shown.map((p, i) => (
-          <div key={p.journeyId} className="rowhover" style={{ padding: 14, borderBottom: '1px solid var(--border-soft)' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11 }}>
-              <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.name)}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontSize: 16, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                  <span className="pill" style={pillFor(p.status)}>{p.status}</span>
-                </div>
-                <div style={{ fontSize: 12, color: p.phone ? 'var(--muted)' : 'var(--muted-2)', marginTop: 2 }}>{p.phone || 'no phone on record'}</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Last touch: {p.last}{isCoordinator && p.logs[0] ? ` · by ${actorNames[p.logs[0].logged_by] || '—'}` : ''}</div>
+          <div key={p.journeyId} className="rowhover" onClick={() => setDetailFor(p)} style={{ padding: '8px 14px', borderBottom: '1px solid var(--border-soft)', cursor: 'pointer' }}>
+            {/* Row 1: avatar, name + phone, status */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{initials(p.name)}</div>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                <span style={{ fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                <span style={{ fontSize: 12, color: p.phone ? 'var(--muted)' : 'var(--muted-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.phone || 'no phone'}</span>
               </div>
+              <span className="pill" style={{ ...pillFor(p.status), flexShrink: 0 }}>{p.status}</span>
             </div>
-            <div style={{ marginTop: 8 }}>
-              {isCoordinator ? (
-                <select
-                  value={p.callerKey || ''}
-                  disabled={busyId === p.journeyId}
-                  onChange={(e) => reassign(p, c.callerPool.find((x) => x.key === e.target.value) || null)}
-                  style={{ width: '100%', minHeight: 40, fontSize: 12, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: p.callerKey ? 'var(--ink-soft)' : 'var(--red)' }}
-                >
-                  <option value="">— unassigned —</option>
-                  {c.callerPool.map((cp) => <option key={cp.key} value={cp.key}>{cp.name}{cp.source === 'nurturing_team' ? ' · Team' : ' · Volunteer'}</option>)}
-                </select>
-              ) : (
-                <div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>Assigned to: {p.assigned}</div>
-              )}
-            </div>
+            {/* Row 2: Call, Message, WhatsApp, Log, ⋯ — equal width, one row */}
             {isCoordinator && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-                <ReachButtons phone={p.phone} messaging={messaging} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
-                {!messaging && <button className="btn btn-ghost" style={{ padding: '9px 14px', fontSize: 12, minHeight: 44 }} onClick={() => setLogFor(p)}>Log</button>}
-                <button title="Remove from campaign" disabled={busyId === p.journeyId} onClick={() => removeRecipient(p)} style={{ padding: '9px 12px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer', marginLeft: 'auto', minHeight: 44 }}>✕ Remove</button>
+              <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                <ReachButtons compact phone={p.phone} messaging={messaging} smsText={fillTemplate(c.sms_template, { name: p.name, myName })} waText={fillTemplate(c.whatsapp_template, { name: p.name, myName })} />
+                {!messaging && <button style={{ flex: 1, height: 36, fontSize: 14, fontWeight: 600, borderRadius: 8, border: '1px solid var(--border)', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }} onClick={() => setLogFor(p)}>Log</button>}
+                <KebabMenu buttonStyle={{ height: 36, width: 36, fontSize: 16 }} items={[
+                  { label: 'Assign caller', onClick: () => setAssignFor(p) },
+                  { label: 'Remove', onClick: () => removeRecipient(p), danger: true, disabled: busyId === p.journeyId },
+                  { label: 'View details', onClick: () => setDetailFor(p) },
+                ]} />
               </div>
             )}
           </div>
@@ -786,16 +796,12 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
       </>)}
 
       {detailTab === 'callers' && (<>
-      {/* callers */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 3px' }}>Callers</h3>
-          <p style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--muted)' }}>The volunteers &amp; team calling this cohort.</p>
+      {/* callers — no heading/description here, the tab label already says "Callers" */}
+      {isCoordinator && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+          <button className="btn btn-ghost" style={{ height: 36, padding: '0 14px', fontSize: 12 }} onClick={() => setAddCaller(true)}>+ Add caller</button>
         </div>
-        {isCoordinator && (
-          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 14px' }} onClick={() => setAddCaller(true)}>+ Add caller</button>
-        )}
-      </div>
+      )}
       <div className="card" style={{ overflow: 'hidden' }}>
         {!isPhone && (
           <div style={{ display: 'grid', gridTemplateColumns: callerCols, gap: 12, padding: '13px 22px', background: '#FAF4EA', borderBottom: '1px solid var(--border-soft)', fontSize: 12, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>
@@ -869,6 +875,73 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
       {editing && (
         <EditCampaignDialog campaign={c} me={me} onClose={() => setEditing(false)} onSaved={reload} onToast={onToast} />
       )}
+
+      {assignFor && (
+        <AssignCallerModal
+          row={assignFor}
+          callerPool={c.callerPool}
+          busy={busyId === assignFor.journeyId}
+          onAssign={(caller) => { reassign(assignFor, caller); setAssignFor(null) }}
+          onClose={() => setAssignFor(null)}
+        />
+      )}
+      {detailFor && (
+        <RecipientDetailPanel row={detailFor} isCoordinator={isCoordinator} actorNames={actorNames} onClose={() => setDetailFor(null)} />
+      )}
     </Pad>
   )
+}
+
+// Kebab → "Assign caller": the same reassignment the desktop row's inline <select>
+// does, presented as a small modal instead of living directly on the mobile card.
+function AssignCallerModal({ row, callerPool, busy, onAssign, onClose }) {
+  return (
+    <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
+      <div className="card modal-sheet" style={{ width: 380, maxWidth: '100%', padding: 22 }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 4px' }}>Assign caller</h3>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>{row.name}</div>
+        <select
+          autoFocus
+          disabled={busy}
+          defaultValue={row.callerKey || ''}
+          onChange={(e) => onAssign(callerPool.find((x) => x.key === e.target.value) || null)}
+          style={{ width: '100%', minHeight: 44, fontSize: 14, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)' }}
+        >
+          <option value="">— unassigned —</option>
+          {callerPool.map((cp) => <option key={cp.key} value={cp.key}>{cp.name}{cp.source === 'nurturing_team' ? ' · Team' : ' · Volunteer'}</option>)}
+        </select>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <button className="btn btn-ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Kebab → "View details" (also opened by tapping the card): the fields dropped
+// from the compact card — last touch and who's assigned.
+function RecipientDetailPanel({ row, isCoordinator, actorNames, onClose }) {
+  return (
+    <SidePanel onClose={onClose}>
+      <PanelHeader onClose={onClose}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ width: 46, height: 46, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 600 }}>{initials(row.name)}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 3px' }}>{row.name}</h2>
+            <span className="pill" style={pillFor(row.status)}>{row.status}</span>
+          </div>
+        </div>
+      </PanelHeader>
+      <div style={{ padding: '20px 26px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <DetailField label="Phone" value={row.phone || 'No phone on record'} />
+          {isCoordinator && <DetailField label="Assigned to" value={row.assigned} />}
+          <DetailField label="Last touch" value={row.last + (isCoordinator && row.logs[0] ? ` · by ${actorNames[row.logs[0].logged_by] || '—'}` : '')} />
+        </div>
+      </div>
+    </SidePanel>
+  )
+}
+function DetailField({ label, value }) {
+  return (<div><div style={{ fontSize: 12, color: 'var(--muted-2)', marginBottom: 4 }}>{label}</div><div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{value}</div></div>)
 }

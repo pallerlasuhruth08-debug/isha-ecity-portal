@@ -16,16 +16,22 @@ import { multiFieldOr } from '../lib/searchFilter'
 import EventInterestPanel from '../components/EventInterestPanel'
 import { eventDays } from '../lib/planning'
 import KebabMenu from '../components/KebabMenu'
+import { useBreakpoint } from '../lib/useBreakpoint'
 
 // EVENT HUB — the home for events. The list surfaces overdue/at-risk phases across
 // all events; opening one shows four LENSES over four separate tables joined by the
 // event's id (Planning blocks, its Interest pool, its linked Campaigns, Attendance).
 // Rows open their target directly — no intermediary "open" buttons.
-export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStartCampaign, onOpenInterestInbox, onCreateEvent, openEventId = null, onEventConsumed }) {
+export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStartCampaign, onOpenInterestInbox, openEventId = null, onEventConsumed, onListModeChange, onCreateEvent }) {
+  const { isPhone } = useBreakpoint()
   const [events, setEvents] = useState(null)
   const [phasesByEvent, setPhasesByEvent] = useState({})
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
+
+  // Report list-vs-detail mode up so the Topbar knows when to show "+ Create event"
+  // (it only makes sense on the events LIST, not inside a specific event's hub).
+  useEffect(() => { onListModeChange?.(!openId) }, [openId, onListModeChange])
 
   const load = useCallback(async () => {
     setErr(null)
@@ -61,15 +67,16 @@ export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStar
 
   return (
     <Pad>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
-        <p className="mobile-hide" style={{ margin: 0, fontSize: 14, color: 'var(--muted)', maxWidth: 520 }}>
-          Every event and everything linked to it — planning, interest, campaigns and attendance. Overdue phases across all events surface up top.
-        </p>
-        {isCoordinator && onCreateEvent && (
-          <button className="btn btn-primary" style={{ fontSize: 12, padding: '8px 14px' }} onClick={onCreateEvent}>＋ Create event</button>
-        )}
-      </div>
       <EventList events={events} phasesByEvent={phasesByEvent} onOpen={setOpenId} />
+      {isPhone && isCoordinator && onCreateEvent && (
+        <>
+          {/* Clears the fixed bar below so the last list row stays reachable. */}
+          <div style={{ height: 68 }} />
+          <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, padding: '10px 14px calc(10px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '1px solid var(--border)', zIndex: 120 }}>
+            <button className="btn btn-primary" onClick={onCreateEvent} style={{ width: '100%', height: 48, justifyContent: 'center', fontSize: 15 }}>＋ Create event</button>
+          </div>
+        </>
+      )}
     </Pad>
   )
 }
