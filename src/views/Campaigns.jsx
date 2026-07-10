@@ -62,7 +62,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
     try {
       const { data: camps, error: e1 } = await supabase
         .from('campaigns')
-        .select('id, name, goal, script, message, whatsapp_template, sms_template, segment, audience, status, center_id, created_at, is_test, event_id, edited_by, edited_at, campaign_type')
+        .select('id, name, goal, script, message, whatsapp_template, sms_template, segment, audience, status, center_id, created_at, is_test, event_id, edited_by, edited_at, campaign_type, portal_token')
         .order('created_at', { ascending: false })
       if (e1) throw e1
 
@@ -88,7 +88,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
 
       const { data: splits, error: e4 } = await supabase
         .from('campaign_splits')
-        .select('id, campaign_id, split_number, share_token, created_at')
+        .select('id, campaign_id, split_number, share_token, created_at, claimed_by_name, claimed_by_phone, claimed_at, last_active_at')
         .order('split_number')
       if (e4) throw e4
       setSplitsByCampaign(
@@ -379,34 +379,93 @@ function EventLinkControl({ campaign, eventName, isCoordinator, reload, onToast 
   )
 }
 
-// Divide the campaign's active recipients into N groups (random order, remainder to
-// the first groups) and give each group a shareable, revocable link to the volunteer
-// portal. Splitting only offered while none exist yet — re-splitting a live campaign
-// would silently reshuffle links already handed out, so that's a distinct action we
-// haven't built (existing splits can only be regenerated/shared, not redivided).
-function CampaignSplits({ campaignId, contacts, splits, reload, onToast }) {
+const agoFrom = (iso) => {
+  if (!iso) return ''
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} min ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`
+  return `${Math.floor(hrs / 24)} day${Math.floor(hrs / 24) === 1 ? '' : 's'} ago`
+}
+const VERIFIED_LABEL = { phone: 'phone', email: 'email', coordinator: 'coordinator' }
+
+// Divide the campaign's active recipients into N batches (random order, remainder
+// to the first batches). Batches then self-assign via the ONE shared campaign
+// portal link (campaigns.portal_token) — no per-batch link, no coordinator
+// hand-assignment. Splitting only offered while none exist yet — redividing a
+// live campaign would silently reshuffle recipients out from under volunteers
+// already mid-way through their batch.
+function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
   const [n, setN] = useState(2)
   const [busy, setBusy] = useState(false)
+  const [sessions, setSessions] = useState([])
 
-  const portalLink = (token) => `${window.location.origin}${window.location.pathname}#volunteer=${token}`
-  async function copyLink(token) {
+  const portalLink = `${window.location.origin}${window.location.pathname}#volunteer-portal/${campaign.portal_token}`
+  async function copyLink() {
     try {
-      await navigator.clipboard.writeText(portalLink(token))
+      await navigator.clipboard.writeText(portalLink)
       onToast('Link copied.')
     } catch {
-      onToast('Could not copy — link: ' + portalLink(token))
+      onToast('Could not copy — link: ' + portalLink)
     }
   }
-  async function regenerate(split) {
-    if (!window.confirm(`Regenerate the link for Split ${split.split_number}? The current link will stop working immediately — anyone still using it loses access.`)) return
+
+  const loadSessions = useCallback(() => {
+    supabase.from('portal_sessions').select('id, phone, name, status, verified_by, batch_id, expires_at, first_used_at')
+      .eq('campaign_id', campaign.id).order('first_used_at', { ascending: false })
+      .then(({ data }) => setSessions(data || []))
+  }, [campaign.id])
+  useEffect(() => { loadSessions() }, [loadSessions])
+
+  const verifiedByPhone = Object.fromEntries(sessions.filter((s) => s.status === 'approved').map((s) => [s.phone, s.verified_by]))
+  const pending = sessions.filter((s) => s.status === 'pending')
+
+  async function approveSession(s) {
     setBusy(true)
     try {
-      const token = crypto.randomUUID().replace(/-/g, '')
-      const { error } = await supabase.from('campaign_splits').update({ share_token: token }).eq('id', split.id)
+      const { error } = await supabase.from('portal_sessions').update({ status: 'approved', verified_by: 'coordinator', approved_by: myId, approved_at: new Date().toISOString() }).eq('id', s.id)
       if (error) throw error
-      onToast(`Split ${split.split_number} link regenerated.`)
-      reload()
-    } catch (e) { onToast('Could not regenerate: ' + (e.message || e)) } finally { setBusy(false) }
+      const { data, error: e2 } = await supabase.rpc('claim_portal_assign_batch', { p_token: campaign.portal_token, p_phone: s.phone })
+      if (e2) throw e2
+      onToast(`${s.name} approved` + (data?.status === 'ok' ? ' and assigned a batch.' : ' — no batch available yet.'))
+      loadSessions(); reload()
+    } catch (e) { onToast('Could not approve: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+  async function rejectSession(s) {
+    if (!window.confirm(`Reject ${s.name}'s access request?`)) return
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('portal_sessions').update({ status: 'rejected' }).eq('id', s.id)
+      if (error) throw error
+      onToast(`${s.name} rejected.`)
+      loadSessions()
+    } catch (e) { onToast('Could not reject: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+  // Frees the batch AND clears the volunteer's stored batch_id -- their next visit
+  // (or 30s poll) re-runs auto-assignment and picks up a fresh one automatically.
+  async function releaseBatch(s) {
+    if (!window.confirm(`Release Split ${s.split_number}? ${s.claimed_by_name} will lose access; the batch becomes available again.`)) return
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('campaign_splits').update({ claimed_by_name: null, claimed_by_phone: null, claimed_at: null, last_active_at: null }).eq('id', s.id)
+      if (error) throw error
+      if (s.claimed_by_phone) await supabase.from('portal_sessions').update({ batch_id: null }).eq('campaign_id', campaign.id).eq('phone', s.claimed_by_phone)
+      onToast(`Split ${s.split_number} released.`)
+      loadSessions(); reload()
+    } catch (e) { onToast('Could not release: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+  async function extendSession(s) {
+    const sess = sessions.find((x) => x.phone === s.claimed_by_phone)
+    if (!sess) return onToast('No portal session found for this volunteer.')
+    setBusy(true)
+    try {
+      const base = Math.max(new Date(sess.expires_at).getTime(), Date.now())
+      const { error } = await supabase.from('portal_sessions').update({ expires_at: new Date(base + 24 * 3600 * 1000).toISOString() }).eq('id', sess.id)
+      if (error) throw error
+      onToast(`${s.claimed_by_name}'s session extended by 24 hours.`)
+      loadSessions()
+    } catch (e) { onToast('Could not extend: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
   async function createSplits() {
@@ -423,10 +482,9 @@ function CampaignSplits({ campaignId, contacts, splits, reload, onToast }) {
       const remainder = total % n
       const { data: rows, error: e1 } = await supabase
         .from('campaign_splits')
-        .insert(Array.from({ length: n }, (_, i) => ({ campaign_id: campaignId, split_number: i + 1 })))
+        .insert(Array.from({ length: n }, (_, i) => ({ campaign_id: campaign.id, split_number: i + 1 })))
         .select('id, split_number')
       if (e1) throw e1
-      const bySplit = Object.fromEntries(rows.map((r) => [r.split_number, r.id]))
       let cursor = 0
       for (let s = 1; s <= n; s++) {
         const size = base + (s <= remainder ? 1 : 0)
@@ -445,12 +503,12 @@ function CampaignSplits({ campaignId, contacts, splits, reload, onToast }) {
   if (splits.length === 0) {
     return (
       <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-soft)' }}>
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Split the call list into groups, each with its own volunteer-portal link.</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Split the call list into batches. Volunteers self-assign to one via a single shared link — no per-batch link to hand out.</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input type="number" min={2} max={contacts.length} value={n} onChange={(e) => setN(Number(e.target.value))}
             style={{ width: 70, padding: '7px 9px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 14, fontFamily: 'inherit' }} />
-          <span style={{ fontSize: 12, color: 'var(--muted)' }}>groups from {contacts.length} people</span>
-          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }} disabled={busy || contacts.length < 2} onClick={createSplits}>{busy ? 'Splitting…' : 'Split into groups'}</button>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>batches from {contacts.length} people</span>
+          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }} disabled={busy || contacts.length < 2} onClick={createSplits}>{busy ? 'Splitting…' : 'Split into batches'}</button>
         </div>
       </div>
     )
@@ -458,19 +516,66 @@ function CampaignSplits({ campaignId, contacts, splits, reload, onToast }) {
 
   return (
     <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-soft)' }}>
-      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', marginBottom: 10 }}>Splits</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {pending.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#C2691F', marginBottom: 8 }}>Pending approvals</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {pending.map((s) => (
+              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12.5, padding: '8px 10px', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 9 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#C2691F', flexShrink: 0 }} />
+                <span style={{ fontWeight: 600 }}>{s.name}</span>
+                <span style={{ color: 'var(--muted)' }}>{s.phone}</span>
+                <span style={{ color: 'var(--muted)' }}>· Requested {agoFrom(s.first_used_at)}</span>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                  <button className="btn btn-primary" disabled={busy} style={{ height: 30, padding: '0 11px', fontSize: 12 }} onClick={() => approveSession(s)}>Approve →</button>
+                  <button disabled={busy} style={{ height: 30, padding: '0 11px', fontSize: 12, fontWeight: 600, borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }} onClick={() => rejectSession(s)}>Reject ✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)', marginBottom: 10 }}>Batches</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {splits.map((s) => {
           const rows = contacts.filter((c) => c.splitNumber === s.split_number)
-          const called = rows.filter((c) => c.logs.length > 0).length
+          const sent = rows.filter((c) => c.messageStatus && c.messageStatus !== 'to_message').length
+          const pct = rows.length ? Math.round((sent / rows.length) * 100) : 0
+          const claimed = !!s.claimed_by_phone
           return (
-            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
-              <span style={{ fontWeight: 600, flexShrink: 0 }}>Split {s.split_number}</span>
-              <span style={{ color: 'var(--muted)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rows.length} people · {called} called</span>
-              <button className="btn btn-ghost" style={{ height: 32, padding: '0 10px', fontSize: 12, flexShrink: 0 }} disabled={busy} onClick={() => copyLink(s.share_token)}>Copy</button>
-              <KebabMenu buttonStyle={{ height: 32, width: 32, fontSize: 14 }} items={[
-                { label: 'Regenerate token', onClick: () => regenerate(s), disabled: busy },
-              ]} />
+            <div key={s.id} style={{ padding: '10px 12px', border: '1px solid var(--border-soft)', borderRadius: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12.5 }}>
+                <span style={{ fontWeight: 600, flexShrink: 0 }}>Split {s.split_number}</span>
+                <span style={{ color: 'var(--muted)' }}>{rows.length} people</span>
+                <span style={{ color: 'var(--muted)' }}>{sent} sent</span>
+                {claimed ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 600, color: '#4E7C3F' }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#4E7C3F' }} />{s.claimed_by_name}
+                  </span>
+                ) : (
+                  <span style={{ color: 'var(--muted-2)', fontWeight: 600 }}>Available</span>
+                )}
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                  <button className="btn btn-ghost" style={{ height: 30, padding: '0 10px', fontSize: 12 }} disabled={busy} onClick={copyLink}>Copy link</button>
+                  {claimed && (
+                    <>
+                      <button className="btn btn-ghost" style={{ height: 30, padding: '0 10px', fontSize: 12 }} disabled={busy} onClick={() => extendSession(s)}>+24hrs</button>
+                      <button style={{ height: 30, padding: '0 10px', fontSize: 12, fontWeight: 600, borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }} disabled={busy} onClick={() => releaseBatch(s)}>Release</button>
+                    </>
+                  )}
+                </div>
+              </div>
+              {rows.length > 0 && (
+                <div style={{ height: 5, borderRadius: 3, background: '#EFE4D3', overflow: 'hidden', marginTop: 8 }}>
+                  <div style={{ height: '100%', width: `${pct}%`, background: 'var(--orange)', borderRadius: 3 }} />
+                </div>
+              )}
+              {claimed && (
+                <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginTop: 6 }}>
+                  Verified: {VERIFIED_LABEL[verifiedByPhone[s.claimed_by_phone]] || 'unknown'} · Last active {agoFrom(s.last_active_at)}
+                </div>
+              )}
             </div>
           )
         })}
@@ -720,7 +825,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           )}
         </div>
         <EventLinkControl campaign={c} eventName={eventNames[c.event_id]?.name} isCoordinator={isCoordinator} reload={reload} onToast={onToast} />
-        {isCoordinator && <CampaignSplits campaignId={c.id} contacts={c.contacts} splits={splits} reload={reload} onToast={onToast} />}
+        {isCoordinator && <CampaignSplits campaign={c} contacts={c.contacts} splits={splits} myId={myId} reload={reload} onToast={onToast} />}
         {c.edited_at && (
           <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted-2)' }}>
             Last edited {new Date(c.edited_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}

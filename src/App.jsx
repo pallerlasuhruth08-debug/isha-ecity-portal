@@ -18,6 +18,7 @@ import Login from './views/Login'
 import PublicAccept from './views/PublicAccept'
 import PublicInterest from './views/PublicInterest'
 import PublicVolunteerPortal from './views/PublicVolunteerPortal'
+import VolunteerPortalClaim from './views/VolunteerPortalClaim'
 import UtilityDrawer from './components/UtilityDrawer'
 import CreateEventModal from './components/CreateEventModal'
 import { TAB_TITLES, TAB_LABELS, tabsForSections } from './lib/roles'
@@ -36,6 +37,16 @@ function readHashToken(key) {
   const m = (typeof window !== 'undefined' ? window.location.hash || '' : '').match(new RegExp(`${key}=([0-9a-f]{32})`, 'i'))
   return m ? m[1] : null
 }
+// New claim-based portal route: #volunteer-portal/<32-hex campaign token>[/batch/<uuid>].
+// Path-shaped (not a=b) since it carries an optional second segment; hash-based (not a
+// real path) because this is a static GH Pages deploy with no server-side SPA fallback,
+// and these links get opened directly from WhatsApp. A volunteer never types the
+// /batch/<id> part themselves — it's only ever set by the app after auto-assignment.
+function readVolunteerPortalRoute() {
+  const h = typeof window !== 'undefined' ? window.location.hash || '' : ''
+  const m = h.match(/volunteer-portal\/([0-9a-f]{32})(?:\/batch\/([0-9a-f-]{36}))?/i)
+  return m ? { token: m[1], splitId: m[2] || null } : null
+}
 
 export default function App() {
   // Checked BEFORE any hook so the public pages bypass the auth gate entirely.
@@ -45,6 +56,8 @@ export default function App() {
   if (interestId) return <PublicInterest eventId={interestId} />
   const volunteerToken = readHashToken('volunteer')
   if (volunteerToken) return <PublicVolunteerPortal token={volunteerToken} />
+  const vpRoute = readVolunteerPortalRoute()
+  if (vpRoute) return <VolunteerPortalClaim token={vpRoute.token} splitId={vpRoute.splitId} />
 
   const { session, profile, sections } = useSession()
 
