@@ -348,6 +348,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState(false)
   const [showComments, setShowComments] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
 
   const byPerson = {}
   for (const a of assigns) {
@@ -378,9 +379,14 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
     return () => clearTimeout(h)
   }, [q])
 
-  // Tab 1 (default): this event's Volunteer Interest pool = only APPROVED interests,
-  // minus anyone already on ANY team for this event. Interested/Contacted/Declined/
-  // No-Response never appear here — approval is what flows a volunteer into the pool.
+  // Tab 1 (default): this event's Volunteer Interest pool = every APPROVED interest.
+  // Interested/Contacted/Declined/No-Response never appear here — approval is what
+  // flows a volunteer into the pool. A volunteer already on another team for this
+  // event (or even this one) still shows up here — a person can legitimately be on
+  // more than one team, and each row already surfaces "Already in: <team>" / "on
+  // team" via teamsForPerson/memberIds below, same as the All-Volunteers tab. (A
+  // prior version pre-filtered out anyone assigned to ANY team, which meant someone
+  // already on one team could never be found here to add to a second.)
   // Loaded once per picker-open (a fresh open reloads, so it can't go stale).
   useEffect(() => {
     if (!adding) return
@@ -390,12 +396,11 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
       .eq('activity_id', ev.id).eq('status', 'approved')
       .then(({ data }) => {
         if (!alive) return
-        const assignedIds = new Set(allAssigns.filter((a) => ['assigned', 'show', 'involved'].includes(a.status)).map((a) => a.person_id))
         const seen = new Set()
         const pool = []
         for (const row of data || []) {
           const p = row.person
-          if (!p || assignedIds.has(p.id) || seen.has(p.id)) continue
+          if (!p || seen.has(p.id)) continue
           seen.add(p.id); pool.push({ ...p, availability_dates: row.availability_dates || [] })
         }
         setInterestPool(pool)
@@ -512,109 +517,116 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   return (
     <div className="card" style={{ padding: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
+        <button className="tap44" onClick={() => setCollapsed((c) => !c)} title={collapsed ? 'Expand team' : 'Collapse team'}
+          style={{ fontSize: 13, padding: '4px 6px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform .15s ease' }}>▾</button>
+        <div style={{ minWidth: 0, flex: 1, cursor: 'pointer' }} onClick={() => setCollapsed((c) => !c)}>
           <div style={{ fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{block.heading}{block.activity_type_id && typeLabel(block.activity_type_id) ? <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {typeLabel(block.activity_type_id)}</span> : null}</div>
           {pocs.length > 0 && <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>POC: {pocs.map((m) => people[m.person_id]?.full_name).filter(Boolean).join(', ')}</div>}
         </div>
         <span className="pill" style={{ ...(full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')), flexShrink: 0 }}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
 
-        {/* Desktop: inline actions when space allows. */}
+        {/* Desktop: inline actions when space allows. Opening add/edit/comments also
+            expands the card so the coordinator immediately sees what they opened. */}
         <div className="desktop-only" style={{ gap: 8, flexShrink: 0 }}>
           {isCoordinator && (
-            <button className="tap44" onClick={() => setAdding((a) => !a)} title="Add member" style={{ fontSize: 12, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? 'var(--orange)' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
+            <button className="tap44" onClick={() => { setAdding((a) => !a); setCollapsed(false) }} title="Add member" style={{ fontSize: 12, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? 'var(--orange)' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
           )}
           {isCoordinator && (
-            <button className="tap44" onClick={() => setEditing(true)} title="Edit team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
+            <button className="tap44" onClick={() => { setEditing(true); setCollapsed(false) }} title="Edit team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
           )}
           {isCoordinator && (
             <button className="tap44" disabled={busy} onClick={removeTeam} title="Delete / archive team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>🗑</button>
           )}
-          <button className="tap44" onClick={() => setShowComments((s) => !s)} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: showComments ? '#EDE4D6' : '#fff', cursor: 'pointer' }}>💬</button>
+          <button className="tap44" onClick={() => { setShowComments((s) => !s); setCollapsed(false) }} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: showComments ? '#EDE4D6' : '#fff', cursor: 'pointer' }}>💬</button>
         </div>
 
         {/* Mobile: everything collapses behind one 3-dot menu so it never crowds the team name. */}
         <div className="mobile-only">
           <KebabMenu items={[
             { label: 'Dates: ' + (phaseSpan || '—'), view: true },
-            ...(isCoordinator ? [{ label: adding ? 'Hide add member' : '＋ Add member', onClick: () => setAdding((a) => !a) }] : []),
-            ...(isCoordinator ? [{ label: 'Edit team', onClick: () => setEditing(true) }] : []),
-            { label: showComments ? 'Hide comments' : 'Show comments', onClick: () => setShowComments((s) => !s) },
+            ...(isCoordinator ? [{ label: adding ? 'Hide add member' : '＋ Add member', onClick: () => { setAdding((a) => !a); setCollapsed(false) } }] : []),
+            ...(isCoordinator ? [{ label: 'Edit team', onClick: () => { setEditing(true); setCollapsed(false) } }] : []),
+            { label: showComments ? 'Hide comments' : 'Show comments', onClick: () => { setShowComments((s) => !s); setCollapsed(false) } },
             ...(isCoordinator ? [{ label: 'Delete / archive team', onClick: removeTeam, danger: true, disabled: busy }] : []),
           ]} />
         </div>
       </div>
-      {editing && (
-        <CreateTeamForm ev={ev} types={types} firstDay={firstDay} me={me} block={block}
-          onClose={() => setEditing(false)} onToast={onToast} onCreated={() => { setEditing(false); onChanged() }} />
-      )}
+      {!collapsed && (
+        <>
+          {editing && (
+            <CreateTeamForm ev={ev} types={types} firstDay={firstDay} me={me} block={block}
+              onClose={() => setEditing(false)} onToast={onToast} onCreated={() => { setEditing(false); onChanged() }} />
+          )}
 
-      {members.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
-          {members.map((m) => {
-            const p = people[m.person_id]
-            return (
-              <div key={m.person_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #F4EEE2' }}>
-                <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>{initials(p?.full_name || '?')}</div>
-                <div style={{ fontSize: 14, fontWeight: 500 }}>{p?.full_name || 'Unknown'}</div>
-                {m.poc && <span className="pill" style={{ ...pill('#F3E3D2', 'var(--rust)'), fontSize: 12 }}>POC</span>}
-                {isCoordinator && (
-                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                    <button className="tap44" disabled={busy} onClick={() => togglePoc(m.person_id, p?.full_name, m.poc)} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: m.poc ? 'var(--rust)' : 'var(--muted)', cursor: 'pointer' }}>{m.poc ? '★ POC' : '☆ POC'}</button>
-                    <button className="tap44" disabled={busy} onClick={() => removeMember(m.person_id, p?.full_name)} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Remove</button>
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {isCoordinator && adding && (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-            <button className="tap44" onClick={() => setPickerTab('interest')}
-              style={{ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 7, border: '1px solid var(--border)', cursor: 'pointer', background: pickerTab === 'interest' ? '#241B14' : '#fff', color: pickerTab === 'interest' ? '#F6ECDC' : 'var(--ink-soft)' }}>
-              Volunteer Interests{interestPool.length ? ` (${interestPool.length})` : ''}
-            </button>
-            <button className="tap44" onClick={() => setPickerTab('all')}
-              style={{ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 7, border: '1px solid var(--border)', cursor: 'pointer', background: pickerTab === 'all' ? '#241B14' : '#fff', color: pickerTab === 'all' ? '#F6ECDC' : 'var(--ink-soft)' }}>
-              All Volunteers
-            </button>
-          </div>
-          <div style={{ position: 'relative' }}>
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or phone…" style={{ fontSize: 13, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, width: '100%' }} />
-            <div className="card" style={{ marginTop: 6, boxShadow: 'var(--shadow-lg)', padding: 6, maxHeight: 260, overflowY: 'auto' }}>
-              {pickerTab === 'all' && !debouncedQ ? (
-                <div style={{ padding: '10px 9px', fontSize: 12, color: 'var(--muted-2)' }}>Type a name or phone number to search all volunteers.</div>
-              ) : pickerResults.length === 0 ? (
-                <div style={{ padding: '10px 9px', fontSize: 12, color: 'var(--muted-2)' }}>
-                  {pickerTab === 'interest' ? (interestPool.length ? 'No matches.' : 'No one from Volunteer Interests is available for this event yet.') : 'No matches.'}
-                </div>
-              ) : pickerResults.map((p) => {
-                const teams = teamsForPerson(p.id)
-                const inThisTeam = teams.some((t) => t.id === block.id)
+          {members.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
+              {members.map((m) => {
+                const p = people[m.person_id]
                 return (
-                  <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, cursor: 'pointer' }} onClick={() => !busy && addMember(p)}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 500 }}>{p.full_name}</div>
-                      <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>{p.phone || 'no phone'}</div>
-                      {inThisTeam ? (
-                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--rust)' }}>Already a member of this team.</div>
-                      ) : teams.length ? (
-                        <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>Already in: {teams.map((t) => t.name).join(' · ')}</div>
-                      ) : (
-                        <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>Not in any team yet</div>
-                      )}
-                    </div>
-                    <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 12, color: memberIds.has(p.id) ? 'var(--muted)' : 'var(--orange)', fontWeight: 600 }}>{memberIds.has(p.id) ? 'on team' : '+ add'}</span>
+                  <div key={m.person_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #F4EEE2' }}>
+                    <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>{initials(p?.full_name || '?')}</div>
+                    <div style={{ fontSize: 14, fontWeight: 500 }}>{p?.full_name || 'Unknown'}</div>
+                    {m.poc && <span className="pill" style={{ ...pill('#F3E3D2', 'var(--rust)'), fontSize: 12 }}>POC</span>}
+                    {isCoordinator && (
+                      <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                        <button className="tap44" disabled={busy} onClick={() => togglePoc(m.person_id, p?.full_name, m.poc)} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: m.poc ? 'var(--rust)' : 'var(--muted)', cursor: 'pointer' }}>{m.poc ? '★ POC' : '☆ POC'}</button>
+                        <button className="tap44" disabled={busy} onClick={() => removeMember(m.person_id, p?.full_name)} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Remove</button>
+                      </div>
+                    )}
                   </div>
                 )
               })}
             </div>
-          </div>
-        </div>
+          )}
+
+          {isCoordinator && adding && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <button className="tap44" onClick={() => setPickerTab('interest')}
+                  style={{ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 7, border: '1px solid var(--border)', cursor: 'pointer', background: pickerTab === 'interest' ? '#241B14' : '#fff', color: pickerTab === 'interest' ? '#F6ECDC' : 'var(--ink-soft)' }}>
+                  Volunteer Interests{interestPool.length ? ` (${interestPool.length})` : ''}
+                </button>
+                <button className="tap44" onClick={() => setPickerTab('all')}
+                  style={{ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 7, border: '1px solid var(--border)', cursor: 'pointer', background: pickerTab === 'all' ? '#241B14' : '#fff', color: pickerTab === 'all' ? '#F6ECDC' : 'var(--ink-soft)' }}>
+                  All Volunteers
+                </button>
+              </div>
+              <div style={{ position: 'relative' }}>
+                <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or phone…" style={{ fontSize: 13, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, width: '100%' }} />
+                <div className="card" style={{ marginTop: 6, boxShadow: 'var(--shadow-lg)', padding: 6, maxHeight: 260, overflowY: 'auto' }}>
+                  {pickerTab === 'all' && !debouncedQ ? (
+                    <div style={{ padding: '10px 9px', fontSize: 12, color: 'var(--muted-2)' }}>Type a name or phone number to search all volunteers.</div>
+                  ) : pickerResults.length === 0 ? (
+                    <div style={{ padding: '10px 9px', fontSize: 12, color: 'var(--muted-2)' }}>
+                      {pickerTab === 'interest' ? (interestPool.length ? 'No matches.' : 'No one from Volunteer Interests is available for this event yet.') : 'No matches.'}
+                    </div>
+                  ) : pickerResults.map((p) => {
+                    const teams = teamsForPerson(p.id)
+                    const inThisTeam = teams.some((t) => t.id === block.id)
+                    return (
+                      <div key={p.id} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, cursor: 'pointer' }} onClick={() => !busy && addMember(p)}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 500 }}>{p.full_name}</div>
+                          <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>{p.phone || 'no phone'}</div>
+                          {inThisTeam ? (
+                            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--rust)' }}>Already a member of this team.</div>
+                          ) : teams.length ? (
+                            <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>Already in: {teams.map((t) => t.name).join(' · ')}</div>
+                          ) : (
+                            <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>Not in any team yet</div>
+                          )}
+                        </div>
+                        <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 12, color: memberIds.has(p.id) ? 'var(--muted)' : 'var(--orange)', fontWeight: 600 }}>{memberIds.has(p.id) ? 'on team' : '+ add'}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+          {showComments && <CommentThread scope={{ block_id: block.id }} me={me} onToast={onToast} />}
+        </>
       )}
-      {showComments && <CommentThread scope={{ block_id: block.id }} me={me} onToast={onToast} />}
     </div>
   )
 }
