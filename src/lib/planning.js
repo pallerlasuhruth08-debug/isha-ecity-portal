@@ -21,6 +21,20 @@ export function todayISO() {
   return new Date().toISOString().slice(0, 10)
 }
 
+// Day 0 = the day before the event's own first day (a setup/pre-event day some
+// volunteers help with) — prepended so it sorts/indexes as day 0, Day 1 stays the
+// event's real first day exactly as before. Shared by everything that needs a
+// day-chip list (availability filters, team day-requirements, auto-assign matching)
+// so "Day 0" means the same date everywhere.
+export function dayBefore(iso) {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10)
+}
+export function eventDaysWithSetup(start, end) {
+  const days = eventDays(start, end)
+  return days.length ? [dayBefore(days[0]), ...days] : days
+}
+
 // Coarse date-derived status — only a FALLBACK now, for events that have no
 // phases (e.g. old past events not backfilled). The lifecycle is the phase model.
 export function deriveStage(startDate, endDate, t = todayISO()) {

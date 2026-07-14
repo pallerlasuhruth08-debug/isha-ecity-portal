@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { pill } from '../lib/ui'
-import { phaseChipLabel } from '../lib/planning'
+import { phaseChipLabel, eventDaysWithSetup, fmtDay } from '../lib/planning'
 
 // Create a team = create an ACTIVITY BLOCK on this event (one source of truth).
 // Shared by the Teams tab and the Planning to-do launchers. onCreated(blockId) fires
@@ -13,6 +13,7 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
   const [name, setName] = useState(block?.heading || '')
   const [nameEdited, setNameEdited] = useState(!!block)
   const [needed, setNeeded] = useState(block?.volunteers_needed ?? 4)
+  const [requiredDays, setRequiredDays] = useState(block?.required_days || []) // [] = All Days
   const [phaseIds, setPhaseIds] = useState([]) // multi-phase (block_phases junction)
   const [phases, setPhases] = useState([])
   const [attnLocked, setAttnLocked] = useState(false) // team has captured attendance → activity_type locked
@@ -64,6 +65,8 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
   }, [ev.id, editing])
 
   const togglePhase = (id) => setPhaseIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id])
+  const dayList = eventDaysWithSetup(ev.start_date || ev.activity_date, ev.end_date)
+  const toggleDay = (d) => setRequiredDays((cur) => cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d])
   useEffect(() => {
     if (leadQ.trim().length < 2) { setLeadResults([]); return }
     const h = setTimeout(async () => {
@@ -100,9 +103,10 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
     setBusy(true)
     try {
       const primaryPhase = phaseIds[0] || null // legacy phase_id mirrors the first selected phase
+      const requiredDaysPatch = requiredDays.length ? requiredDays : null
       if (editing) {
         // activity_type is LOCKED once attendance exists — never rewrite it here.
-        const patch = { heading: effName, volunteers_needed: Number(needed) || 0, phase_id: primaryPhase }
+        const patch = { heading: effName, volunteers_needed: Number(needed) || 0, phase_id: primaryPhase, required_days: requiredDaysPatch }
         if (!attnLocked) patch.activity_type_id = typeId
         const { error } = await supabase.from('activity_blocks').update(patch).eq('id', block.id)
         if (error) throw error
@@ -113,7 +117,7 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
       }
       const { data: blk, error } = await supabase.from('activity_blocks').insert({
         activity_id: ev.id, heading: effName, activity_type_id: typeId, volunteers_needed: Number(needed) || 0,
-        phase_id: primaryPhase, recruiting_method: 'manual', attendance_mode: 'per_day', created_by: me?.id || null,
+        phase_id: primaryPhase, required_days: requiredDaysPatch, recruiting_method: 'manual', attendance_mode: 'per_day', created_by: me?.id || null,
       }).select('id').single()
       if (error) throw error
       await syncPhases(blk.id)
@@ -127,6 +131,7 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
 
   const lbl = { fontSize: 12, fontWeight: 600, color: '#5C5142', display: 'block', marginBottom: 5 }
   const fld = { fontSize: 13, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)', width: '100%' }
+  const dayChip = (on) => ({ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 8, cursor: 'pointer', border: on ? '1px solid var(--orange)' : '1px solid var(--border)', background: on ? '#F6E8D8' : '#fff', color: on ? 'var(--orange)' : 'var(--muted)' })
 
   return (
     <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
@@ -173,6 +178,18 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
           <span style={lbl}>Size needed</span>
           <input type="number" min={0} value={needed} onChange={(e) => setNeeded(e.target.value)} style={fld} />
         </div>
+
+        {dayList.length > 1 && (
+          <div style={{ marginBottom: 14 }}>
+            <span style={lbl}>Required on <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· leave blank for all days</span></span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button type="button" onClick={() => setRequiredDays([])} style={dayChip(requiredDays.length === 0)}>All Days</button>
+              {dayList.map((d, di) => (
+                <button type="button" key={d} onClick={() => toggleDay(d)} style={dayChip(requiredDays.includes(d))}>Day {di} · {fmtDay(d)}</button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {phases.length > 0 && (
           <div style={{ marginBottom: 14 }}>

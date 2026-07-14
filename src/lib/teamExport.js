@@ -67,6 +67,14 @@ export function teamsToCSV(teams) {
   return rows.map((r) => r.map(csvField).join(',')).join('\r\n')
 }
 
+// Unassigned volunteers -- SAME column layout as the team roster CSV above, minus
+// Email; Team Name/Size Needed/Dates/Is POC are blank since these people have no team.
+export function unassignedToCSV(rows) {
+  const out = [['Team Name', 'Size Needed', 'Dates', 'Member Name', 'Phone', 'Is POC', 'Comments']]
+  for (const r of rows) out.push(['', '', '', r.name, r.phone, '', (r.comments || []).join(', ')])
+  return out.map((row) => row.map(csvField).join(',')).join('\r\n')
+}
+
 export function downloadCSV(filename, csv) {
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)

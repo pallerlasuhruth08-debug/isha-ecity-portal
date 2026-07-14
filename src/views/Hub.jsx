@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { rangeLabel, groupPhases, phaseFlag, currentPhase, phaseTone, fmtDay, countdownLabel } from '../lib/planning'
+import { rangeLabel, groupPhases, phaseFlag, currentPhase, phaseTone, fmtDay, countdownLabel, eventDaysWithSetup } from '../lib/planning'
 import { ensureSeriesWindow } from '../lib/series'
 import { fetchActivityTypes } from '../lib/activityTypes'
 import EventList from '../components/EventList'
@@ -11,7 +11,7 @@ import { Detail as AttendanceDetail, EventActions } from './Events'
 import CommentThread from '../components/CommentThread'
 import CreateTeamForm from '../components/CreateTeamForm'
 import { AddImport } from './Interest'
-import { buildTeamRoster, teamsToCSV, downloadCSV, teamsToPDF } from '../lib/teamExport'
+import { buildTeamRoster, teamsToCSV, downloadCSV, teamsToPDF, unassignedToCSV } from '../lib/teamExport'
 import { multiFieldOr } from '../lib/searchFilter'
 import EventInterestPanel from '../components/EventInterestPanel'
 import { eventDays } from '../lib/planning'
@@ -219,6 +219,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   const [blocks, setBlocks] = useState(null)
   const [assigns, setAssigns] = useState([])
   const [people, setPeople] = useState({})
+  const [interest, setInterest] = useState([])
   const [types, setTypes] = useState([])
   const [err, setErr] = useState(null)
   const [creating, setCreating] = useState(false)
@@ -229,12 +230,14 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
 
   const load = useCallback(async () => {
     setErr(null)
-    const [bl, ty] = await Promise.all([
-      supabase.from('activity_blocks').select('id, heading, volunteers_needed, activity_type_id').eq('activity_id', ev.id).is('archived_at', null).order('created_at'),
+    const [bl, ty, ei] = await Promise.all([
+      supabase.from('activity_blocks').select('id, heading, volunteers_needed, activity_type_id, required_days').eq('activity_id', ev.id).is('archived_at', null).order('created_at'),
       fetchActivityTypes().catch(() => []),
+      supabase.from('event_interest').select('person_id, availability_dates, person:people!event_interest_person_id_fkey(id, full_name, phone)').eq('activity_id', ev.id).eq('status', 'approved'),
     ])
     if (bl.error) { setErr(bl.error.message); setBlocks([]); return }
     setBlocks(bl.data || []); setTypes(ty || [])
+    setInterest(ei.data || [])
     const ids = (bl.data || []).map((b) => b.id)
     if (ids.length) {
       const [asgRes, bpRes, epRes] = await Promise.all([
@@ -278,6 +281,40 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
 
   const typeLabel = (id) => types.find((t) => t.id === id)?.label
   const firstDay = ev.start_date || ev.activity_date
+
+  // Which team(s) (if any) each approved-interest person is already on for THIS event --
+  // drives both the "Unassigned Volunteers" list below and the coverage CSV's Team(s) column.
+  const dayList0 = eventDaysWithSetup(ev.start_date || ev.activity_date, ev.end_date)
+  const blockNameById2 = Object.fromEntries((blocks || []).map((b) => [b.id, b.heading]))
+  const teamsByPerson = {}
+  for (const a of assigns) {
+    if (!['assigned', 'show', 'involved'].includes(a.status)) continue
+    const name = blockNameById2[a.block_id]
+    if (name) (teamsByPerson[a.person_id] ||= new Set()).add(name)
+  }
+  const unassigned = interest.filter((r) => !teamsByPerson[r.person_id])
+  const dayLabel = (dates) => {
+    const s = (dates || []).map((d) => { const i = dayList0.indexOf(d); return i >= 0 ? `Day ${i}` : fmtDay(d) }).join(', ')
+    return s || '—'
+  }
+
+  async function exportUnassigned() {
+    setExporting(true)
+    try {
+      const ids = unassigned.map((r) => r.person_id)
+      const { data: cm } = ids.length
+        ? await supabase.from('comments').select('subject_person_id, body').eq('activity_id', ev.id).in('subject_person_id', ids)
+        : { data: [] }
+      const commentsByPerson = {}
+      for (const c of cm || []) (commentsByPerson[c.subject_person_id] ||= []).push(c.body)
+      const rows = unassigned.map((r) => {
+        const p = r.person || {}
+        return { name: p.full_name || 'Unknown', phone: p.phone || '', comments: commentsByPerson[r.person_id] || [] }
+      })
+      const safeName = ev.name.replace(/[^\w\- ]/g, '').trim() || 'event'
+      downloadCSV(`${safeName} - unassigned volunteers.csv`, unassignedToCSV(rows))
+    } catch (e) { onToast('Could not export: ' + (e.message || e)) } finally { setExporting(false) }
+  }
 
   // Export = the SAME data already on screen (blocks/assignments/people), plus two
   // extra reads for fields the roster needs but this view doesn't otherwise load:
@@ -324,10 +361,40 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
           Teams are this event's activity blocks. Here you create teams and set members &amp; POCs; a team's <strong>dates &amp; attendance mode</strong> are set in <strong>Planning</strong> — it's the same block.
         </div>
       )}
+      {interest.length > 0 && (
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: unassigned.length ? 10 : 0, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>Unassigned Volunteers</span>
+            <span className="pill" style={unassigned.length ? pill('#FBEAD9', '#C2691F') : pill('#EAF2E5', '#4E7C3F')}>{unassigned.length}</span>
+            <button className="btn btn-ghost tap44" disabled={exporting} onClick={exportUnassigned} title="CSV of unassigned volunteers — same columns as the team roster CSV, minus email."
+              style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 11px', opacity: exporting ? 0.6 : 1 }}>⬇ CSV</button>
+          </div>
+          {unassigned.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>Every approved volunteer is on a team.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {unassigned.map((r, i) => {
+                const p = r.person || {}
+                return (
+                  <div key={r.person_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: i ? '1px solid var(--border)' : 'none' }}>
+                    <span style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name || '?')}</span>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.full_name || 'Unknown'}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>{p.phone || '—'}</div>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: 'var(--muted)', textAlign: 'right', flexShrink: 0 }}>{dayLabel(r.availability_dates)}</div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
       {blocks.length === 0 ? <Empty label="No teams yet — create one below." /> : blocks.map((b) => (
         <TeamCard key={b.id} ev={ev} block={b} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator} types={types}
           assigns={assigns.filter((a) => a.block_id === b.id)} allAssigns={assigns} allBlocks={blocks} people={people}
           phaseSpan={phaseSpanByBlock[b.id]} teamDays={teamDaysByBlock[b.id] || []} eventDayList={eventDays(ev.start_date || ev.activity_date, ev.end_date)}
+          dayList0={eventDaysWithSetup(ev.start_date || ev.activity_date, ev.end_date)}
           onToast={onToast} onChanged={load} />
       ))}
       {isCoordinator && (
@@ -338,7 +405,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   )
 }
 
-function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, phaseSpan, teamDays = [], eventDayList = [], types = [], onToast, onChanged }) {
+function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, phaseSpan, teamDays = [], eventDayList = [], dayList0 = [], types = [], onToast, onChanged }) {
   const [q, setQ] = useState('')
   const [debouncedQ, setDebouncedQ] = useState('')
   const [pickerTab, setPickerTab] = useState('interest') // 'interest' (default) | 'all'
@@ -348,7 +415,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState(false)
   const [showComments, setShowComments] = useState(false)
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)
 
   const byPerson = {}
   for (const a of assigns) {
@@ -429,6 +496,12 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   // Map a set of dates to "Day 1, Day 3" labels (day number = position in the event's
   // day list); dates outside that list fall back to their own short date.
   const dayLabels = (dates) => (dates || []).map((d) => { const i = eventDayList.indexOf(d); return i >= 0 ? `Day ${i + 1}` : fmtDay(d) }).join(', ')
+
+  // Required-days summary for this team's card — dayList0 INCLUDES Day 0 (unlike
+  // eventDayList/dayLabels above, which are for the older availability-mismatch check).
+  const requiredDaysLabel = (block.required_days || []).length
+    ? block.required_days.map((d) => { const i = dayList0.indexOf(d); return i >= 0 ? `Day ${i}` : fmtDay(d) }).join(', ')
+    : 'All days'
 
   async function addMember(p) {
     if (memberIds.has(p.id)) { onToast(`${p.full_name} already on the team.`); return }
@@ -521,7 +594,10 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
           style={{ fontSize: 13, padding: '4px 6px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform .15s ease' }}>▾</button>
         <div style={{ minWidth: 0, flex: 1, cursor: 'pointer' }} onClick={() => setCollapsed((c) => !c)}>
           <div style={{ fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{block.heading}{block.activity_type_id && typeLabel(block.activity_type_id) ? <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {typeLabel(block.activity_type_id)}</span> : null}</div>
-          {pocs.length > 0 && <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>POC: {pocs.map((m) => people[m.person_id]?.full_name).filter(Boolean).join(', ')}</div>}
+          <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {pocs.length > 0 && <>POC: {pocs.map((m) => people[m.person_id]?.full_name).filter(Boolean).join(', ')} · </>}
+            {requiredDaysLabel}
+          </div>
         </div>
         <span className="pill" style={{ ...(full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')), flexShrink: 0 }}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
 
