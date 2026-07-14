@@ -17,6 +17,8 @@ import EventInterestPanel from '../components/EventInterestPanel'
 import { eventDays } from '../lib/planning'
 import KebabMenu from '../components/KebabMenu'
 import { useBreakpoint } from '../lib/useBreakpoint'
+import AssignToTeamModal from '../components/AssignToTeamModal'
+import { Checkbox } from '../components/View'
 
 // EVENT HUB — the home for events. The list surfaces overdue/at-risk phases across
 // all events; opening one shows four LENSES over four separate tables joined by the
@@ -227,6 +229,11 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   const [exporting, setExporting] = useState(false)
   const [phaseSpanByBlock, setPhaseSpanByBlock] = useState({})
   const [teamDaysByBlock, setTeamDaysByBlock] = useState({})
+  const [selUnassigned, setSelUnassigned] = useState(() => new Set())
+  const [unassignedSortBy, setUnassignedSortBy] = useState('name') // 'name' | 'phone' | 'day0' | 'day1' | ...
+  const [unassignedSortDir, setUnassignedSortDir] = useState('asc')
+  const [showAssignUnassigned, setShowAssignUnassigned] = useState(false)
+  const [assignUnassignedBusy, setAssignUnassignedBusy] = useState(false)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -292,10 +299,71 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
     const name = blockNameById2[a.block_id]
     if (name) (teamsByPerson[a.person_id] ||= new Set()).add(name)
   }
-  const unassigned = interest.filter((r) => !teamsByPerson[r.person_id])
+  const unassignedRaw = interest.filter((r) => !teamsByPerson[r.person_id])
+  const unassignedDir = unassignedSortDir === 'asc' ? 1 : -1
+  const unassigned = [...unassignedRaw].sort((a, b) => {
+    let cmp = 0
+    if (unassignedSortBy === 'phone') cmp = (a.person?.phone || '').localeCompare(b.person?.phone || '')
+    else if (unassignedSortBy.startsWith('day')) {
+      const d = dayList0[Number(unassignedSortBy.slice(3))]
+      const aOn = d && (a.availability_dates || []).includes(d) ? 1 : 0
+      const bOn = d && (b.availability_dates || []).includes(d) ? 1 : 0
+      cmp = bOn - aOn // ascending = available on that day first
+    }
+    cmp *= unassignedDir
+    if (!cmp) cmp = (a.person?.full_name || '').localeCompare(b.person?.full_name || '') * (unassignedSortBy === 'name' ? unassignedDir : 1)
+    return cmp
+  })
+  const toggleUnassignedSort = (col) => {
+    if (unassignedSortBy === col) setUnassignedSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setUnassignedSortBy(col); setUnassignedSortDir('asc') }
+  }
+  const unassignedSortArrow = (col) => (unassignedSortBy === col ? (unassignedSortDir === 'asc' ? ' ▲' : ' ▼') : '')
   const dayLabel = (dates) => {
     const s = (dates || []).map((d) => { const i = dayList0.indexOf(d); return i >= 0 ? `Day ${i}` : fmtDay(d) }).join(', ')
     return s || '—'
+  }
+
+  const unassignedPageIds = unassigned.map((r) => r.person_id).filter(Boolean)
+  const unassignedSelState = unassignedPageIds.length === 0 ? 'none'
+    : unassignedPageIds.every((id) => selUnassigned.has(id)) ? 'all'
+    : unassignedPageIds.some((id) => selUnassigned.has(id)) ? 'partial' : 'none'
+  const toggleUnassignedAll = () => {
+    setSelUnassigned((prev) => {
+      const allSelected = unassignedPageIds.every((id) => prev.has(id)) && unassignedPageIds.length > 0
+      return allSelected ? new Set() : new Set(unassignedPageIds)
+    })
+  }
+  const toggleUnassignedOne = (personId) => {
+    setSelUnassigned((prev) => {
+      const next = new Set(prev)
+      next.has(personId) ? next.delete(personId) : next.add(personId)
+      return next
+    })
+  }
+
+  async function assignSelectedUnassigned(block) {
+    setAssignUnassignedBusy(true)
+    try {
+      const personIds = [...selUnassigned]
+      if (!personIds.length) { onToast('No volunteers selected.'); return }
+      const { data: existing, error: exErr } = await supabase.from('block_assignments').select('person_id').eq('block_id', block.id).in('person_id', personIds)
+      if (exErr) throw exErr
+      const already = new Set((existing || []).map((r) => r.person_id))
+      const toInsert = personIds.filter((id) => !already.has(id))
+      if (toInsert.length) {
+        const { error } = await supabase.from('block_assignments').insert(
+          toInsert.map((pid) => ({ block_id: block.id, person_id: pid, day_date: firstDay, status: 'assigned', assigned_by: me?.id || null }))
+        )
+        if (error) throw error
+      }
+      onToast(`Added ${toInsert.length} to "${block.heading}"${already.size ? ` · ${already.size} already on the team` : ''}.`)
+      setSelUnassigned(new Set())
+      setShowAssignUnassigned(false)
+      load()
+    } catch (e) {
+      onToast('Could not assign: ' + (e.message || e))
+    } finally { setAssignUnassignedBusy(false) }
   }
 
   async function exportUnassigned() {
@@ -372,23 +440,56 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
           {unassigned.length === 0 ? (
             <div style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>Every approved volunteer is on a team.</div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {unassigned.map((r, i) => {
-                const p = r.person || {}
-                return (
-                  <div key={r.person_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: i ? '1px solid var(--border)' : 'none' }}>
-                    <span style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name || '?')}</span>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.full_name || 'Unknown'}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>{p.phone || '—'}</div>
-                    </div>
-                    <div style={{ fontSize: 11.5, color: 'var(--muted)', textAlign: 'right', flexShrink: 0 }}>{dayLabel(r.availability_dates)}</div>
+            <>
+              {isCoordinator && selUnassigned.size > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', marginBottom: 8, background: '#FBF1E6', border: '1px solid var(--border)', borderRadius: 9 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{selUnassigned.size} selected</span>
+                  <button className="btn btn-primary tap44" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setShowAssignUnassigned(true)}>Assign to team</button>
+                  <button className="btn btn-ghost tap44" style={{ fontSize: 12, padding: '6px 10px', marginLeft: 'auto' }} onClick={() => setSelUnassigned(new Set())}>Clear</button>
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0 8px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--muted-2)' }}>
+                  {isCoordinator ? <Checkbox state={unassignedSelState} onClick={toggleUnassignedAll} /> : <span style={{ width: 19, flexShrink: 0 }} />}
+                  <span style={{ width: 30, flexShrink: 0 }} />
+                  <div style={{ minWidth: 0, flex: 1, display: 'flex', gap: 14 }}>
+                    <span onClick={() => toggleUnassignedSort('name')} style={{ cursor: 'pointer' }}>Name{unassignedSortArrow('name')}</span>
+                    <span onClick={() => toggleUnassignedSort('phone')} style={{ cursor: 'pointer' }}>Phone{unassignedSortArrow('phone')}</span>
                   </div>
-                )
-              })}
-            </div>
+                  <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                    {dayList0.map((d, di) => (
+                      <span key={di} onClick={() => toggleUnassignedSort(`day${di}`)} style={{ width: 18, textAlign: 'center', cursor: 'pointer' }}>D{di}{unassignedSortArrow(`day${di}`)}</span>
+                    ))}
+                  </div>
+                </div>
+                {unassigned.map((r, i) => {
+                  const p = r.person || {}
+                  const avail = r.availability_dates || []
+                  return (
+                    <div key={r.person_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: i ? '1px solid var(--border)' : 'none' }}>
+                      {isCoordinator && <Checkbox state={selUnassigned.has(r.person_id) ? 'all' : 'none'} onClick={() => toggleUnassignedOne(r.person_id)} />}
+                      <span style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.full_name || '?')}</span>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.full_name || 'Unknown'}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--muted-2)' }}>{p.phone || '—'}</div>
+                      </div>
+                      {/* Day-tick sheet -- same day list as required_days/Day-0 elsewhere, so
+                          every unassigned volunteer's full availability is visible at a glance. */}
+                      <div style={{ display: 'flex', gap: 5, flexShrink: 0 }} title={dayLabel(avail)}>
+                        {dayList0.map((d, di) => (
+                          <span key={di} style={{ width: 18, textAlign: 'center', fontSize: 12, fontWeight: 600, color: avail.includes(d) ? 'var(--green, #4E7C3F)' : 'var(--muted-2)' }}>{avail.includes(d) ? '✓' : '·'}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
           )}
         </div>
+      )}
+      {showAssignUnassigned && (
+        <AssignToTeamModal eventId={ev.id} busy={assignUnassignedBusy} onClose={() => setShowAssignUnassigned(false)} onPick={assignSelectedUnassigned} />
       )}
       {blocks.length === 0 ? <Empty label="No teams yet — create one below." /> : blocks.map((b) => (
         <TeamCard key={b.id} ev={ev} block={b} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator} types={types}

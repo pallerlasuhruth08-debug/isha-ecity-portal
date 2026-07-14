@@ -8,6 +8,7 @@ import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import CampaignForm from './CampaignForm'
 import { addRecipientsToCampaign } from '../lib/campaignRecipients'
+import AssignToTeamModal from './AssignToTeamModal'
 
 export const EI_STATUS = [
   { v: 'interested', label: 'Interested', pill: pill('#F1EADD', '#8C7E6B') },
@@ -63,7 +64,25 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
   // Filters: status + event pushed server-side; availability client-side
   const [statusFilter, setStatusFilter] = useState('all')
   const [evFilter, setEvFilter] = useState('all')
-  const [availFilter, setAvailFilter] = useState('all')
+  const [dayFilter, setDayFilter] = useState([]) // multi-select day indices, OR'd together
+  const [allDaysOnly, setAllDaysOnly] = useState(false) // exclusive with dayFilter
+  const [assignFilter, setAssignFilter] = useState('all') // 'all' | 'assigned' | 'unassigned'
+
+  // Sort -- Status is a real column on event_interest, so it sorts correctly across
+  // every page via a normal server-side .order(). "Day N" sorting can't be pushed to
+  // PostgREST (it can't order by an array-contains expression), so when a day-sort is
+  // active loadPage fetches the whole (single-event-scoped) filtered set and sorts +
+  // paginates it client-side — still correct across pages, just a different path.
+  // Volunteer/Phone live on the joined `people` row (PostgREST ignores order-by on a
+  // to-one embed) and Team is computed, so those two aren't offered.
+  const [sortBy, setSortBy] = useState('created_at') // 'created_at' | 'status' | 'day0' | 'day1' | …
+  const [sortDir, setSortDir] = useState('desc')
+  const toggleSort = (col) => {
+    if (sortBy === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    // Day columns: first click shows available-on-that-day first (desc). Others: asc.
+    else { setSortBy(col); setSortDir(col.startsWith('day') ? 'desc' : 'asc') }
+  }
+  const sortArrow = (col) => (sortBy === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '')
 
   const [selected, setSelected] = useState(null)
   const [showCampaign, setShowCampaign] = useState(false)
@@ -75,8 +94,18 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
   // Event list for filter pills — loaded separately so it spans all pages
   const [evList, setEvList] = useState([])
 
+  // Team assignment per person for THIS event — drives the Team column, the
+  // Assigned/Unassigned filter, and the "already on a team" check in Assign to team.
+  const [teamsByPerson, setTeamsByPerson] = useState({})
+  const [teamsLoaded, setTeamsLoaded] = useState(false)
+
   const sel = useTableSelection()
   const reqSeq = useRef(0)
+
+  // When exactly ONE event is in scope (the only way this panel is actually used —
+  // Event Hub always locks it), team assignment and availability can both be pushed
+  // server-side instead of only filtering the current page.
+  const scopedEventId = lockEventId || (evFilter !== 'all' ? evFilter : null)
 
   // Distinct events for the pill row
   useEffect(() => {
@@ -90,11 +119,37 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
     })
   }, [lockEventId, reloadKey])
 
+  // This event's team assignments, once — powers the Team column, the
+  // Assigned/Unassigned filter, and "already on this team" in Assign to team.
+  useEffect(() => {
+    if (!scopedEventId) { setTeamsByPerson({}); setTeamsLoaded(true); return }
+    let alive = true
+    setTeamsLoaded(false)
+    ;(async () => {
+      const { data: bl } = await supabase.from('activity_blocks').select('id, heading').eq('activity_id', scopedEventId).is('archived_at', null)
+      const blocks = bl || []
+      const ids = blocks.map((b) => b.id)
+      const map = {}
+      if (ids.length) {
+        const { data: asg } = await supabase.from('block_assignments').select('person_id, block_id, status').in('block_id', ids)
+        const nameById = Object.fromEntries(blocks.map((b) => [b.id, b.heading]))
+        for (const a of asg || []) {
+          if (!['assigned', 'show', 'involved'].includes(a.status)) continue
+          ;(map[a.person_id] ||= new Set()).add(nameById[a.block_id] || 'Unknown team')
+        }
+      }
+      if (!alive) return
+      setTeamsByPerson(Object.fromEntries(Object.entries(map).map(([k, v]) => [k, [...v]])))
+      setTeamsLoaded(true)
+    })()
+    return () => { alive = false }
+  }, [scopedEventId, reloadKey])
+
   // Reset page + clear selection when server-side filters change
   useEffect(() => {
     setPage(0)
     sel.clear() // eslint-disable-line react-hooks/exhaustive-deps
-  }, [statusFilter, evFilter, availFilter, pageSize])
+  }, [statusFilter, evFilter, dayFilter.join(','), allDaysOnly, assignFilter, sortBy, sortDir, pageSize])
 
   // Preset event filter from Interest Inbox scope jump
   useEffect(() => {
@@ -107,19 +162,29 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
   const daysByEvent = Object.fromEntries(evList.map((e) => [e.id, eventDaysWithSetup(e.start_date || e.activity_date, e.end_date)]))
   const maxDays = Math.max(1, ...evList.map((e) => (daysByEvent[e.id] || []).length))
 
-  // When exactly ONE event is in scope (the only way this panel is actually used —
-  // Event Hub always locks it), the availability filter can be pushed server-side:
-  // "Day N" resolves to that event's Nth real date and becomes a `.contains()` filter,
-  // so total/pagination reflect the FILTERED set, not just the current page.
-  const scopedEventId = lockEventId || (evFilter !== 'all' ? evFilter : null)
+  // "Day N" resolves to the scoped event's Nth real date and becomes an `.overlaps()`
+  // filter (multi-select OR), so total/pagination reflect the FILTERED set, not just
+  // the current page. "All Days" (exact match on every day) stays a separate toggle.
   const scopedDays = scopedEventId ? (daysByEvent[scopedEventId] || []) : []
+  const assignedIds = Object.keys(teamsByPerson)
+  const dayFilterActive = allDaysOnly || dayFilter.length > 0
+  const toggleDay = (i) => { setAllDaysOnly(false); setDayFilter((cur) => cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i]) }
+  const clearDayFilter = () => { setDayFilter([]); setAllDaysOnly(false) }
+  const pickAllDays = () => { setDayFilter([]); setAllDaysOnly(true) }
 
   const loadPage = useCallback(async () => {
-    // A day filter is active but we don't have the scoped event's day list yet
-    // (evList still loading) — wait rather than firing an unfiltered query.
-    if (scopedEventId && availFilter !== 'all' && scopedDays.length === 0) return
+    // A day or assign filter is active but we don't have the scoped event's day list
+    // / team assignments yet — wait rather than firing an unfiltered query.
+    if (scopedEventId && dayFilterActive && scopedDays.length === 0) return
+    if (scopedEventId && assignFilter !== 'all' && !teamsLoaded) return
     setLoading(true)
     const seq = ++reqSeq.current
+    // Assigned filter with nobody assigned yet -- no query can match, skip straight
+    // to an empty result (an empty `.in()` list is otherwise ambiguous/invalid).
+    if (scopedEventId && assignFilter === 'assigned' && assignedIds.length === 0) {
+      setRows([]); setTotal(0); setLoading(false)
+      return
+    }
     try {
       let q = supabase.from('event_interest').select(
         'id, created_at, status, contacted_at, approved_at, availability_dates, note, activity:activities!event_interest_activity_id_fkey(id, name, activity_date, start_date, end_date), person:people!event_interest_person_id_fkey(id, full_name, phone, email)',
@@ -129,13 +194,36 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
       else if (evFilter !== 'all') q = q.eq('activity_id', evFilter)
       if (statusFilter !== 'all') q = q.eq('status', statusFilter)
       if (scopedEventId && scopedDays.length) {
-        if (availFilter === 'all_days') q = q.contains('availability_dates', scopedDays)
-        else if (availFilter.startsWith('day')) {
-          const d = scopedDays[Number(availFilter.slice(3))]
-          if (d) q = q.contains('availability_dates', [d])
+        if (allDaysOnly) q = q.contains('availability_dates', scopedDays)
+        else if (dayFilter.length) {
+          const dates = dayFilter.map((i) => scopedDays[i]).filter(Boolean)
+          if (dates.length) q = q.overlaps('availability_dates', dates)
         }
       }
-      q = q.order('created_at', { ascending: false }).range(page * pageSize, page * pageSize + pageSize - 1)
+      if (scopedEventId && assignFilter === 'assigned') q = q.in('person_id', assignedIds)
+      else if (scopedEventId && assignFilter === 'unassigned' && assignedIds.length) q = q.not('person_id', 'in', `(${assignedIds.join(',')})`)
+      const asc = sortDir === 'asc'
+      // Day sort: PostgREST can't order by "availability contains day N", so pull the
+      // whole scoped/filtered set (single event, bounded) and sort + slice here.
+      const dayIdx = sortBy.startsWith('day') && scopedEventId ? Number(sortBy.slice(3)) : null
+      if (dayIdx !== null && scopedDays[dayIdx]) {
+        q = q.order('created_at', { ascending: false }).limit(2000)
+        const { data, count, error } = await q
+        if (error) throw error
+        if (seq !== reqSeq.current) return
+        const d = scopedDays[dayIdx]
+        const sorted = [...(data || [])].sort((a, b) => {
+          const av = (a.availability_dates || []).includes(d) ? 1 : 0
+          const bv = (b.availability_dates || []).includes(d) ? 1 : 0
+          return asc ? av - bv : bv - av // asc = not-available first, desc = available first
+        })
+        setRows(sorted.slice(page * pageSize, page * pageSize + pageSize))
+        setTotal(count ?? sorted.length)
+        return
+      }
+      if (sortBy === 'status') q = q.order('status', { ascending: asc })
+      else q = q.order('created_at', { ascending: asc })
+      q = q.range(page * pageSize, page * pageSize + pageSize - 1)
       const { data, count, error } = await q
       if (error) throw error
       if (seq !== reqSeq.current) return
@@ -149,7 +237,7 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
       if (seq === reqSeq.current) setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockEventId, evFilter, statusFilter, availFilter, scopedEventId, scopedDays.join(','), page, pageSize, onToast])
+  }, [lockEventId, evFilter, statusFilter, dayFilter.join(','), allDaysOnly, dayFilterActive, assignFilter, sortBy, sortDir, scopedEventId, scopedDays.join(','), teamsLoaded, assignedIds.join(','), page, pageSize, onToast])
 
   useEffect(() => { loadPage() }, [loadPage, reloadKey])
 
@@ -191,6 +279,7 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
   // Fetch all person_ids matching current server-side filters (for Stage 2 "select all"
   // and for bulk actions like Assign to team) -- including the day filter when scoped.
   const fetchAllIds = useCallback(async () => {
+    if (scopedEventId && assignFilter === 'assigned' && assignedIds.length === 0) return []
     const ids = []
     let from = 0
     const CHUNK = 1000
@@ -200,12 +289,14 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
       else if (evFilter !== 'all') q = q.eq('activity_id', evFilter)
       if (statusFilter !== 'all') q = q.eq('status', statusFilter)
       if (scopedEventId && scopedDays.length) {
-        if (availFilter === 'all_days') q = q.contains('availability_dates', scopedDays)
-        else if (availFilter.startsWith('day')) {
-          const d = scopedDays[Number(availFilter.slice(3))]
-          if (d) q = q.contains('availability_dates', [d])
+        if (allDaysOnly) q = q.contains('availability_dates', scopedDays)
+        else if (dayFilter.length) {
+          const dates = dayFilter.map((i) => scopedDays[i]).filter(Boolean)
+          if (dates.length) q = q.overlaps('availability_dates', dates)
         }
       }
+      if (scopedEventId && assignFilter === 'assigned') q = q.in('person_id', assignedIds)
+      else if (scopedEventId && assignFilter === 'unassigned' && assignedIds.length) q = q.not('person_id', 'in', `(${assignedIds.join(',')})`)
       q = q.order('person_id', { ascending: true }).range(from, from + CHUNK - 1)
       const { data, error } = await q
       if (error) throw error
@@ -216,7 +307,7 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
     }
     return [...new Set(ids)]
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockEventId, evFilter, statusFilter, availFilter, scopedEventId, scopedDays.join(',')])
+  }, [lockEventId, evFilter, statusFilter, dayFilter.join(','), allDaysOnly, assignFilter, scopedEventId, scopedDays.join(','), assignedIds.join(',')])
 
   async function openCampaign() {
     if (selCount === 0) { setCampaignIds([]); setShowCampaign(true); return }
@@ -279,13 +370,11 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
   // Unscoped (multi-event, not reachable from the current app) falls back to the
   // old page-local client filter rather than silently ignoring it.
   const matchesAvail = (r) => {
-    if (availFilter === 'all') return true
+    if (!dayFilterActive) return true
     const days = daysByEvent[r.activity?.id] || []
     const avail = r.availability_dates || []
-    if (availFilter === 'all_days') return days.length > 0 && days.every((d) => avail.includes(d))
-    const idx = Number(availFilter.slice(3))
-    const d = days[idx]
-    return d ? avail.includes(d) : false
+    if (allDaysOnly) return days.length > 0 && days.every((d) => avail.includes(d))
+    return dayFilter.some((i) => days[i] && avail.includes(days[i]))
   }
   const shown = scopedEventId ? (rows || []) : (rows || []).filter(matchesAvail)
 
@@ -304,12 +393,21 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
   const activeEvent = evList.find((e) => e.id === campaignEventId)
 
   const showEventCol = !lockEventId
+  // One narrow tick column per event day, replacing the old single "2/4 days" cell —
+  // the on-screen "sheet" the whole row's availability is visible in one glance.
+  const dayCols = Array.from({ length: maxDays }, () => '0.55fr').join(' ')
   const grid = showEventCol
-    ? '34px 2fr 1.2fr 0.85fr 1.4fr 0.9fr'
-    : '34px 2fr 1.3fr 0.9fr 1fr'
+    ? `34px 2fr 1.2fr 0.85fr 1.4fr ${dayCols} 1.2fr`
+    : `34px 2fr 1.3fr 0.9fr ${dayCols} 1.2fr`
+
+  const teamLabel = (personId) => {
+    const teams = personId && teamsByPerson[personId]
+    return teams && teams.length ? teams.join(', ') : 'Unassigned'
+  }
 
   const filterChip = (on) => ({ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 20, cursor: 'pointer', border: on ? 'none' : '1px solid var(--border)', background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', whiteSpace: 'nowrap', flexShrink: 0 })
   const pillRow = { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }
+  const sortHeaderStyle = { cursor: 'pointer', userSelect: 'none' }
 
   return (
     <>
@@ -331,14 +429,25 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
         </div>
       )}
 
-      {/* Availability pills — server-side + paginated when scoped to one event */}
+      {/* Availability pills — multi-select (OR'd together), server-side + paginated
+          when scoped to one event. Day chips toggle independently; "All Days" is a
+          separate exact-match toggle (available every day). */}
       <div className="scroll-tabs" style={{ ...pillRow, marginBottom: 12 }}>
-        <button className="tap44" onClick={() => setAvailFilter('all')} style={filterChip(availFilter === 'all')}>All</button>
-        {Array.from({ length: maxDays }, (_, i) => `day${i}`).map((k, i) => (
-          <button key={k} className="tap44" onClick={() => setAvailFilter(k)} style={filterChip(availFilter === k)}>Day {i}</button>
+        <button className="tap44" onClick={clearDayFilter} style={filterChip(!dayFilterActive)}>All</button>
+        {Array.from({ length: maxDays }, (_, i) => i).map((i) => (
+          <button key={i} className="tap44" onClick={() => toggleDay(i)} style={filterChip(dayFilter.includes(i))}>Day {i}</button>
         ))}
-        <button className="tap44" onClick={() => setAvailFilter('all_days')} style={filterChip(availFilter === 'all_days')}>All Days</button>
+        <button className="tap44" onClick={pickAllDays} style={filterChip(allDaysOnly)}>All Days</button>
       </div>
+
+      {/* Team-assignment pills — only meaningful when scoped to one event */}
+      {scopedEventId && (
+        <div className="scroll-tabs" style={{ ...pillRow, marginBottom: 12 }}>
+          <button className="tap44" onClick={() => setAssignFilter('all')} style={filterChip(assignFilter === 'all')}>All</button>
+          <button className="tap44" onClick={() => setAssignFilter('assigned')} style={filterChip(assignFilter === 'assigned')}>Assigned</button>
+          <button className="tap44" onClick={() => setAssignFilter('unassigned')} style={filterChip(assignFilter === 'unassigned')}>Unassigned</button>
+        </div>
+      )}
 
       <div style={{ marginBottom: 10, fontSize: 14, color: 'var(--muted)' }}>
         {loading ? 'Loading…' : `${total} interest${total === 1 ? '' : 's'}${selCount > 0 ? ` · ${selCount} selected` : ''}`}
@@ -356,9 +465,13 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
             <Checkbox state={pageHeaderState} onClick={togglePage} />
             <span>Volunteer</span>
             <span>Phone</span>
-            <span>Status</span>
+            <span onClick={() => toggleSort('status')} style={sortHeaderStyle} title="Sortable — Volunteer/Phone can't sort correctly across pages (name/phone live on the joined person, not this table)">Status{sortArrow('status')}</span>
             {showEventCol && <span>Event</span>}
-            <span>Availability</span>
+            {Array.from({ length: maxDays }, (_, i) => (
+              <span key={i} onClick={scopedEventId ? () => toggleSort(`day${i}`) : undefined} style={{ textAlign: 'center', ...(scopedEventId ? sortHeaderStyle : {}) }}
+                title={scopedEventId ? 'Sort by availability on this day' : undefined}>D{i}{sortArrow(`day${i}`)}</span>
+            ))}
+            <span>Team</span>
           </div>
         )}
 
@@ -381,6 +494,7 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
               <div style={{ fontSize: 12, color: r.person?.phone ? 'var(--muted)' : 'var(--red)', marginTop: 2 }}>{r.person?.phone || 'no phone'}</div>
               {showEventCol && r.activity && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{r.activity.name}</div>}
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{availLabel(r, daysByEvent)}</div>
+              <div style={{ fontSize: 12, marginTop: 2, color: teamsByPerson[r.person?.id]?.length ? 'var(--muted)' : 'var(--muted-2)' }}>{teamLabel(r.person?.id)}</div>
             </div>
           </div>
         ))}
@@ -399,7 +513,13 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
             <div style={{ fontSize: 14, color: r.person?.phone ? 'var(--ink-soft)' : 'var(--red)' }}>{r.person?.phone || 'no phone'}</div>
             <div><span className="pill" style={EI_STATUS_MAP[r.status || 'interested']?.pill}>{EI_STATUS_MAP[r.status || 'interested']?.label}</span></div>
             {showEventCol && <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.activity?.name || '—'}</div>}
-            <div style={{ fontSize: 14, color: 'var(--muted)' }}>{availLabel(r, daysByEvent)}</div>
+            {Array.from({ length: maxDays }, (_, di) => {
+              const days = daysByEvent[r.activity?.id] || []
+              const d = days[di]
+              const on = d && (r.availability_dates || []).includes(d)
+              return <div key={di} style={{ textAlign: 'center', fontSize: 14, color: on ? 'var(--green, #4E7C3F)' : 'var(--muted-2)' }}>{d ? (on ? '✓' : '·') : ''}</div>
+            })}
+            <div style={{ fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: teamsByPerson[r.person?.id]?.length ? 'var(--ink-soft)' : 'var(--muted-2)' }} title={teamLabel(r.person?.id)}>{teamLabel(r.person?.id)}</div>
           </div>
         ))}
 
@@ -452,56 +572,6 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
         />
       )}
     </>
-  )
-}
-
-// Pick-a-team modal for the "Assign to team" bulk action — lists this event's teams
-// with a live fill count; clicking one assigns the whole (filtered/paginated) selection.
-function AssignToTeamModal({ eventId, busy, onClose, onPick }) {
-  const [teams, setTeams] = useState(null)
-
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      const { data: bl } = await supabase.from('activity_blocks').select('id, heading, volunteers_needed').eq('activity_id', eventId).is('archived_at', null).order('created_at')
-      const blocks = bl || []
-      const ids = blocks.map((b) => b.id)
-      const filledByBlock = {}
-      if (ids.length) {
-        const { data: asg } = await supabase.from('block_assignments').select('block_id, status').in('block_id', ids)
-        for (const a of asg || []) {
-          if (!['assigned', 'show', 'involved'].includes(a.status)) continue
-          filledByBlock[a.block_id] = (filledByBlock[a.block_id] || 0) + 1
-        }
-      }
-      if (alive) setTeams(blocks.map((b) => ({ ...b, filled: filledByBlock[b.id] || 0 })))
-    })()
-    return () => { alive = false }
-  }, [eventId])
-
-  return (
-    <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
-      <div className="card modal-sheet" style={{ width: 420, maxWidth: '100%', maxHeight: '80vh', overflowY: 'auto', padding: 22, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Assign to team</h3>
-          <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={onClose}>✕ Close</button>
-        </div>
-        {!teams ? <Loading label="Loading teams…" /> : teams.length === 0 ? <Empty label="No teams yet — create one in the Teams tab first." /> : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {teams.map((t) => {
-              const full = t.filled >= (t.volunteers_needed || 0)
-              return (
-                <button key={t.id} disabled={busy} onClick={() => onPick(t)} className="rowhover tap44"
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 9, border: '1px solid var(--border)', background: '#fff', cursor: busy ? 'default' : 'pointer', textAlign: 'left', opacity: busy ? 0.6 : 1 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>{t.heading}</span>
-                  <span className="pill" style={full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')}>{t.filled}/{t.volunteers_needed || 0}{full ? ' · full' : ''}</span>
-                </button>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </div>
   )
 }
 
