@@ -467,23 +467,38 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   }
 
   // Destructive-action guard: a team with MARKED attendance (assignment show/no-show/
-  // involved, or event-level attendance rows tagged to this block) is ARCHIVED so its
-  // participation history survives. Only an attendance-free team is hard-deleted — and
-  // even then we warn about the members whose assignments the cascade removes.
+  // involved, or event-level attendance rows tagged to this block), public tap-to-accept
+  // submissions, comments, or phase data is ARCHIVED so that all of it survives. Only a
+  // genuinely untouched team is hard-deleted — and even then we warn about the members
+  // whose assignments the cascade removes. (block_acceptances/comments/block_phases were
+  // previously left out of this check entirely, same gap that caused the event-level
+  // incident — a team with public tap-to-accept responses but no marked attendance would
+  // hard-delete those responses with no warning.)
   async function removeTeam() {
     const markedAssign = assigns.filter((a) => ['show', 'no_show', 'involved'].includes(a.status)).length
-    const { count: attCount } = await supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('block_id', block.id)
-    const marked = markedAssign + (attCount || 0)
+    const [{ count: attCount }, { count: acceptCount }, { count: commentCount }, { count: phaseCount }] = await Promise.all([
+      supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('block_id', block.id),
+      supabase.from('block_acceptances').select('id', { count: 'exact', head: true }).eq('block_id', block.id),
+      supabase.from('comments').select('id', { count: 'exact', head: true }).eq('block_id', block.id),
+      supabase.from('block_phases').select('id', { count: 'exact', head: true }).eq('block_id', block.id),
+    ])
+    const marked = markedAssign + (attCount || 0) + (acceptCount || 0) + (commentCount || 0) + (phaseCount || 0)
     setBusy(true)
     try {
       if (marked > 0) {
-        if (!window.confirm(`"${block.heading}" has ${marked} attendance record(s). It will be ARCHIVED — hidden from Teams but all attendance is preserved. Continue?`)) return
+        const parts = []
+        if (attCount) parts.push(`${attCount} attendance record${attCount === 1 ? '' : 's'}`)
+        if (markedAssign) parts.push(`${markedAssign} marked assignment${markedAssign === 1 ? '' : 's'}`)
+        if (acceptCount) parts.push(`${acceptCount} tap-to-accept response${acceptCount === 1 ? '' : 's'}`)
+        if (commentCount) parts.push(`${commentCount} comment${commentCount === 1 ? '' : 's'}`)
+        if (phaseCount) parts.push(`${phaseCount} phase${phaseCount === 1 ? '' : 's'}`)
+        if (!window.confirm(`"${block.heading}" has ${parts.join(', ')}. It will be ARCHIVED — hidden from Teams but everything is preserved. Continue?`)) return
         const { error } = await supabase.from('activity_blocks').update({ archived_at: new Date().toISOString(), archived_by: me?.id || null }).eq('id', block.id)
         if (error) throw error
-        onToast(`Team "${block.heading}" archived (attendance preserved).`)
+        onToast(`Team "${block.heading}" archived (all records preserved).`)
       } else {
         const n = assigns.length
-        const msg = n ? `Delete "${block.heading}"? No attendance is marked, but ${n} member assignment(s) will be removed. This cannot be undone.`
+        const msg = n ? `Delete "${block.heading}"? No attendance, responses, comments, or phases are recorded, but ${n} member assignment(s) will be removed. This cannot be undone.`
           : `Delete "${block.heading}"? This cannot be undone.`
         if (!window.confirm(msg)) return
         const { error } = await supabase.from('activity_blocks').delete().eq('id', block.id)

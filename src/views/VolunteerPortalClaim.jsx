@@ -43,6 +43,9 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
   const [recipients, setRecipients] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
   const [celebrating, setCelebrating] = useState(false)
+  const [bulkConfirming, setBulkConfirming] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkErr, setBulkErr] = useState(null)
 
   useEffect(() => {
     let alive = true
@@ -144,15 +147,6 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
     setCelebrating(false)
   }
 
-  function claimNextBatch(newBatchId) {
-    setCelebrating(false)
-    setBatchId(newBatchId)
-    setRecipients(null)
-    setStatusFilter('all')
-    window.location.hash = `volunteer-portal/${token}/batch/${newBatchId}`
-    setToast(`Here's your next outreach list, ${caller.name.split(' ')[0]}!`)
-  }
-
   // Ownership gate — re-checked whenever we have a batch to show (direct link,
   // fresh assignment, or a returning visit). Never trust that getting here already
   // proved ownership; a volunteer only ever sees THEIR OWN batch, nothing else.
@@ -193,6 +187,29 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
     sent: recipients.filter((r) => r.message_status === 'sent' || r.message_status === 'responded').length,
     noWa: recipients.filter((r) => r.message_status === 'no_whatsapp').length,
   } : { total: 0, sent: 0, noWa: 0 }
+  const unresolvedCount = recipients ? recipients.filter((r) => r.message_status === 'to_message').length : 0
+
+  // Bulk-marks every still-"to_message" recipient as sent -- same message_logs
+  // entry shape (channel: whatsapp) as the per-row Sent button, just server-side
+  // in one round trip. No WhatsApp / Responded rows are untouched (the RPC only
+  // targets message_status = 'to_message'). Always leaves the batch fully
+  // resolved, so it goes straight to the celebration screen.
+  async function confirmBulkMarkSent() {
+    setBulkBusy(true)
+    setBulkErr(null)
+    try {
+      const { data, error } = await supabase.rpc('claim_portal_mark_all_sent', { p_token: token, p_split_id: batchId, p_phone: caller.phone, p_caller_label: `${caller.name} · ${caller.phone}` })
+      if (error) throw error
+      if (data.status !== 'ok') throw new Error(data.status)
+      setRecipients((prev) => prev.map((r) => (r.message_status === 'to_message' ? { ...r, message_status: 'sent' } : r)))
+      setBulkConfirming(false)
+      setCelebrating(true)
+    } catch (e) {
+      setBulkErr('Could not mark all as sent: ' + (e.message || e))
+    } finally {
+      setBulkBusy(false)
+    }
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', padding: '24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -289,10 +306,18 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
             <>
               <div style={{ fontFamily: "'Newsreader',serif", fontSize: 18, fontWeight: 600, marginBottom: 2 }}>Namaskaram, {caller.name.split(' ')[0]}</div>
               <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 4 }}>{info.campaign_name}</div>
-              <div style={{ fontSize: 14, color: 'var(--ink-soft)', fontWeight: 600, marginBottom: 16 }}>
+              <div style={{ fontSize: 14, color: 'var(--ink-soft)', fontWeight: 600, marginBottom: 12 }}>
                 Your outreach list — {(recipients || []).length} people
                 {recipients && recipients.length > 0 && <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {recipients.filter((r) => r.message_status === 'sent' || r.message_status === 'responded').length} sent</span>}
               </div>
+
+              {unresolvedCount > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <button onClick={() => setBulkConfirming(true)} style={{ fontSize: 12.5, fontWeight: 600, padding: '8px 13px', borderRadius: 9, border: '1px solid var(--border)', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }}>
+                    ✓ Mark all as sent & finish
+                  </button>
+                </div>
+              )}
 
               {recipients && recipients.length > 0 && (() => {
                 const counts = { all: recipients.length }
@@ -327,8 +352,22 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
                 <button className="btn btn-primary done-sticky-btn" onClick={() => setCelebrating(true)} style={{ padding: '14px 22px', fontSize: 15, borderRadius: 999 }}>🎉 All done! Tap to finish</button>
               )}
               {celebrating && (
-                <CelebrationScreen name={caller.name} stats={resolvedStats} token={token} phone={caller.phone}
-                  onClaimed={claimNextBatch} onDismiss={() => setCelebrating(false)} />
+                <CelebrationScreen name={caller.name} stats={resolvedStats} onDismiss={() => setCelebrating(false)} />
+              )}
+              {bulkConfirming && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 250, padding: 20 }} onClick={() => !bulkBusy && setBulkConfirming(false)}>
+                  <div className="card" style={{ width: 380, maxWidth: '100%', padding: 22 }} onClick={(e) => e.stopPropagation()}>
+                    <h3 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 8px' }}>Mark all as sent?</h3>
+                    <div style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 16 }}>
+                      This marks all {unresolvedCount} remaining recipient{unresolvedCount === 1 ? '' : 's'} as sent via WhatsApp — same as tapping Sent on each one individually. No WhatsApp and Responded statuses won't be touched.
+                    </div>
+                    {bulkErr && <div style={{ fontSize: 13, color: 'var(--red)', marginBottom: 12 }}>{bulkErr}</div>}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                      <button className="btn btn-ghost" disabled={bulkBusy} onClick={() => setBulkConfirming(false)}>Cancel</button>
+                      <button className="btn btn-primary" disabled={bulkBusy} onClick={confirmBulkMarkSent}>{bulkBusy ? 'Marking…' : `Yes, mark all ${unresolvedCount} sent`}</button>
+                    </div>
+                  </div>
+                </div>
               )}
             </>
           )}
@@ -433,34 +472,16 @@ function RecipientRow({ r, token, splitId, phone, myName, label, onTouch, onSent
 }
 
 // Full-screen "batch complete" celebration, reached by tapping the sticky done
-// button once every recipient is resolved. Three outcomes once the volunteer
-// acts: a fresh batch is claimed (screen closes, portal navigates to it), no
-// batches are left campaign-wide ('all_taken'), or the volunteer opts to stop
-// for the day ('done') -- the latter two render the same "come back tomorrow"
-// closing message, just reached by different paths.
-function CelebrationScreen({ name, stats, token, phone, onClaimed, onDismiss }) {
-  const [phase, setPhase] = useState('celebrate') // celebrate | claiming | all_taken | done
-  const [err, setErr] = useState(null)
-
-  async function claimAnother() {
-    setErr(null)
-    setPhase('claiming')
-    try {
-      const { data, error } = await supabase.rpc('claim_portal_claim_next_batch', { p_token: token, p_phone: phone })
-      if (error) throw error
-      if (data.status === 'ok') { onClaimed(data.batch_id); return }
-      if (data.status === 'all_taken') { setPhase('all_taken'); return }
-      throw new Error(data.status)
-    } catch (e) {
-      setErr('Could not claim a new list: ' + (e.message || e))
-      setPhase('celebrate')
-    }
-  }
+// button (or the bulk mark-all-sent action) once every recipient is resolved.
+// One outcome: the volunteer confirms they're done for today, which shows a
+// "come back tomorrow" closing message.
+function CelebrationScreen({ name, stats, onDismiss }) {
+  const [phase, setPhase] = useState('celebrate') // celebrate | done
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'linear-gradient(160deg, #2a2017, #241b14)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, overflow: 'hidden' }}>
       <Confetti />
-      {(phase === 'celebrate' || phase === 'claiming') && (
+      {phase === 'celebrate' && (
         <div style={{ position: 'relative', zIndex: 2, textAlign: 'center', maxWidth: 420 }}>
           <div style={{ fontSize: 56, marginBottom: 8 }}>🙏</div>
           <div style={{ fontFamily: "'Newsreader',serif", fontSize: 26, fontWeight: 600, color: '#F6ECDC', marginBottom: 6 }}>Namaskaram {name.split(' ')[0]}!</div>
@@ -481,13 +502,8 @@ function CelebrationScreen({ name, stats, token, phone, onClaimed, onDismiss }) 
               </div>
             )}
           </div>
-          {err && <div style={{ fontSize: 13, color: '#E79248', marginBottom: 14 }}>{err}</div>}
-          <button className="btn btn-primary" disabled={phase === 'claiming'} onClick={claimAnother} style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: 15, minHeight: 48, marginBottom: 10 }}>{phase === 'claiming' ? 'Finding your next list…' : 'Claim another batch'}</button>
-          <button disabled={phase === 'claiming'} onClick={() => setPhase('done')} style={{ width: '100%', textAlign: 'center', background: 'none', border: 'none', color: '#D8CBB4', fontSize: 14, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', minHeight: 44 }}>I'm done for today</button>
+          <button className="btn btn-primary" onClick={() => setPhase('done')} style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: 15, minHeight: 48 }}>I'm done for today</button>
         </div>
-      )}
-      {phase === 'all_taken' && (
-        <ClosingMessage title="🙏 All lists are taken care of!" body="Every outreach list for this campaign has already been claimed. Thank you for your seva today." onDismiss={onDismiss} />
       )}
       {phase === 'done' && (
         <ClosingMessage title="🙏 Thank you for your seva today!" body="Come back tomorrow to help reach out to more people." onDismiss={onDismiss} />

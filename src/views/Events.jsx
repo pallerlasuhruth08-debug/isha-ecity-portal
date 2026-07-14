@@ -743,24 +743,47 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
 }
 
 // Event-level Edit / Archive / Delete — belongs to the EVENT, not the attendance
-// sheet. Rendered in the Event Hub header. Self-contained: it fetches its own
-// attendance count for the delete gate (attendance-bearing events archive, never
-// hard-delete) and owns the edit form.
+// sheet. Rendered in the Event Hub header. Self-contained: it fetches counts across
+// every table that cascade-deletes with the event (attendance, to-dos, volunteer
+// interest submissions, comments, phases, teams) for the delete gate — any of them
+// existing routes to Archive instead. Only a genuinely untouched event hard-deletes.
+// (A prior version only checked attendance; an event with 222 interest submissions
+// and 4 to-dos but zero attendance was hard-deleted with no warning about either.)
 export function EventActions({ activity, me, isCoordinator, onToast, onChanged, onDeleted }) {
   const { isPhone } = useBreakpoint()
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [attCount, setAttCount] = useState(null)
+  const [counts, setCounts] = useState(null) // null while loading
   const nowISO = () => new Date().toISOString()
 
   useEffect(() => {
     let alive = true
-    supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id)
-      .then(({ count }) => { if (alive) setAttCount(count || 0) })
+    Promise.all([
+      supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id),
+      supabase.from('event_todos').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id),
+      supabase.from('event_interest').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id),
+      supabase.from('comments').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id),
+      // Every event auto-gets 4 phase rows (pre_far/pre_near/day_of/post) on creation --
+      // scaffolding, not data. Only count ones that actually have progress recorded.
+      supabase.from('event_phases').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id).or('started_at.not.is.null,completed_at.not.is.null'),
+      supabase.from('activity_blocks').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id),
+    ]).then(([att, todos, interest, comm, phases, blocks]) => {
+      if (!alive) return
+      setCounts({
+        attendance: att.count || 0,
+        interest: interest.count || 0,
+        todos: todos.count || 0,
+        blocks: blocks.count || 0,
+        comments: comm.count || 0,
+        phases: phases.count || 0,
+      })
+    })
     return () => { alive = false }
   }, [activity.id])
 
   if (!isCoordinator) return null
+
+  const hasData = counts && Object.values(counts).some((n) => n > 0)
 
   async function setArchived(on) {
     setBusy(true)
@@ -773,8 +796,8 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
   }
 
   async function hardDelete() {
-    if ((attCount || 0) > 0) { onToast(`This event has ${attCount} attendance record(s) — archive instead of delete.`); return }
-    if (!window.confirm(`Permanently delete “${activity.name}”? It has no attendance. This cannot be undone.`)) return
+    if (!counts || hasData) return
+    if (!window.confirm(`Permanently delete “${activity.name}”? It has no attendance, interest submissions, to-dos, teams, comments, or phases. This cannot be undone.`)) return
     setBusy(true)
     try {
       const { error } = await supabase.from('activities').delete().eq('id', activity.id)
@@ -782,6 +805,18 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
       onToast('Event deleted.')
       onDeleted?.()
     } catch (e) { onToast('Could not delete: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  const blockedLabel = () => {
+    if (!counts) return ''
+    const parts = []
+    if (counts.attendance) parts.push(`${counts.attendance} attendance record${counts.attendance === 1 ? '' : 's'}`)
+    if (counts.interest) parts.push(`${counts.interest} interest submission${counts.interest === 1 ? '' : 's'}`)
+    if (counts.todos) parts.push(`${counts.todos} to-do${counts.todos === 1 ? '' : 's'}`)
+    if (counts.blocks) parts.push(`${counts.blocks} team${counts.blocks === 1 ? '' : 's'}`)
+    if (counts.comments) parts.push(`${counts.comments} comment${counts.comments === 1 ? '' : 's'}`)
+    if (counts.phases) parts.push(`${counts.phases} planning phase${counts.phases === 1 ? '' : 's'}`)
+    return `Has ${parts.join(', ')} — archive instead`
   }
 
   return (
@@ -795,8 +830,8 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
           {
             label: 'Delete',
             onClick: hardDelete,
-            disabled: busy || (attCount || 0) > 0,
-            danger: (attCount || 0) === 0,
+            disabled: busy || !counts || hasData,
+            danger: !!counts && !hasData,
           },
         ]} />
       ) : (
@@ -806,10 +841,10 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
             ? <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: '7px 12px' }} onClick={() => setArchived(false)}>Unarchive</button>
             : <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: '7px 12px' }} onClick={() => setArchived(true)}>Archive</button>}
           <button
-            title={(attCount || 0) > 0 ? `Has ${attCount} attendance record(s) — archive instead` : 'Delete (no attendance)'}
-            disabled={busy}
+            title={hasData ? blockedLabel() : 'Delete (no related records)'}
+            disabled={busy || !counts || hasData}
             onClick={hardDelete}
-            style={{ fontSize: 12, padding: '7px 12px', fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: (attCount || 0) > 0 ? 'var(--muted-2)' : 'var(--red)', cursor: busy ? 'default' : 'pointer' }}
+            style={{ fontSize: 12, padding: '7px 12px', fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: hasData || !counts ? 'var(--muted-2)' : 'var(--red)', cursor: (busy || !counts || hasData) ? 'default' : 'pointer' }}
           >Delete</button>
         </div>
       )}

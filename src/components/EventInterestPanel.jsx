@@ -18,6 +18,18 @@ export const EI_STATUS = [
 ]
 export const EI_STATUS_MAP = Object.fromEntries(EI_STATUS.map((s) => [s.v, s]))
 
+// Day 0 = the day before the event's own first day (a setup/pre-event day some
+// volunteers help with) — prepended so it sorts/indexes as day 0, Day 1 stays the
+// event's real first day exactly as before.
+const dayBefore = (iso) => {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10)
+}
+const daysWithSetup = (start, end) => {
+  const days = eventDays(start, end)
+  return days.length ? [dayBefore(days[0]), ...days] : days
+}
+
 const ago = (d) => {
   if (!d) return '—'
   const days = Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
@@ -210,8 +222,10 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
     } finally { setResolving(false) }
   }
 
-  // Availability filter — client-side on current page rows
-  const daysByEvent = Object.fromEntries(evList.map((e) => [e.id, eventDays(e.start_date || e.activity_date, e.end_date)]))
+  // Availability filter — client-side on current page rows. Day 0 (the day before
+  // the event's own first day) stands in for a setup/pre-event day some volunteers
+  // help with — prepended to the event's own day list so index === day number.
+  const daysByEvent = Object.fromEntries(evList.map((e) => [e.id, daysWithSetup(e.start_date || e.activity_date, e.end_date)]))
   const maxDays = Math.max(1, ...evList.map((e) => (daysByEvent[e.id] || []).length))
 
   const matchesAvail = (r) => {
@@ -219,7 +233,7 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
     const days = daysByEvent[r.activity?.id] || []
     const avail = r.availability_dates || []
     if (availFilter === 'all_days') return days.length > 0 && days.every((d) => avail.includes(d))
-    const idx = Number(availFilter.slice(3)) - 1
+    const idx = Number(availFilter.slice(3))
     const d = days[idx]
     return d ? avail.includes(d) : false
   }
@@ -270,8 +284,8 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
       {/* Availability pills — client-side filter on current page */}
       <div className="scroll-tabs" style={{ ...pillRow, marginBottom: 12 }}>
         <button className="tap44" onClick={() => setAvailFilter('all')} style={filterChip(availFilter === 'all')}>All</button>
-        {Array.from({ length: maxDays }, (_, i) => `day${i + 1}`).map((k, i) => (
-          <button key={k} className="tap44" onClick={() => setAvailFilter(k)} style={filterChip(availFilter === k)}>Day {i + 1}</button>
+        {Array.from({ length: maxDays }, (_, i) => `day${i}`).map((k, i) => (
+          <button key={k} className="tap44" onClick={() => setAvailFilter(k)} style={filterChip(availFilter === k)}>Day {i}</button>
         ))}
         <button className="tap44" onClick={() => setAvailFilter('all_days')} style={filterChip(availFilter === 'all_days')}>All Days</button>
       </div>
@@ -441,11 +455,11 @@ function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailabil
                 <>
                   {days.length > 1 && <button onClick={toggleAll} style={chip(allSelected)}>All Days</button>}
                   {days.map((d, di) => (
-                    <button key={d} onClick={() => toggleDay(d)} style={chip(avail.includes(d))}>Day {di + 1} · {fmtDay(d)}</button>
+                    <button key={d} onClick={() => toggleDay(d)} style={chip(avail.includes(d))}>Day {di} · {fmtDay(d)}</button>
                   ))}
                 </>
               ) : (
-                avail.length ? avail.map((d) => <span key={d} className="pill" style={pill('#F6E8D8', 'var(--orange)')}>Day {days.indexOf(d) + 1} · {fmtDay(d)}</span>)
+                avail.length ? avail.map((d) => <span key={d} className="pill" style={pill('#F6E8D8', 'var(--orange)')}>Day {days.indexOf(d)} · {fmtDay(d)}</span>)
                   : <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>Not set</span>
               )}
             </div>
