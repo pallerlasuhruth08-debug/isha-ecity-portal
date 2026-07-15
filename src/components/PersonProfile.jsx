@@ -20,7 +20,7 @@ const boolOf = (v) => (v == null ? null : v ? 'Yes' : 'No')
 
 // Rich person detail (mirrors the AppSheet profile). All values from named
 // queries; fields not yet synced from AppSheet render an explicit empty state.
-export default function PersonProfile({ personId, me, onClose, onToast, onChanged }) {
+export default function PersonProfile({ personId, me, onClose, onToast, onChanged, panelWidth }) {
   const [p, setP] = useState(null)
   const [vp, setVp] = useState(null)
   const [center, setCenter] = useState(null)
@@ -128,7 +128,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
   const sevaSuggestions = Object.entries(sevaCounts).filter(([label, n]) => n >= SEVA_THRESHOLD && !manual.some((m) => m.tag === label))
 
   return (
-    <SidePanel onClose={onClose}>
+    <SidePanel onClose={onClose} width={panelWidth}>
       <PanelHeader onClose={onClose}>
         {err && <div style={{ color: '#B5532F', fontSize: 13 }}>{err}</div>}
         {!p && !err && <Loading label="Loading profile…" />}

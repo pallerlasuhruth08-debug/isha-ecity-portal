@@ -19,6 +19,7 @@ import KebabMenu from '../components/KebabMenu'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import AssignToTeamModal from '../components/AssignToTeamModal'
 import { Checkbox } from '../components/View'
+import PersonProfile from '../components/PersonProfile'
 
 // EVENT HUB — the home for events. The list surfaces overdue/at-risk phases across
 // all events; opening one shows four LENSES over four separate tables joined by the
@@ -293,6 +294,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   // Which team(s) (if any) each approved-interest person is already on for THIS event --
   // drives both the "Unassigned Volunteers" list below and the coverage CSV's Team(s) column.
   const dayList0 = eventDaysWithSetup(ev.start_date || ev.activity_date, ev.end_date)
+  const availByPerson = Object.fromEntries(interest.map((r) => [r.person_id, r.availability_dates || []]))
   const blockNameById2 = Object.fromEntries((blocks || []).map((b) => [b.id, b.heading]))
   const teamsByPerson = {}
   for (const a of assigns) {
@@ -522,7 +524,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
         <TeamCard key={b.id} ev={ev} block={b} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator} types={types}
           assigns={assigns.filter((a) => a.block_id === b.id)} allAssigns={assigns} allBlocks={blocks} people={people}
           phaseSpan={phaseSpanByBlock[b.id]} teamDays={teamDaysByBlock[b.id] || []} eventDayList={eventDays(ev.start_date || ev.activity_date, ev.end_date)}
-          dayList0={eventDaysWithSetup(ev.start_date || ev.activity_date, ev.end_date)}
+          dayList0={eventDaysWithSetup(ev.start_date || ev.activity_date, ev.end_date)} availByPerson={availByPerson}
           onToast={onToast} onChanged={load} />
       ))}
       {isCoordinator && (
@@ -533,7 +535,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   )
 }
 
-function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, phaseSpan, teamDays = [], eventDayList = [], dayList0 = [], types = [], onToast, onChanged }) {
+function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, phaseSpan, teamDays = [], eventDayList = [], dayList0 = [], availByPerson = {}, types = [], onToast, onChanged }) {
   const [q, setQ] = useState('')
   const [debouncedQ, setDebouncedQ] = useState('')
   const [pickerTab, setPickerTab] = useState('interest') // 'interest' (default) | 'all'
@@ -544,6 +546,13 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   const [editing, setEditing] = useState(false)
   const [showComments, setShowComments] = useState(false)
   const [collapsed, setCollapsed] = useState(true)
+  const [profileId, setProfileId] = useState(null) // member whose profile side-panel is open
+
+  // The team's day columns: its required days (or all event days when unset), left→right
+  // by day index. Each member shows ✓ (available) / ✗ (not) per column.
+  const teamDayCols = ((block.required_days && block.required_days.length)
+    ? block.required_days.filter((d) => dayList0.includes(d))
+    : dayList0).slice().sort((a, b) => dayList0.indexOf(a) - dayList0.indexOf(b))
 
   const byPerson = {}
   for (const a of assigns) {
@@ -551,7 +560,8 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
     const m = (byPerson[a.person_id] ||= { person_id: a.person_id, poc: false })
     if (a.is_poc) m.poc = true
   }
-  const members = Object.values(byPerson)
+  // POCs float to the top of the roster; everyone else keeps insertion order (stable sort).
+  const members = Object.values(byPerson).sort((a, b) => Number(b.poc) - Number(a.poc))
   const filled = members.length
   const size = block.volunteers_needed || 0
   const short = size - filled
@@ -748,27 +758,8 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
         {locked && <span className="pill" style={{ ...pill('#E7E0F0', '#5B4B8A'), flexShrink: 0 }} title={block.locked_by ? undefined : 'Roster finalised'}>🔒 Locked</span>}
         <span className="pill" style={{ ...(full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')), flexShrink: 0 }}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
 
-        {/* Desktop: inline actions when space allows. Opening add/edit/comments also
-            expands the card so the coordinator immediately sees what they opened. When
-            locked, the roster-editing actions are hidden — only Unlock + Comments remain. */}
-        <div className="desktop-only" style={{ gap: 8, flexShrink: 0 }}>
-          {isCoordinator && !locked && (
-            <button className="tap44" onClick={() => { setAdding((a) => !a); setCollapsed(false) }} title="Add member" style={{ fontSize: 12, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? 'var(--orange)' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
-          )}
-          {isCoordinator && !locked && (
-            <button className="tap44" onClick={() => { setEditing(true); setCollapsed(false) }} title="Edit team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
-          )}
-          {isCoordinator && !locked && (
-            <button className="tap44" disabled={busy} onClick={removeTeam} title="Delete / archive team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>🗑</button>
-          )}
-          {isCoordinator && (
-            <button className="tap44" disabled={busy} onClick={toggleLock} title={locked ? 'Unlock team' : 'Lock team (finalise roster)'} style={{ fontSize: 12, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: locked ? '#EDE6F5' : '#fff', color: locked ? '#5B4B8A' : 'var(--ink-soft)', cursor: 'pointer' }}>{locked ? '🔓 Unlock' : '🔒 Lock'}</button>
-          )}
-          <button className="tap44" onClick={() => { setShowComments((s) => !s); setCollapsed(false) }} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: showComments ? '#EDE4D6' : '#fff', cursor: 'pointer' }}>💬</button>
-        </div>
-
-        {/* Mobile: everything collapses behind one 3-dot menu so it never crowds the team name. */}
-        <div className="mobile-only">
+        {/* All team actions live behind one 3-dot menu (desktop + mobile). */}
+        <div style={{ flexShrink: 0 }}>
           <KebabMenu items={[
             { label: 'Dates: ' + (phaseSpan || '—'), view: true },
             ...(isCoordinator ? [{ label: locked ? '🔓 Unlock team' : '🔒 Lock team', onClick: toggleLock, disabled: busy }] : []),
@@ -787,23 +778,52 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
           )}
 
           {members.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
+            <div style={{ marginTop: 8 }}>
+              {/* Column headers: the team's required days. ✓ = member available that day,
+                  ✗ = not. Click a name to open their profile; the star toggles POC. */}
+              {teamDayCols.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0 6px', fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--muted-2)' }}>
+                  <span style={{ width: 20, flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0 }}>Volunteer</span>
+                  {teamDayCols.map((d) => <span key={d} style={{ width: 34, textAlign: 'center', flexShrink: 0 }}>D{dayList0.indexOf(d)}</span>)}
+                  {isCoordinator && !locked && <span style={{ width: 62, flexShrink: 0 }} />}
+                </div>
+              )}
               {members.map((m) => {
                 const p = people[m.person_id]
+                const avail = availByPerson[m.person_id] || []
                 return (
                   <div key={m.person_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #F4EEE2' }}>
-                    <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>{initials(p?.full_name || '?')}</div>
-                    <div style={{ fontSize: 14, fontWeight: 500 }}>{p?.full_name || 'Unknown'}</div>
-                    {m.poc && <span className="pill" style={{ ...pill('#F3E3D2', 'var(--rust)'), fontSize: 12 }}>POC</span>}
+                    {isCoordinator && !locked ? (
+                      <button className="tap44" disabled={busy} onClick={() => togglePoc(m.person_id, p?.full_name, m.poc)} title={m.poc ? 'POC — click to unset' : 'Set as POC'}
+                        style={{ width: 20, flexShrink: 0, fontSize: 16, lineHeight: 1, background: 'none', border: 'none', cursor: 'pointer', color: m.poc ? 'var(--rust)' : 'var(--muted-2)', padding: 0, textAlign: 'center' }}>{m.poc ? '★' : '☆'}</button>
+                    ) : (
+                      <span style={{ width: 20, flexShrink: 0, fontSize: 16, lineHeight: 1, textAlign: 'center', color: 'var(--rust)' }}>{m.poc ? '★' : ''}</span>
+                    )}
+                    <div onClick={() => setProfileId(m.person_id)} title="Open profile"
+                      style={{ flex: 1, minWidth: 0, cursor: 'pointer', fontSize: 14, fontWeight: m.poc ? 700 : 500, color: m.poc ? 'var(--rust)' : 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p?.full_name || 'Unknown'}</div>
+                    {teamDayCols.map((d) => {
+                      const on = avail.includes(d)
+                      return <span key={d} style={{ width: 34, flexShrink: 0, textAlign: 'center', fontSize: 13, fontWeight: 600, color: on ? '#4E7C3F' : '#C9BEA9' }}>{on ? '✓' : '✗'}</span>
+                    })}
                     {isCoordinator && !locked && (
-                      <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                        <button className="tap44" disabled={busy} onClick={() => togglePoc(m.person_id, p?.full_name, m.poc)} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: m.poc ? 'var(--rust)' : 'var(--muted)', cursor: 'pointer' }}>{m.poc ? '★ POC' : '☆ POC'}</button>
-                        <button className="tap44" disabled={busy} onClick={() => removeMember(m.person_id, p?.full_name)} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Remove</button>
-                      </div>
+                      <button className="tap44" disabled={busy} onClick={() => removeMember(m.person_id, p?.full_name)} style={{ width: 62, flexShrink: 0, fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Remove</button>
                     )}
                   </div>
                 )
               })}
+              {/* Per-day totals: how many members are available that day / needed. */}
+              {teamDayCols.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0 2px', fontSize: 12, fontWeight: 700 }}>
+                  <span style={{ width: 20, flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0, color: 'var(--muted-2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em' }}>Available</span>
+                  {teamDayCols.map((d) => {
+                    const cnt = members.filter((m) => (availByPerson[m.person_id] || []).includes(d)).length
+                    return <span key={d} style={{ width: 34, flexShrink: 0, textAlign: 'center', color: cnt >= size ? '#4E7C3F' : 'var(--rust)' }}>{cnt}/{size}</span>
+                  })}
+                  {isCoordinator && !locked && <span style={{ width: 62, flexShrink: 0 }} />}
+                </div>
+              )}
             </div>
           )}
 
@@ -855,6 +875,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
           {showComments && <CommentThread scope={{ block_id: block.id }} me={me} onToast={onToast} />}
         </>
       )}
+      {profileId && <PersonProfile personId={profileId} me={me} panelWidth={480} onClose={() => setProfileId(null)} onToast={onToast} onChanged={onChanged} />}
     </div>
   )
 }
