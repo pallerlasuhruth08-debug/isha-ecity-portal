@@ -67,6 +67,58 @@ export function teamsToCSV(teams) {
   return rows.map((r) => r.map(csvField).join(',')).join('\r\n')
 }
 
+// Day-grid roster CSV. One section per team: member rows with a ✓ per day the member
+// is available AND the team requires that day, then a totals row (available / needed,
+// per required day), then a blank separator. Columns: Team, Locked, Volunteer, Phone,
+// Day 0…Day N. Team name + Locked print on the first member row only; a team with no
+// members collapses to a single name+totals row.
+//   dayList  — the event's day dates incl. Day 0 (index i → "Day i")
+//   blocks   — activity_blocks (need heading, volunteers_needed, required_days, locked_at)
+//   assigns  — block_assignments (block_id, person_id, status)
+//   people   — { person_id: { full_name, phone } }
+//   availByPerson — { person_id: [ISO date, …] } from event_interest.availability_dates
+export function teamsToDayGridCSV({ blocks, assigns, people, availByPerson, dayList }) {
+  const ACTIVE = ['assigned', 'show', 'involved']
+  const dayHeaders = dayList.map((_, i) => `Day ${i}`)
+  const out = [['Team', 'Locked', 'Volunteer', 'Phone', ...dayHeaders]]
+  const blank = dayList.map(() => '')
+
+  for (const b of blocks) {
+    // Which day-columns this team operates on: its required_days mapped to indices,
+    // or every day when required_days isn't set ("all days").
+    const reqSet = (b.required_days && b.required_days.length)
+      ? new Set(b.required_days.map((d) => dayList.indexOf(d)).filter((i) => i >= 0))
+      : new Set(dayList.map((_, i) => i))
+    const needed = b.volunteers_needed || 0
+    const lockedCell = b.locked_at ? 'Yes' : ''
+
+    const memberIds = []
+    const seen = new Set()
+    for (const a of assigns) {
+      if (a.block_id !== b.id || !ACTIVE.includes(a.status) || seen.has(a.person_id)) continue
+      seen.add(a.person_id); memberIds.push(a.person_id)
+    }
+
+    // Totals: per required day, how many members are available that day / needed.
+    const totals = dayList.map((d, i) => reqSet.has(i)
+      ? `${memberIds.filter((pid) => (availByPerson[pid] || []).includes(d)).length}/${needed}`
+      : '')
+
+    if (!memberIds.length) {
+      out.push([b.heading, lockedCell, '', '', ...totals])
+    } else {
+      memberIds.forEach((pid, mi) => {
+        const p = people[pid] || {}
+        const ticks = dayList.map((d, i) => (reqSet.has(i) && (availByPerson[pid] || []).includes(d)) ? '✓' : '')
+        out.push([mi === 0 ? b.heading : '', mi === 0 ? lockedCell : '', p.full_name || 'Unknown', p.phone || '', ...ticks])
+      })
+      out.push(['', '', '', '', ...totals])
+    }
+    out.push(['', '', '', '', ...blank]) // separator between teams
+  }
+  return out.map((r) => r.map(csvField).join(',')).join('\r\n')
+}
+
 // Unassigned volunteers -- SAME column layout as the team roster CSV above, minus
 // Email; Team Name/Size Needed/Dates/Is POC are blank since these people have no team.
 export function unassignedToCSV(rows) {

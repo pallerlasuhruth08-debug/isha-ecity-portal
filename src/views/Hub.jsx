@@ -11,7 +11,7 @@ import { Detail as AttendanceDetail, EventActions } from './Events'
 import CommentThread from '../components/CommentThread'
 import CreateTeamForm from '../components/CreateTeamForm'
 import { AddImport } from './Interest'
-import { buildTeamRoster, teamsToCSV, downloadCSV, teamsToPDF, unassignedToCSV } from '../lib/teamExport'
+import { buildTeamRoster, teamsToDayGridCSV, downloadCSV, teamsToPDF, unassignedToCSV } from '../lib/teamExport'
 import { multiFieldOr } from '../lib/searchFilter'
 import EventInterestPanel from '../components/EventInterestPanel'
 import { eventDays } from '../lib/planning'
@@ -238,7 +238,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   const load = useCallback(async () => {
     setErr(null)
     const [bl, ty, ei] = await Promise.all([
-      supabase.from('activity_blocks').select('id, heading, volunteers_needed, activity_type_id, required_days').eq('activity_id', ev.id).is('archived_at', null).order('created_at'),
+      supabase.from('activity_blocks').select('id, heading, volunteers_needed, activity_type_id, required_days, locked_at, locked_by').eq('activity_id', ev.id).is('archived_at', null).order('created_at'),
       fetchActivityTypes().catch(() => []),
       supabase.from('event_interest').select('person_id, availability_dates, person:people!event_interest_person_id_fkey(id, full_name, phone)').eq('activity_id', ev.id).eq('status', 'approved'),
     ])
@@ -384,12 +384,24 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
     } catch (e) { onToast('Could not export: ' + (e.message || e)) } finally { setExporting(false) }
   }
 
-  // Export = the SAME data already on screen (blocks/assignments/people), plus two
-  // extra reads for fields the roster needs but this view doesn't otherwise load:
-  // each team's phase span (execution period) and per-person comments for this event.
+  // CSV = the day-grid roster (Team, Locked, Volunteer, Phone, Day 0…N with ✓ per day
+  // the member is available AND the team requires it, plus per-day totals). Needs each
+  // member's availability, which the Teams view doesn't otherwise load. PDF keeps the
+  // older readable-roster format (name/phone/comments per team).
   async function exportRoster(kind) {
     setExporting(true)
     try {
+      const safeName = ev.name.replace(/[^\w\- ]/g, '').trim() || 'event'
+      if (kind === 'csv') {
+        const memberIds = [...new Set(assigns.filter((a) => ['assigned', 'show', 'involved'].includes(a.status)).map((a) => a.person_id))]
+        const availByPerson = {}
+        if (memberIds.length) {
+          const { data: ei } = await supabase.from('event_interest').select('person_id, availability_dates').eq('activity_id', ev.id).in('person_id', memberIds)
+          for (const r of ei || []) availByPerson[r.person_id] = r.availability_dates || []
+        }
+        downloadCSV(`${safeName} - teams.csv`, teamsToDayGridCSV({ blocks, assigns, people, availByPerson, dayList: dayList0 }))
+        return
+      }
       const ids = blocks.map((b) => b.id)
       const [bp, ep, cm] = await Promise.all([
         ids.length ? supabase.from('block_phases').select('block_id, phase_id').in('block_id', ids) : Promise.resolve({ data: [] }),
@@ -402,9 +414,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
       for (const c of cm.data || []) (commentsByPerson[c.subject_person_id] ||= []).push(c.body)
 
       const teams = buildTeamRoster({ ev, blocks, assigns, people, blockPhases, eventPhases: ep.data || [], commentsByPerson })
-      const safeName = ev.name.replace(/[^\w\- ]/g, '').trim() || 'event'
-      if (kind === 'csv') downloadCSV(`${safeName} - teams.csv`, teamsToCSV(teams))
-      else teamsToPDF(ev.name, teams).save(`${safeName} - teams.pdf`)
+      teamsToPDF(ev.name, teams).save(`${safeName} - teams.pdf`)
     } catch (e) { onToast('Could not export: ' + (e.message || e)) } finally { setExporting(false) }
   }
 
@@ -532,6 +542,20 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   const pocs = members.filter((m) => m.poc)
   const memberIds = new Set(members.map((m) => m.person_id))
 
+  // Locked = finalised. The roster is frozen: no add/remove/POC/edit/delete until it's
+  // unlocked. A UI-level finalise so a coordinator needn't revisit it; unlock is one click.
+  const locked = !!block.locked_at
+  async function toggleLock() {
+    setBusy(true)
+    try {
+      const patch = locked ? { locked_at: null, locked_by: null } : { locked_at: new Date().toISOString(), locked_by: me?.id || null }
+      const { error } = await supabase.from('activity_blocks').update(patch).eq('id', block.id)
+      if (error) throw error
+      onToast(locked ? `Team "${block.heading}" unlocked.` : `Team "${block.heading}" locked — roster finalised.`)
+      onChanged()
+    } catch (e) { onToast('Could not update lock: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
   // Existing team memberships FOR THIS EVENT ONLY — shown in the add-member picker so a
   // coordinator adding someone sees where they already are, without being blocked (a
   // person can legitimately be on more than one team for the same event).
@@ -605,6 +629,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
     : 'All days'
 
   async function addMember(p) {
+    if (locked) { onToast(`${block.heading} is locked — unlock it to change the roster.`); return }
     if (memberIds.has(p.id)) { onToast(`${p.full_name} already on the team.`); return }
     // Availability-vs-team-days mismatch check (warns, never blocks — coordinator overrides).
     try {
@@ -628,6 +653,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
     } catch (e) { onToast(/duplicate/i.test(e.message || '') ? 'Already on the team.' : 'Could not add: ' + (e.message || e)) } finally { setBusy(false) }
   }
   async function removeMember(pid, name) {
+    if (locked) { onToast(`${block.heading} is locked — unlock it to change the roster.`); return }
     if (!window.confirm(`Remove ${name} from ${block.heading}?`)) return
     setBusy(true)
     try {
@@ -637,6 +663,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
     } catch (e) { onToast('Could not remove: ' + (e.message || e)) } finally { setBusy(false) }
   }
   async function togglePoc(pid, name, currentlyPoc) {
+    if (locked) { onToast(`${block.heading} is locked — unlock it to change the roster.`); return }
     setBusy(true)
     try {
       const { error } = await supabase.from('block_assignments').update({ is_poc: !currentlyPoc }).eq('block_id', block.id).eq('person_id', pid)
@@ -654,6 +681,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   // incident — a team with public tap-to-accept responses but no marked attendance would
   // hard-delete those responses with no warning.)
   async function removeTeam() {
+    if (locked) { onToast(`${block.heading} is locked — unlock it first.`); return }
     const markedAssign = assigns.filter((a) => ['show', 'no_show', 'involved'].includes(a.status)).length
     const [{ count: attCount }, { count: acceptCount }, { count: commentCount }, { count: phaseCount }] = await Promise.all([
       supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('block_id', block.id),
@@ -700,19 +728,24 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
             {requiredDaysLabel}
           </div>
         </div>
+        {locked && <span className="pill" style={{ ...pill('#E7E0F0', '#5B4B8A'), flexShrink: 0 }} title={block.locked_by ? undefined : 'Roster finalised'}>🔒 Locked</span>}
         <span className="pill" style={{ ...(full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')), flexShrink: 0 }}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
 
         {/* Desktop: inline actions when space allows. Opening add/edit/comments also
-            expands the card so the coordinator immediately sees what they opened. */}
+            expands the card so the coordinator immediately sees what they opened. When
+            locked, the roster-editing actions are hidden — only Unlock + Comments remain. */}
         <div className="desktop-only" style={{ gap: 8, flexShrink: 0 }}>
-          {isCoordinator && (
+          {isCoordinator && !locked && (
             <button className="tap44" onClick={() => { setAdding((a) => !a); setCollapsed(false) }} title="Add member" style={{ fontSize: 12, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: adding ? '#F6E8D8' : '#fff', color: adding ? 'var(--orange)' : 'var(--ink-soft)', cursor: 'pointer' }}>＋ Member</button>
           )}
-          {isCoordinator && (
+          {isCoordinator && !locked && (
             <button className="tap44" onClick={() => { setEditing(true); setCollapsed(false) }} title="Edit team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
           )}
-          {isCoordinator && (
+          {isCoordinator && !locked && (
             <button className="tap44" disabled={busy} onClick={removeTeam} title="Delete / archive team" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>🗑</button>
+          )}
+          {isCoordinator && (
+            <button className="tap44" disabled={busy} onClick={toggleLock} title={locked ? 'Unlock team' : 'Lock team (finalise roster)'} style={{ fontSize: 12, fontWeight: 600, padding: '4px 9px', borderRadius: 7, border: '1px solid var(--border)', background: locked ? '#EDE6F5' : '#fff', color: locked ? '#5B4B8A' : 'var(--ink-soft)', cursor: 'pointer' }}>{locked ? '🔓 Unlock' : '🔒 Lock'}</button>
           )}
           <button className="tap44" onClick={() => { setShowComments((s) => !s); setCollapsed(false) }} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: showComments ? '#EDE4D6' : '#fff', cursor: 'pointer' }}>💬</button>
         </div>
@@ -721,10 +754,11 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
         <div className="mobile-only">
           <KebabMenu items={[
             { label: 'Dates: ' + (phaseSpan || '—'), view: true },
-            ...(isCoordinator ? [{ label: adding ? 'Hide add member' : '＋ Add member', onClick: () => { setAdding((a) => !a); setCollapsed(false) } }] : []),
-            ...(isCoordinator ? [{ label: 'Edit team', onClick: () => { setEditing(true); setCollapsed(false) } }] : []),
+            ...(isCoordinator ? [{ label: locked ? '🔓 Unlock team' : '🔒 Lock team', onClick: toggleLock, disabled: busy }] : []),
+            ...(isCoordinator && !locked ? [{ label: adding ? 'Hide add member' : '＋ Add member', onClick: () => { setAdding((a) => !a); setCollapsed(false) } }] : []),
+            ...(isCoordinator && !locked ? [{ label: 'Edit team', onClick: () => { setEditing(true); setCollapsed(false) } }] : []),
             { label: showComments ? 'Hide comments' : 'Show comments', onClick: () => { setShowComments((s) => !s); setCollapsed(false) } },
-            ...(isCoordinator ? [{ label: 'Delete / archive team', onClick: removeTeam, danger: true, disabled: busy }] : []),
+            ...(isCoordinator && !locked ? [{ label: 'Delete / archive team', onClick: removeTeam, danger: true, disabled: busy }] : []),
           ]} />
         </div>
       </div>
@@ -744,7 +778,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
                     <div style={{ width: 26, height: 26, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>{initials(p?.full_name || '?')}</div>
                     <div style={{ fontSize: 14, fontWeight: 500 }}>{p?.full_name || 'Unknown'}</div>
                     {m.poc && <span className="pill" style={{ ...pill('#F3E3D2', 'var(--rust)'), fontSize: 12 }}>POC</span>}
-                    {isCoordinator && (
+                    {isCoordinator && !locked && (
                       <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
                         <button className="tap44" disabled={busy} onClick={() => togglePoc(m.person_id, p?.full_name, m.poc)} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: m.poc ? 'var(--rust)' : 'var(--muted)', cursor: 'pointer' }}>{m.poc ? '★ POC' : '☆ POC'}</button>
                         <button className="tap44" disabled={busy} onClick={() => removeMember(m.person_id, p?.full_name)} style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Remove</button>
