@@ -227,6 +227,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   const [creating, setCreating] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [phaseSpanByBlock, setPhaseSpanByBlock] = useState({})
   const [teamDaysByBlock, setTeamDaysByBlock] = useState({})
   const [selUnassigned, setSelUnassigned] = useState(() => new Set())
@@ -418,6 +419,19 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
     } catch (e) { onToast('Could not export: ' + (e.message || e)) } finally { setExporting(false) }
   }
 
+  // Push the current roster to the linked Google Sheet. An edge function re-fetches
+  // live data server-side, builds the same day-grid, and posts it to the sheet's
+  // Apps Script web app — each sync REPLACES the tab's contents.
+  async function syncToSheet() {
+    setSyncing(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('sync-teams-sheet', { body: { eventId: ev.id } })
+      if (error) throw error
+      if (data && data.ok === false) throw new Error(data.error || 'Sheet sync failed')
+      onToast(`Synced ${data?.teams ?? ''} team${data?.teams === 1 ? '' : 's'} to Google Sheet.`)
+    } catch (e) { onToast('Could not sync to sheet: ' + (e.message || e)) } finally { setSyncing(false) }
+  }
+
   if (err) return <ErrorCard>{err}</ErrorCard>
   if (!blocks) return <Loading label="Loading teams…" />
 
@@ -429,6 +443,9 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
           style={{ width: 18, height: 18, borderRadius: '50%', border: '1px solid var(--border)', background: showInfo ? '#EDE4D6' : '#fff', color: 'var(--muted)', fontSize: 12, cursor: 'pointer', lineHeight: 1, padding: 0 }}>ⓘ</button>
         {blocks.length > 0 && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            {isCoordinator && (
+              <button className="btn btn-ghost tap44" disabled={syncing} onClick={syncToSheet} title="Push the current teams to the linked Google Sheet (replaces the tab's contents)" style={{ fontSize: 12, padding: '6px 11px', opacity: syncing ? 0.6 : 1 }}>{syncing ? 'Syncing…' : '⤴ Sync to Sheet'}</button>
+            )}
             <button className="btn btn-ghost tap44" disabled={exporting} onClick={() => exportRoster('csv')} style={{ fontSize: 12, padding: '6px 11px', opacity: exporting ? 0.6 : 1 }}>⬇ CSV</button>
             <button className="btn btn-ghost tap44" disabled={exporting} onClick={() => exportRoster('pdf')} style={{ fontSize: 12, padding: '6px 11px', opacity: exporting ? 0.6 : 1 }}>⬇ PDF</button>
           </div>
