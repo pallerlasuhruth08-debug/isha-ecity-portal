@@ -18,6 +18,7 @@ import Login from './views/Login'
 import PublicAccept from './views/PublicAccept'
 import PublicInterest from './views/PublicInterest'
 import PublicVolunteerPortal from './views/PublicVolunteerPortal'
+import AttendancePortal from './views/AttendancePortal'
 import VolunteerPortalClaim from './views/VolunteerPortalClaim'
 import UtilityDrawer from './components/UtilityDrawer'
 import CreateEventModal from './components/CreateEventModal'
@@ -48,6 +49,12 @@ function readVolunteerPortalRoute() {
   const m = h.match(/volunteer-portal\/([0-9a-f]{32})(?:\/batch\/([0-9a-f-]{36}))?/i)
   return m ? { token: m[1], splitId: m[2] || null } : null
 }
+// Public per-day attendance capture: #attend/<32-hex session token>.
+function readAttendRoute() {
+  const h = typeof window !== 'undefined' ? window.location.hash || '' : ''
+  const m = h.match(/attend\/([0-9a-f]{32})/i)
+  return m ? m[1] : null
+}
 
 export default function App() {
   // Checked BEFORE any hook so the public pages bypass the auth gate entirely.
@@ -59,6 +66,8 @@ export default function App() {
   if (volunteerToken) return <><PublicVolunteerPortal token={volunteerToken} /><PwaUpdatePrompt /></>
   const vpRoute = readVolunteerPortalRoute()
   if (vpRoute) return <><VolunteerPortalClaim token={vpRoute.token} splitId={vpRoute.splitId} /><PwaUpdatePrompt /></>
+  const attendToken = readAttendRoute()
+  if (attendToken) return <><AttendancePortal token={attendToken} /><PwaUpdatePrompt /></>
 
   const { session, profile, sections } = useSession()
 

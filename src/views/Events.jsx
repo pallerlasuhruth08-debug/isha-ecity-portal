@@ -221,22 +221,65 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
   const [editing, setEditing] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  const [pending, setPending] = useState([])
 
   const load = useCallback(async () => {
     setErr(null)
     const { data, error } = await supabase.from('attendance_sessions')
-      .select('id, title, type, session_date, center_id, activity_type_id')
+      .select('id, title, type, session_date, center_id, activity_type_id, public_token')
       .eq('activity_id', activity.id).is('archived_at', null).order('session_date').order('created_at')
     if (error) { setErr(error.message); setSessions([]); return }
     setSessions(data || [])
     const { data: att } = await supabase.from('attendance').select('session_id').eq('activity_id', activity.id).not('session_id', 'is', null)
     const c = {}; (att || []).forEach((r) => { c[r.session_id] = (c[r.session_id] || 0) + 1 })
     setCounts(c)
+    // Public-link access requests awaiting coordinator approval (across this event's sessions)
+    const ids = (data || []).map((s) => s.id)
+    if (ids.length) {
+      const { data: pend } = await supabase.from('attendance_portal_sessions')
+        .select('id, session_id, name, phone, email, first_used_at').in('session_id', ids).eq('status', 'pending').order('first_used_at')
+      setPending(pend || [])
+    } else setPending([])
     onChanged?.()
   }, [activity.id, onChanged])
   useEffect(() => { load() }, [load])
 
   const typeLabel = (id) => types.find((t) => t.id === id)?.label
+
+  // Public per-day capture link: generate a token on first use, then copy the URL.
+  function genToken() {
+    const a = new Uint8Array(16); crypto.getRandomValues(a)
+    return [...a].map((b) => b.toString(16).padStart(2, '0')).join('')
+  }
+  async function publicLink(e, s) {
+    e.stopPropagation()
+    setBusy(true)
+    try {
+      let token = s.public_token
+      if (!token) {
+        token = genToken()
+        const { error } = await supabase.from('attendance_sessions').update({ public_token: token }).eq('id', s.id)
+        if (error) throw error
+        s.public_token = token; setSessions((prev) => [...prev])
+      }
+      const url = `${window.location.origin}${window.location.pathname}#attend/${token}`
+      try { await navigator.clipboard.writeText(url); onToast('Public attendance link copied — share it with volunteers.') }
+      catch { window.prompt('Copy this public attendance link:', url) }
+    } catch (e2) { onToast('Could not create link: ' + (e2.message || e2)) } finally { setBusy(false) }
+  }
+
+  async function decideRequest(reqId, approve) {
+    setBusy(true)
+    try {
+      const patch = approve
+        ? { status: 'approved', verified_by: 'coordinator', approved_by: me?.id || null, approved_at: new Date().toISOString() }
+        : { status: 'rejected' }
+      const { error } = await supabase.from('attendance_portal_sessions').update(patch).eq('id', reqId)
+      if (error) throw error
+      setPending((prev) => prev.filter((p) => p.id !== reqId))
+      onToast(approve ? 'Access approved.' : 'Access request rejected.')
+    } catch (e) { onToast('Could not update request: ' + (e.message || e)) } finally { setBusy(false) }
+  }
 
   // A session with ZERO captured records has nothing to protect → hard delete.
   // A session WITH records is archived (records preserved via attendance.session_id
@@ -266,9 +309,30 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
     if (s) return <SessionCapture session={s} activity={activity} types={types} me={me} typeLabel={typeLabel} onBack={() => { setOpenId(null); load() }} onToast={onToast} />
   }
 
+  const sessionTitleOf = (sid) => sessions?.find((x) => x.id === sid)?.title || 'Attendance'
+
   return (
     <div>
       {err && <ErrorCard>{err}</ErrorCard>}
+
+      {isCoordinator && pending.length > 0 && (
+        <div className="card" style={{ padding: 12, marginBottom: 12, border: '1px solid #E7C9B8', background: '#FBF6EC' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#8C4A16', marginBottom: 8 }}>Access requests · {pending.length}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {pending.map((p) => (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{p.name || 'Unknown'} · {p.phone}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{p.email ? `${p.email} · ` : ''}{sessionTitleOf(p.session_id)}</div>
+                </div>
+                <button disabled={busy} onClick={() => decideRequest(p.id, true)} style={{ fontSize: 12.5, fontWeight: 600, padding: '7px 12px', borderRadius: 8, border: 'none', background: 'linear-gradient(150deg, var(--orange-2), var(--orange-3))', color: '#fff', cursor: 'pointer' }}>Approve</button>
+                <button disabled={busy} onClick={() => decideRequest(p.id, false)} style={{ fontSize: 12.5, fontWeight: 600, padding: '7px 12px', borderRadius: 8, border: '1px solid var(--border)', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }}>Reject</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {!sessions ? <Loading label="Loading sessions…" /> : sessions.length === 0 ? (
         <Empty label="No attendance sessions yet — create one below." />
       ) : (
@@ -286,6 +350,9 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
               {/* Desktop: inline actions when space allows. */}
               <div className="desktop-only" style={{ gap: 8, flexShrink: 0 }}>
                 {isCoordinator && (
+                  <button className="tap44" disabled={busy} onClick={(e) => publicLink(e, s)} title="Copy public attendance link" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: s.public_token ? '#EAF2E5' : '#fff', cursor: 'pointer' }}>🔗 Link</button>
+                )}
+                {isCoordinator && (
                   <button className="tap44" disabled={busy} onClick={(e) => { e.stopPropagation(); setEditing(s) }} title="Edit session" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>✏️</button>
                 )}
                 {isCoordinator && (
@@ -298,6 +365,7 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
               {isCoordinator && (
                 <div className="mobile-only">
                   <KebabMenu items={[
+                    { label: s.public_token ? 'Copy public link' : 'Create public link', onClick: () => publicLink({ stopPropagation() {} }, s) },
                     { label: 'Edit session', onClick: () => setEditing(s) },
                     { label: (counts[s.id] || 0) > 0 ? 'Archive session' : 'Delete session', onClick: () => removeSession({ stopPropagation() {} }, s), danger: true, disabled: busy },
                   ]} />
@@ -518,7 +586,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('attendance')
-      .select('id, person_id, activity_type_id, center_id, person:people!attendance_person_id_fkey(full_name, phone)')
+      .select('id, person_id, activity_type_id, center_id, captured_name, capture_source, person:people!attendance_person_id_fkey(full_name, phone)')
       .eq('session_id', session.id).order('time_in', { ascending: false })
     setPresent(data || [])
   }, [session.id])
@@ -721,6 +789,9 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 500 }}>{r.person?.full_name || 'Unknown'}</div>
                   {ovrDiffers(r) && <div style={{ fontSize: 12, color: 'var(--orange)' }}>{nameOf(r.activity_type_id)}{r.center_id && r.center_id !== session.center_id ? ` · ${r.center_id}` : ''}</div>}
+                  {r.capture_source === 'public_link' && r.captured_name && (
+                    <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>via link · captured by {r.captured_name}</div>
+                  )}
                 </div>
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <button onClick={() => setOpenComment(openComment === r.person_id ? null : r.person_id)} title="Comments" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', cursor: 'pointer' }}>💬</button>
