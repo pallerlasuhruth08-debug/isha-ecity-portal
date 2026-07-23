@@ -7,6 +7,7 @@ import CampaignForm from './CampaignForm'
 import AssignNurturerDialog from './AssignNurturerDialog'
 import SidePanel, { PanelHeader } from './SidePanel'
 import { ensureSkill } from '../lib/skills'
+import { PROGRAMS } from '../lib/programs'
 
 const REACH = [
   { key: 'answered', label: 'Answered' },
@@ -211,7 +212,8 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
             <Row label="Center" value={center || p.center_id} />
             <Row label="Region" value={p.region} />
             <Row label="Program Tags" value={progTags.length ? progTags.join(', ') : null} />
-            <Row label="IE Date" value={fmt(p.ie_date)} />
+            {PROGRAMS.filter((pr) => p[pr.col]).map((pr) => (<Row key={pr.key} label={pr.label} value={fmt(p[pr.col])} />))}
+            {!PROGRAMS.some((pr) => p[pr.col]) && <Row label="Programmes" value={null} />}
             <Row label="Last Transaction Date" value={fmt(p.last_active_date)} />
           </Section>
 
