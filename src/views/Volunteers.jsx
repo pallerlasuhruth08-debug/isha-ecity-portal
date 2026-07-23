@@ -11,6 +11,7 @@ import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
 import AssignNurturerDialog from '../components/AssignNurturerDialog'
 import { fetchActivityTypes } from '../lib/activityTypes'
+import { PROGRAMS, PROGRAM_BY_KEY, programsWithData } from '../lib/programs'
 import { addRecipientsToCampaign } from '../lib/campaignRecipients'
 
 const STAGE_TO_STATUS = { New: 'new', 'Reached out': 'contacted', Oriented: 'matched', Active: 'active' }
@@ -60,6 +61,8 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const [tagInput, setTagInput] = useState('')
 
   const [opts, setOpts] = useState({ centres: [], ieYears: [], tags: [], atypes: [], skills: [], events: [], subs: [] })
+  const [progKeys, setProgKeys] = useState(() => new Set(['ie', 'bsp', 'shoonya', 'samyama'])) // programmes with data (dynamic)
+  useEffect(() => { programsWithData().then(setProgKeys) }, [])
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 300)
@@ -232,8 +235,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (fil.nurt === 'needs' && Array.isArray(coveredIds) && coveredIds.length) q = q.not('person_id', 'in', `(${coveredIds.join(',')})`)
       if (fil.centre) q = q.eq('center_id', fil.centre)
       if (fil.ie) q = q.gte('ie_date', `${fil.ie}-01-01`).lte('ie_date', `${fil.ie}-12-31`)
-      const PROG_COL = { ie: 'ie_date', bsp: 'bsp_date', shoonya: 'shoonya_date', samyama: 'samyama_date' }
-      if (PROG_COL[fil.program]) q = q.not(PROG_COL[fil.program], 'is', null)
+      if (PROGRAM_BY_KEY[fil.program]) q = q.not(PROGRAM_BY_KEY[fil.program].col, 'is', null)
       if (fil.last === '30') q = q.gte('last_active_date', daysAgoISO(30))
       if (fil.last === '90') q = q.gte('last_active_date', daysAgoISO(90))
       if (fil.last === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
@@ -268,7 +270,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     const seq = ++reqSeq.current // cancel-in-flight: only the newest request applies
     try {
       let q = applyFilters(
-        supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, shoonya_date, samyama_date, last_active_date, tags, last_activity_at', { count: 'exact' }),
+        supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date, tags, last_activity_at', { count: 'exact' }),
       )
       // Query-level sort over the FULL dataset: most-recent activity first (nulls last),
       // person_id as a stable tiebreak — so page 1 is globally most-recent.
@@ -288,7 +290,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
             name: r.full_name || 'Unknown',
             phone: r.phone || '',
             stage: isCore ? 'Core Group' : STATUS_TO_STAGE[r.status] || 'New',
-            programs: [r.ie_date && 'IE', r.bsp_date && 'BSP', r.shoonya_date && 'Shoonya', r.samyama_date && 'Samyama'].filter(Boolean),
+            programs: PROGRAMS.filter((pr) => r[pr.col]).map((pr) => pr.chip),
             where: [r.area, r.pincode].filter(Boolean).join(' · ') || r.center_id || '—',
             last: lastActiveLabel(r.last_activity_at),
             attended: 0,
@@ -415,7 +417,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
   const selStyle ={ padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 4px)' : undefined }
   const selectDefs = [
-    { k: 'program', all: 'All programmes', opts: [{ v: 'ie', label: 'Inner Engineering' }, { v: 'bsp', label: 'Bhava Spandana' }, { v: 'shoonya', label: 'Shoonya' }, { v: 'samyama', label: 'Samyama' }] },
+    { k: 'program', all: 'All programmes', opts: PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => ({ v: p.key, label: p.label })) },
     { k: 'event', all: 'Any event', opts: opts.events },
     { k: 'atype', all: 'Any activity type', opts: opts.atypes },
     ...(opts.subs.length ? [{ k: 'sub', all: 'Any sub-activity', opts: opts.subs }] : []),

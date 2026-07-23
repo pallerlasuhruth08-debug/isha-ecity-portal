@@ -11,14 +11,8 @@ import CampaignForm from '../components/CampaignForm'
 import PersonProfile from '../components/PersonProfile'
 import AssignNurturerDialog from '../components/AssignNurturerDialog'
 import { addRecipientsToCampaign } from '../lib/campaignRecipients'
+import { PROGRAMS, PROGRAM_BY_KEY, programsWithData } from '../lib/programs'
 
-const PROGRAMS = [
-  { key: 'all', label: 'All programmes' },
-  { key: 'ie', label: 'Inner Engineering', col: 'ie_date' },
-  { key: 'bsp', label: 'Bhava Spandana', col: 'bsp_date' },
-  { key: 'shoonya', label: 'Shoonya', col: 'shoonya_date' },
-  { key: 'samyama', label: 'Samyama', col: 'samyama_date' },
-]
 const RECENCY = [
   { key: 'any', label: 'Any time' },
   { key: '30', label: 'Active · 30 days' },
@@ -28,7 +22,7 @@ const RECENCY = [
 
 const daysAgoISO = (d) => new Date(Date.now() - d * 86400000).toISOString().slice(0, 10)
 function progList(p) {
-  return [p.ie_date && 'IE', p.bsp_date && 'BSP', p.shoonya_date && 'Shoonya', p.samyama_date && 'Samyama'].filter(Boolean)
+  return PROGRAMS.filter((pr) => p[pr.col]).map((pr) => pr.chip)
 }
 function lastActive(d) {
   if (!d) return 'No recent activity'
@@ -51,6 +45,8 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
   const [prog, setProg] = useState('all')
+  const [progKeys, setProgKeys] = useState(() => new Set(['ie', 'bsp', 'shoonya', 'samyama'])) // programmes with data (dynamic)
+  useEffect(() => { programsWithData().then(setProgKeys) }, [])
   const [recency, setRecency] = useState('any')
   const [needsNurt, setNeedsNurt] = useState(false)
   const [coveredIds, setCoveredIds] = useState(null) // person ids WITH an active nurturer (to exclude)
@@ -91,7 +87,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const applyFilters = useCallback(
     (q) => {
       q = q.eq('is_meditator', true)
-      const pd = PROGRAMS.find((p) => p.key === prog)
+      const pd = PROGRAM_BY_KEY[prog]
       if (pd && pd.col) q = q.not(pd.col, 'is', null)
       if (recency === '30') q = q.gte('last_active_date', daysAgoISO(30))
       if (recency === '90') q = q.gte('last_active_date', daysAgoISO(90))
@@ -128,7 +124,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     const seq = ++reqSeq.current // cancel-in-flight: only the newest request applies
     try {
       let q = applyFilters(
-        supabase.from('people').select('id, full_name, phone, area, pincode, center_id, ie_date, bsp_date, shoonya_date, samyama_date, last_active_date', { count: 'exact' }),
+        supabase.from('people').select('id, full_name, phone, area, pincode, center_id, ie_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date', { count: 'exact' }),
       )
       q = q.order('id', { ascending: true }).range(page * pageSize, page * pageSize + pageSize - 1)
       const { data, count, error } = await q
@@ -250,7 +246,8 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
         </div>
         <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0)}>
           <select value={prog} onChange={(e) => setProg(e.target.value)} style={selStyle}>
-            {PROGRAMS.map((p) => (<option key={p.key} value={p.key}>{p.label}</option>))}
+            <option value="all">All programmes</option>
+            {PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => (<option key={p.key} value={p.key}>{p.label}</option>))}
           </select>
           <select value={recency} onChange={(e) => setRecency(e.target.value)} style={selStyle}>
             {RECENCY.map((r) => (<option key={r.key} value={r.key}>{r.label}</option>))}
