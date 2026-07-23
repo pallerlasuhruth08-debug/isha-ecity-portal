@@ -9,6 +9,7 @@ import { useBreakpoint } from '../lib/useBreakpoint'
 import CampaignForm from './CampaignForm'
 import { addRecipientsToCampaign } from '../lib/campaignRecipients'
 import AssignToTeamModal from './AssignToTeamModal'
+import { multiFieldOr } from '../lib/searchFilter'
 
 export const EI_STATUS = [
   { v: 'interested', label: 'Interested', pill: pill('#F1EADD', '#8C7E6B') },
@@ -67,6 +68,8 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
   const [dayFilter, setDayFilter] = useState([]) // multi-select day indices, OR'd together
   const [allDaysOnly, setAllDaysOnly] = useState(false) // exclusive with dayFilter
   const [assignFilter, setAssignFilter] = useState('all') // 'all' | 'assigned' | 'unassigned'
+  const [searchQ, setSearchQ] = useState('') // raw input
+  const [search, setSearch] = useState('') // debounced; matched server-side on person name/phone
 
   // Sort -- Status is a real column on event_interest, so it sorts correctly across
   // every page via a normal server-side .order(). "Day N" sorting can't be pushed to
@@ -145,11 +148,17 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
     return () => { alive = false }
   }, [scopedEventId, reloadKey])
 
+  // Debounce the raw search box (~300ms) before it drives the server query.
+  useEffect(() => {
+    const h = setTimeout(() => setSearch(searchQ.trim()), 300)
+    return () => clearTimeout(h)
+  }, [searchQ])
+
   // Reset page + clear selection when server-side filters change
   useEffect(() => {
     setPage(0)
     sel.clear() // eslint-disable-line react-hooks/exhaustive-deps
-  }, [statusFilter, evFilter, dayFilter.join(','), allDaysOnly, assignFilter, sortBy, sortDir, pageSize])
+  }, [statusFilter, evFilter, dayFilter.join(','), allDaysOnly, assignFilter, search, sortBy, sortDir, pageSize])
 
   // Preset event filter from Interest Inbox scope jump
   useEffect(() => {
@@ -186,13 +195,16 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
       return
     }
     try {
+      // person embed is !inner so a name/phone search filter on it narrows the
+      // event_interest rows themselves (person_id is NOT NULL, so no rows are lost).
       let q = supabase.from('event_interest').select(
-        'id, created_at, status, contacted_at, approved_at, availability_dates, note, activity:activities!event_interest_activity_id_fkey(id, name, activity_date, start_date, end_date), person:people!event_interest_person_id_fkey(id, full_name, phone, email)',
+        'id, created_at, status, contacted_at, approved_at, availability_dates, note, activity:activities!event_interest_activity_id_fkey(id, name, activity_date, start_date, end_date), person:people!event_interest_person_id_fkey!inner(id, full_name, phone, email)',
         { count: 'exact' }
       )
       if (lockEventId) q = q.eq('activity_id', lockEventId)
       else if (evFilter !== 'all') q = q.eq('activity_id', evFilter)
       if (statusFilter !== 'all') q = q.eq('status', statusFilter)
+      if (search) q = q.or(multiFieldOr(search, ['full_name', 'phone']), { referencedTable: 'person' })
       if (scopedEventId && scopedDays.length) {
         if (allDaysOnly) q = q.contains('availability_dates', scopedDays)
         else if (dayFilter.length) {
@@ -237,7 +249,7 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
       if (seq === reqSeq.current) setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockEventId, evFilter, statusFilter, dayFilter.join(','), allDaysOnly, dayFilterActive, assignFilter, sortBy, sortDir, scopedEventId, scopedDays.join(','), teamsLoaded, assignedIds.join(','), page, pageSize, onToast])
+  }, [lockEventId, evFilter, statusFilter, dayFilter.join(','), allDaysOnly, dayFilterActive, assignFilter, search, sortBy, sortDir, scopedEventId, scopedDays.join(','), teamsLoaded, assignedIds.join(','), page, pageSize, onToast])
 
   useEffect(() => { loadPage() }, [loadPage, reloadKey])
 
@@ -284,10 +296,11 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
     let from = 0
     const CHUNK = 1000
     for (let g = 0; g < 50; g++) {
-      let q = supabase.from('event_interest').select('person_id')
+      let q = supabase.from('event_interest').select(search ? 'person_id, person:people!event_interest_person_id_fkey!inner(id)' : 'person_id')
       if (lockEventId) q = q.eq('activity_id', lockEventId)
       else if (evFilter !== 'all') q = q.eq('activity_id', evFilter)
       if (statusFilter !== 'all') q = q.eq('status', statusFilter)
+      if (search) q = q.or(multiFieldOr(search, ['full_name', 'phone']), { referencedTable: 'person' })
       if (scopedEventId && scopedDays.length) {
         if (allDaysOnly) q = q.contains('availability_dates', scopedDays)
         else if (dayFilter.length) {
@@ -307,7 +320,7 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
     }
     return [...new Set(ids)]
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockEventId, evFilter, statusFilter, dayFilter.join(','), allDaysOnly, assignFilter, scopedEventId, scopedDays.join(','), assignedIds.join(',')])
+  }, [lockEventId, evFilter, statusFilter, dayFilter.join(','), allDaysOnly, assignFilter, search, scopedEventId, scopedDays.join(','), assignedIds.join(',')])
 
   async function openCampaign() {
     if (selCount === 0) { setCampaignIds([]); setShowCampaign(true); return }
@@ -411,6 +424,16 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
 
   return (
     <>
+      {/* Search — name or phone, matched server-side across all pages. */}
+      <div style={{ position: 'relative', marginBottom: 10 }}>
+        <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: 'var(--muted-2)', pointerEvents: 'none' }}>⌕</span>
+        <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} placeholder="Search name or phone…"
+          style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, padding: '9px 32px 9px 30px', border: '1px solid var(--border)', borderRadius: 10, background: '#fff', color: 'var(--ink)', outline: 'none' }} />
+        {searchQ && (
+          <button onClick={() => setSearchQ('')} title="Clear" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', fontSize: 15, color: 'var(--muted)', lineHeight: 1, padding: 4 }}>✕</button>
+        )}
+      </div>
+
       {/* Status pills */}
       <div className="scroll-tabs" style={pillRow}>
         <button className="tap44" onClick={() => setStatusFilter('all')} style={filterChip(statusFilter === 'all')}>All</button>
