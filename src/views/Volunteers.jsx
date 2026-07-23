@@ -129,6 +129,9 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   }, [fil.tag])
 
   // Event filter -> person_ids who attended that event (attendance.activity_id).
+  // When an activity type is ALSO chosen, scope to THAT type AT THIS event — so
+  // "Guru Pooja + class support" means class support done at Guru Pooja, not
+  // "attended Guru Pooja AND did class support at some other event".
   useEffect(() => {
     if (!fil.event) {
       setEventIds(null)
@@ -136,13 +139,15 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     }
     let alive = true
     setEventIds('loading')
-    supabase.from('attendance').select('person_id').eq('activity_id', fil.event).not('person_id', 'is', null).then(({ data }) => {
+    let q = supabase.from('attendance').select('person_id').eq('activity_id', fil.event).not('person_id', 'is', null)
+    if (fil.atype) q = q.eq('activity_type_id', fil.atype)
+    q.then(({ data }) => {
       if (alive) setEventIds([...new Set((data || []).map((r) => r.person_id))])
     })
     return () => {
       alive = false
     }
-  }, [fil.event])
+  }, [fil.event, fil.atype])
 
   // Skill filter -> person_ids who have that skill (person_skills).
   useEffect(() => {
