@@ -566,6 +566,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
   const [localTypes, setLocalTypes] = useState([])
   const [ovrType, setOvrType] = useState(session.activity_type_id || '')
   const [ovrCentre, setOvrCentre] = useState(session.center_id || '')
+  const [ovrSub, setOvrSub] = useState('') // "capturing for" sub-activity — stamped on each mark
   const [addingType, setAddingType] = useState(false)
   const [newType, setNewType] = useState('')
   const [openComment, setOpenComment] = useState(null) // person_id whose comments are open
@@ -586,7 +587,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('attendance')
-      .select('id, person_id, activity_type_id, center_id, captured_name, capture_source, person:people!attendance_person_id_fkey(full_name, phone)')
+      .select('id, person_id, activity_type_id, sub_activity_type_id, center_id, captured_name, capture_source, person:people!attendance_person_id_fkey(full_name, phone)')
       .eq('session_id', session.id).order('time_in', { ascending: false })
     setPresent(data || [])
   }, [session.id])
@@ -652,13 +653,13 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
     try {
       const { error } = await supabase.from('attendance').insert({
         session_id: session.id, activity_id: activity.id, person_id: person.id,
-        activity_type_id: typeForRow, attended_on: session.session_date,
+        activity_type_id: typeForRow, sub_activity_type_id: ovrSub || null, attended_on: session.session_date,
         center_id: opts.centerId || ovrCentre || session.center_id,
       })
       if (error) throw error
       await ensureParticipation(person.id, session.type, { source: 'event_attendance' })
       setQ(''); setResults([]); setNewP(null); load()
-      onToast(`${person.full_name} — present${typeForRow && typeForRow !== session.activity_type_id ? ` · ${nameOf(typeForRow)}` : ''}.`)
+      onToast(`${person.full_name} — present${ovrSub ? ` · ${nameOf(ovrSub)}` : typeForRow && typeForRow !== session.activity_type_id ? ` · ${nameOf(typeForRow)}` : ''}.`)
     } catch (e) { onToast('Could not mark present: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
@@ -742,6 +743,13 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
           )}
         </div>
         <div style={{ flex: 1, minWidth: 130 }}>
+          <span style={{ ..._lbl, marginBottom: 3, fontSize: 12 }}>Sub-activity (set once, marks many)</span>
+          <select value={ovrSub} onChange={(e) => setOvrSub(e.target.value)} style={_fld}>
+            <option value="">— none —</option>
+            {typeOpts.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </select>
+        </div>
+        <div style={{ flex: 1, minWidth: 130 }}>
           <span style={{ ..._lbl, marginBottom: 3, fontSize: 12 }}>Centre</span>
           <select value={ovrCentre} onChange={(e) => setOvrCentre(e.target.value)} style={_fld}>
             {!centres.some((c) => c.id === ovrCentre) && ovrCentre && <option value={ovrCentre}>{ovrCentre}</option>}
@@ -787,7 +795,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>{initials(r.person?.full_name || '?')}</div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 500 }}>{r.person?.full_name || 'Unknown'}</div>
+                  <div style={{ fontSize: 14, fontWeight: 500 }}>{r.person?.full_name || 'Unknown'}{r.sub_activity_type_id && <span style={{ fontSize: 11.5, fontWeight: 600, color: '#33507D', background: '#E7EEF7', padding: '1px 7px', borderRadius: 6, marginLeft: 8 }}>{nameOf(r.sub_activity_type_id)}</span>}</div>
                   {ovrDiffers(r) && <div style={{ fontSize: 12, color: 'var(--orange)' }}>{nameOf(r.activity_type_id)}{r.center_id && r.center_id !== session.center_id ? ` · ${r.center_id}` : ''}</div>}
                   {r.capture_source === 'public_link' && r.captured_name && (
                     <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>via link · captured by {r.captured_name}</div>

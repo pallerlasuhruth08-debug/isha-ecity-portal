@@ -40,10 +40,11 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
-  const [fil, setFil] = useState({ stage: '', centre: '', ie: '', program: '', last: '', tag: '', event: '', atype: '', skill: '', nurt: '' })
+  const [fil, setFil] = useState({ stage: '', centre: '', ie: '', program: '', last: '', tag: '', event: '', atype: '', sub: '', skill: '', nurt: '' })
   const [tagIds, setTagIds] = useState(null) // manual-tag filter -> person ids
   const [eventIds, setEventIds] = useState(null) // event filter -> person ids who attended that event
   const [atypeIds, setAtypeIds] = useState(null) // activity-type filter -> person ids who attended that type
+  const [subIds, setSubIds] = useState(null) // sub-activity filter -> person ids captured under that sub-activity
   const [skillIds, setSkillIds] = useState(null) // skill filter -> person ids who have that skill
   const [coveredIds, setCoveredIds] = useState(null) // 'needs nurturer' -> person ids WITH an active nurturer (to exclude)
 
@@ -58,7 +59,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const [tagRow, setTagRow] = useState(null)
   const [tagInput, setTagInput] = useState('')
 
-  const [opts, setOpts] = useState({ centres: [], ieYears: [], tags: [], atypes: [], skills: [], events: [] })
+  const [opts, setOpts] = useState({ centres: [], ieYears: [], tags: [], atypes: [], skills: [], events: [], subs: [] })
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 300)
@@ -82,13 +83,14 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const [centres, ieRes, atypes, inUseRes, skillRows, eventsRes] = await Promise.all([
+      const [centres, ieRes, atypes, inUseRes, skillRows, eventsRes, subInUseRes] = await Promise.all([
         supabase.from('centers').select('id, name').order('name'),
         supabase.from('people').select('ie_date').eq('is_volunteer', true).not('ie_date', 'is', null).order('ie_date', { ascending: true }).limit(1),
         fetchActivityTypes().catch(() => []),
         supabase.from('activity_types_in_use').select('id'),
         supabase.from('person_skills').select('skill:skills(id, label)').limit(5000),
         supabase.from('events_with_attendance').select('id, name, activity_date').order('activity_date', { ascending: false }),
+        supabase.from('sub_activities_in_use').select('id'),
       ])
       if (!alive) return
       // Only offer activity types that have captured ATTENDANCE — the rest can only
@@ -100,11 +102,14 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       for (const r of skillRows.data || []) if (r.skill?.id) skillMap.set(r.skill.id, r.skill.label)
       const skills = [...skillMap.entries()].map(([v, label]) => ({ v, label })).sort((a, b) => a.label.localeCompare(b.label))
       const events = (eventsRes.data || []).map((e) => ({ v: e.id, label: e.name || 'Untitled event' }))
+      // Sub-activities that have been captured, labelled from the activity-types list.
+      const subInUse = new Set((subInUseRes.data || []).map((r) => r.id))
+      const subs = (atypes || []).filter((t) => subInUse.has(t.id)).map((t) => ({ v: t.id, label: t.label }))
       const minYear = ieRes.data?.[0]?.ie_date ? new Date(ieRes.data[0].ie_date).getFullYear() : 2010
       const nowY = new Date().getFullYear()
       const ieYears = []
       for (let y = nowY; y >= minYear; y--) ieYears.push(String(y))
-      setOpts((o) => ({ ...o, centres: (centres.data || []).filter((c) => c.name !== 'All Centers').map((c) => ({ v: c.id, label: c.name || c.id })), ieYears, atypes: (atypes || []).filter((t) => inUse.has(t.id)).map((t) => ({ v: t.id, label: t.label })), skills, events }))
+      setOpts((o) => ({ ...o, centres: (centres.data || []).filter((c) => c.name !== 'All Centers').map((c) => ({ v: c.id, label: c.name || c.id })), ieYears, atypes: (atypes || []).filter((t) => inUse.has(t.id)).map((t) => ({ v: t.id, label: t.label })), skills, events, subs }))
       loadTagOptions()
     })()
     return () => {
@@ -148,6 +153,26 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       alive = false
     }
   }, [fil.event, fil.atype])
+
+  // Sub-activity filter -> person_ids captured under that sub-activity, scoped to the
+  // event / activity type when those are also chosen.
+  useEffect(() => {
+    if (!fil.sub) {
+      setSubIds(null)
+      return
+    }
+    let alive = true
+    setSubIds('loading')
+    let q = supabase.from('attendance').select('person_id').eq('sub_activity_type_id', fil.sub).not('person_id', 'is', null)
+    if (fil.event) q = q.eq('activity_id', fil.event)
+    if (fil.atype) q = q.eq('activity_type_id', fil.atype)
+    q.then(({ data }) => {
+      if (alive) setSubIds([...new Set((data || []).map((r) => r.person_id))])
+    })
+    return () => {
+      alive = false
+    }
+  }, [fil.sub, fil.event, fil.atype])
 
   // Skill filter -> person_ids who have that skill (person_skills).
   useEffect(() => {
@@ -203,6 +228,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (Array.isArray(tagIds)) q = q.in('person_id', tagIds.length ? tagIds : [NIL])
       if (Array.isArray(eventIds)) q = q.in('person_id', eventIds.length ? eventIds : [NIL])
       if (Array.isArray(atypeIds)) q = q.in('person_id', atypeIds.length ? atypeIds : [NIL])
+      if (Array.isArray(subIds)) q = q.in('person_id', subIds.length ? subIds : [NIL])
       if (Array.isArray(skillIds)) q = q.in('person_id', skillIds.length ? skillIds : [NIL])
       if (fil.nurt === 'needs' && Array.isArray(coveredIds) && coveredIds.length) q = q.not('person_id', 'in', `(${coveredIds.join(',')})`)
       if (fil.centre) q = q.eq('center_id', fil.centre)
@@ -216,7 +242,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (searchOr) q = q.or(searchOr)
       return q
     },
-    [fil, debounced, tagIds, eventIds, atypeIds, skillIds, coveredIds],
+    [fil, debounced, tagIds, eventIds, atypeIds, subIds, skillIds, coveredIds],
   )
 
   const fetchAllIds = useCallback(async () => {
@@ -239,7 +265,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const loadPage = useCallback(async () => {
     setLoading(true)
     setErr(null)
-    if ((fil.tag && !Array.isArray(tagIds)) || (fil.event && !Array.isArray(eventIds)) || (fil.atype && !Array.isArray(atypeIds)) || (fil.skill && !Array.isArray(skillIds)) || (fil.nurt === 'needs' && !Array.isArray(coveredIds))) return
+    if ((fil.tag && !Array.isArray(tagIds)) || (fil.event && !Array.isArray(eventIds)) || (fil.atype && !Array.isArray(atypeIds)) || (fil.sub && !Array.isArray(subIds)) || (fil.skill && !Array.isArray(skillIds)) || (fil.nurt === 'needs' && !Array.isArray(coveredIds))) return
     const seq = ++reqSeq.current // cancel-in-flight: only the newest request applies
     try {
       let q = applyFilters(
@@ -309,7 +335,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     } finally {
       if (seq === reqSeq.current) setLoading(false)
     }
-  }, [applyFilters, page, pageSize, fil.tag, fil.event, fil.atype, fil.skill, fil.nurt, tagIds, eventIds, atypeIds, skillIds, coveredIds])
+  }, [applyFilters, page, pageSize, fil.tag, fil.event, fil.atype, fil.sub, fil.skill, fil.nurt, tagIds, eventIds, atypeIds, subIds, skillIds, coveredIds])
 
   useEffect(() => {
     loadPage()
@@ -373,7 +399,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
   const setF = (k) => (e) => setFil((f) => ({ ...f, [k]: e.target.value }))
   const clearFil = () => {
-    setFil({ stage: '', centre: '', ie: '', bsp: '', last: '', tag: '', event: '', atype: '', skill: '', nurt: '' })
+    setFil({ stage: '', centre: '', ie: '', bsp: '', last: '', tag: '', event: '', atype: '', sub: '', skill: '', nurt: '' })
     setSearch('')
   }
   const filterActive = !!(debounced || Object.values(fil).some(Boolean))
@@ -393,6 +419,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     { k: 'program', all: 'All programmes', opts: [{ v: 'ie', label: 'Inner Engineering' }, { v: 'bsp', label: 'Bhava Spandana' }, { v: 'shoonya', label: 'Shoonya' }, { v: 'samyama', label: 'Samyama' }] },
     { k: 'event', all: 'Any event', opts: opts.events },
     { k: 'atype', all: 'Any activity type', opts: opts.atypes },
+    ...(opts.subs.length ? [{ k: 'sub', all: 'Any sub-activity', opts: opts.subs }] : []),
     { k: 'skill', all: 'Any skill', opts: opts.skills },
     { k: 'tag', all: 'Any tag', opts: opts.tags },
     { k: 'centre', all: 'All centres', opts: opts.centres },
