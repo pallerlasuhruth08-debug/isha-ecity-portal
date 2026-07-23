@@ -85,15 +85,20 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const [centres, langsRes, ieRes, rawRes, agRes, atypes] = await Promise.all([
+      const [centres, langsRes, ieRes, rawRes, agRes, atypes, inUseRes] = await Promise.all([
         supabase.from('centers').select('id, name').order('name'),
         supabase.from('volunteer_profiles').select('languages').not('languages', 'is', null).limit(2000),
         supabase.from('people').select('ie_date').eq('is_volunteer', true).not('ie_date', 'is', null).order('ie_date', { ascending: true }).limit(1),
         supabase.from('volunteer_history').select('activity').not('activity', 'is', null).limit(4000),
         supabase.from('activity_groups').select('raw_value, group_name'),
         fetchActivityTypes().catch(() => []),
+        supabase.from('activity_types_in_use').select('id'),
       ])
       if (!alive) return
+      // Only offer activity types that actually have people behind them (attended,
+      // assigned to a team of that type, or declared interest) — the rest can only
+      // ever return an empty list, so they're hidden.
+      const inUse = new Set((inUseRes.data || []).map((r) => r.id))
       const langs = uniq((langsRes.data || []).map((r) => r.languages)).sort()
       const raws = uniq((rawRes.data || []).map((r) => r.activity))
       const map = Object.fromEntries((agRes.data || []).map((r) => [r.raw_value, r.group_name]))
@@ -104,7 +109,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       for (let y = nowY; y >= minYear; y--) ieYears.push(String(y))
       setGroupMap(map)
       setRawValues(raws)
-      setOpts((o) => ({ ...o, centres: (centres.data || []).filter((c) => c.name !== 'All Centers').map((c) => ({ v: c.id, label: c.name || c.id })), langs, ieYears, groups, atypes: (atypes || []).map((t) => ({ v: t.id, label: t.label })) }))
+      setOpts((o) => ({ ...o, centres: (centres.data || []).filter((c) => c.name !== 'All Centers').map((c) => ({ v: c.id, label: c.name || c.id })), langs, ieYears, groups, atypes: (atypes || []).filter((t) => inUse.has(t.id)).map((t) => ({ v: t.id, label: t.label })) }))
       loadTagOptions()
     })()
     return () => {
@@ -153,8 +158,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     }
   }, [fil.tag])
 
-  // Activity-TYPE filter -> person_ids who ATTENDED an event of that type (by id).
-  // Same rows as the event's type: attendance.activity_type_id (inherited from the event).
+  // Activity-TYPE filter -> people who DO that activity: attended an event of that
+  // type, are assigned to a team of it, or declared interest (people_for_activity_type
+  // unions all three). Not attendance-only — so "hosting", "Kitchen" etc. return the
+  // volunteers actually tied to them, not just past attendees.
   useEffect(() => {
     if (!fil.atype) {
       setAtypeIds(null)
@@ -163,10 +170,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     let alive = true
     setAtypeIds('loading')
     supabase
-      .from('attendance')
-      .select('person_id')
-      .eq('activity_type_id', fil.atype)
-      .not('person_id', 'is', null)
+      .rpc('people_for_activity_type', { p_type: fil.atype })
       .then(({ data }) => {
         if (alive) setAtypeIds([...new Set((data || []).map((r) => r.person_id))])
       })
