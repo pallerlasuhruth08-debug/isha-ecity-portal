@@ -40,10 +40,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
-  const [fil, setFil] = useState({ stage: '', lang: '', centre: '', ie: '', program: '', last: '', group: '', tag: '', atype: '', nurt: '' })
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [progIds, setProgIds] = useState(null) // group filter -> person ids ('loading'|array|null)
+  const [fil, setFil] = useState({ stage: '', lang: '', centre: '', ie: '', program: '', last: '', tag: '', atype: '', nurt: '' })
   const [tagIds, setTagIds] = useState(null) // manual-tag filter -> person ids
   const [atypeIds, setAtypeIds] = useState(null) // activity-type filter -> person ids who attended that type
   const [coveredIds, setCoveredIds] = useState(null) // 'needs nurturer' -> person ids WITH an active nurturer (to exclude)
@@ -59,9 +56,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const [tagRow, setTagRow] = useState(null)
   const [tagInput, setTagInput] = useState('')
 
-  const [opts, setOpts] = useState({ centres: [], langs: [], ieYears: [], groups: [], tags: [], atypes: [] })
-  const [groupMap, setGroupMap] = useState({}) // raw_value -> group_name
-  const [rawValues, setRawValues] = useState([]) // distinct volunteer_history.activity
+  const [opts, setOpts] = useState({ centres: [], langs: [], ieYears: [], tags: [], atypes: [] })
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 300)
@@ -72,7 +67,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     setPage(0)
     sel.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounced, fil, dateFrom, dateTo])
+  }, [debounced, fil])
   useEffect(() => {
     setPage(0)
   }, [pageSize])
@@ -85,12 +80,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const [centres, langsRes, ieRes, rawRes, agRes, atypes, inUseRes] = await Promise.all([
+      const [centres, langsRes, ieRes, atypes, inUseRes] = await Promise.all([
         supabase.from('centers').select('id, name').order('name'),
         supabase.from('volunteer_profiles').select('languages').not('languages', 'is', null).limit(2000),
         supabase.from('people').select('ie_date').eq('is_volunteer', true).not('ie_date', 'is', null).order('ie_date', { ascending: true }).limit(1),
-        supabase.from('volunteer_history').select('activity').not('activity', 'is', null).limit(4000),
-        supabase.from('activity_groups').select('raw_value, group_name'),
         fetchActivityTypes().catch(() => []),
         supabase.from('activity_types_in_use').select('id'),
       ])
@@ -100,47 +93,17 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       // assigned people may not have shown up, so it's not who actually did it.)
       const inUse = new Set((inUseRes.data || []).map((r) => r.id))
       const langs = uniq((langsRes.data || []).map((r) => r.languages)).sort()
-      const raws = uniq((rawRes.data || []).map((r) => r.activity))
-      const map = Object.fromEntries((agRes.data || []).map((r) => [r.raw_value, r.group_name]))
-      const groups = uniq(Object.values(map)).sort().concat('Uncategorized')
       const minYear = ieRes.data?.[0]?.ie_date ? new Date(ieRes.data[0].ie_date).getFullYear() : 2010
       const nowY = new Date().getFullYear()
       const ieYears = []
       for (let y = nowY; y >= minYear; y--) ieYears.push(String(y))
-      setGroupMap(map)
-      setRawValues(raws)
-      setOpts((o) => ({ ...o, centres: (centres.data || []).filter((c) => c.name !== 'All Centers').map((c) => ({ v: c.id, label: c.name || c.id })), langs, ieYears, groups, atypes: (atypes || []).filter((t) => inUse.has(t.id)).map((t) => ({ v: t.id, label: t.label })) }))
+      setOpts((o) => ({ ...o, centres: (centres.data || []).filter((c) => c.name !== 'All Centers').map((c) => ({ v: c.id, label: c.name || c.id })), langs, ieYears, atypes: (atypes || []).filter((t) => inUse.has(t.id)).map((t) => ({ v: t.id, label: t.label })) }))
       loadTagOptions()
     })()
     return () => {
       alive = false
     }
   }, [loadTagOptions])
-
-  // Activity GROUP (+ optional date range) -> person_ids from volunteer_history.
-  useEffect(() => {
-    if (!fil.group) {
-      setProgIds(null)
-      return
-    }
-    let alive = true
-    setProgIds('loading')
-    const raws = fil.group === 'Uncategorized' ? rawValues.filter((r) => !groupMap[r]) : rawValues.filter((r) => groupMap[r] === fil.group)
-    ;(async () => {
-      if (!raws.length) {
-        if (alive) setProgIds([])
-        return
-      }
-      let q = supabase.from('volunteer_history').select('person_id').in('activity', raws)
-      if (dateFrom) q = q.gte('happened_on', dateFrom)
-      if (dateTo) q = q.lte('happened_on', dateTo)
-      const { data } = await q
-      if (alive) setProgIds([...new Set((data || []).map((r) => r.person_id))])
-    })()
-    return () => {
-      alive = false
-    }
-  }, [fil.group, dateFrom, dateTo, groupMap, rawValues])
 
   // Manual-tag filter -> person_ids from manual_tags.
   useEffect(() => {
@@ -193,19 +156,14 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
   const applyFilters = useCallback(
     (q) => {
-      if (Array.isArray(progIds)) q = q.in('person_id', progIds.length ? progIds : [NIL])
       if (Array.isArray(tagIds)) q = q.in('person_id', tagIds.length ? tagIds : [NIL])
       if (Array.isArray(atypeIds)) q = q.in('person_id', atypeIds.length ? atypeIds : [NIL])
       if (fil.nurt === 'needs' && Array.isArray(coveredIds) && coveredIds.length) q = q.not('person_id', 'in', `(${coveredIds.join(',')})`)
-      if (fil.stage && STAGE_TO_STATUS[fil.stage]) q = q.eq('status', STAGE_TO_STATUS[fil.stage])
-      if (fil.stage === 'Core Group') q = q.contains('tags', ['core_team'])
       if (fil.lang) q = q.eq('languages', fil.lang)
       if (fil.centre) q = q.eq('center_id', fil.centre)
       if (fil.ie) q = q.gte('ie_date', `${fil.ie}-01-01`).lte('ie_date', `${fil.ie}-12-31`)
-      if (fil.program === 'ie') q = q.not('ie_date', 'is', null)
-      if (fil.program === 'no_ie') q = q.is('ie_date', null)
-      if (fil.program === 'bsp') q = q.not('bsp_date', 'is', null)
-      if (fil.program === 'no_bsp') q = q.is('bsp_date', null)
+      const PROG_COL = { ie: 'ie_date', bsp: 'bsp_date', shoonya: 'shoonya_date', samyama: 'samyama_date' }
+      if (PROG_COL[fil.program]) q = q.not(PROG_COL[fil.program], 'is', null)
       if (fil.last === '30') q = q.gte('last_active_date', daysAgoISO(30))
       if (fil.last === '90') q = q.gte('last_active_date', daysAgoISO(90))
       if (fil.last === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
@@ -213,7 +171,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (searchOr) q = q.or(searchOr)
       return q
     },
-    [fil, debounced, progIds, tagIds, atypeIds, coveredIds],
+    [fil, debounced, tagIds, atypeIds, coveredIds],
   )
 
   const fetchAllIds = useCallback(async () => {
@@ -236,11 +194,11 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const loadPage = useCallback(async () => {
     setLoading(true)
     setErr(null)
-    if ((fil.group && !Array.isArray(progIds)) || (fil.tag && !Array.isArray(tagIds)) || (fil.atype && !Array.isArray(atypeIds)) || (fil.nurt === 'needs' && !Array.isArray(coveredIds))) return
+    if ((fil.tag && !Array.isArray(tagIds)) || (fil.atype && !Array.isArray(atypeIds)) || (fil.nurt === 'needs' && !Array.isArray(coveredIds))) return
     const seq = ++reqSeq.current // cancel-in-flight: only the newest request applies
     try {
       let q = applyFilters(
-        supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, last_active_date, tags, last_activity_at', { count: 'exact' }),
+        supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, shoonya_date, samyama_date, last_active_date, tags, last_activity_at', { count: 'exact' }),
       )
       // Query-level sort over the FULL dataset: most-recent activity first (nulls last),
       // person_id as a stable tiebreak — so page 1 is globally most-recent.
@@ -260,7 +218,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
             name: r.full_name || 'Unknown',
             phone: r.phone || '',
             stage: isCore ? 'Core Group' : STATUS_TO_STAGE[r.status] || 'New',
-            programs: [r.ie_date && 'IE', r.bsp_date && 'BSP'].filter(Boolean).join(' · ') || '—',
+            programs: [r.ie_date && 'IE', r.bsp_date && 'BSP', r.shoonya_date && 'Shoonya', r.samyama_date && 'Samyama'].filter(Boolean),
             where: [r.area, r.pincode].filter(Boolean).join(' · ') || r.center_id || '—',
             last: lastActiveLabel(r.last_activity_at),
             attended: 0,
@@ -306,7 +264,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     } finally {
       if (seq === reqSeq.current) setLoading(false)
     }
-  }, [applyFilters, page, pageSize, fil.group, fil.tag, fil.atype, fil.nurt, progIds, tagIds, atypeIds, coveredIds])
+  }, [applyFilters, page, pageSize, fil.tag, fil.atype, fil.nurt, tagIds, atypeIds, coveredIds])
 
   useEffect(() => {
     loadPage()
@@ -370,10 +328,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
   const setF = (k) => (e) => setFil((f) => ({ ...f, [k]: e.target.value }))
   const clearFil = () => {
-    setFil({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', group: '', tag: '', atype: '', nurt: '' })
-    setSearch(''); setDateFrom(''); setDateTo('')
+    setFil({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', tag: '', atype: '', nurt: '' })
+    setSearch('')
   }
-  const filterActive = !!(debounced || Object.values(fil).some(Boolean) || dateFrom || dateTo)
+  const filterActive = !!(debounced || Object.values(fil).some(Boolean))
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const selCount = sel.count(total)
   const isFullySelected = sel.headerState(total) === 'all'
@@ -385,27 +343,18 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const pageHeaderState = pageIds.length === 0 ? 'none' : pageSelectedCount === 0 ? 'none' : pageSelectedCount === pageIds.length ? 'all' : 'partial'
   const togglePage = () => (pageSelectedCount === pageIds.length && pageIds.length > 0 ? sel.deselectIds(pageIds) : sel.selectIds(pageIds))
 
-  const preset = (kind) => () => {
-    if (kind === 'year') { setDateFrom(`${new Date().getFullYear()}-01-01`); setDateTo(todayISO()) }
-    else if (kind === '6mo') { setDateFrom(daysAgoISO(182)); setDateTo(todayISO()) }
-    else if (kind === '30d') { setDateFrom(daysAgoISO(30)); setDateTo(todayISO()) }
-    else { setDateFrom(''); setDateTo('') }
-  }
-
-  const selStyle = { padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 4px)' : undefined }
+  const selStyle ={ padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 4px)' : undefined }
   const selectDefs = [
-    { k: 'stage', all: 'All stages', opts: ['New', 'Reached out', 'Oriented', 'Active', 'Core Group'] },
+    { k: 'program', all: 'All programmes', opts: [{ v: 'ie', label: 'Inner Engineering' }, { v: 'bsp', label: 'Bhava Spandana' }, { v: 'shoonya', label: 'Shoonya' }, { v: 'samyama', label: 'Samyama' }] },
     { k: 'atype', all: 'Any activity type', opts: opts.atypes },
-    { k: 'group', all: 'Any activity group (legacy)', opts: opts.groups },
     { k: 'tag', all: 'Any tag', opts: opts.tags },
     { k: 'lang', all: 'Any language', opts: opts.langs },
     { k: 'centre', all: 'All centres', opts: opts.centres },
     { k: 'ie', all: 'Any IE year', opts: opts.ieYears },
-    { k: 'program', all: 'Program · any', opts: [{ v: 'ie', label: 'IE completed' }, { v: 'no_ie', label: 'No IE yet' }, { v: 'bsp', label: 'BSP completed' }, { v: 'no_bsp', label: 'No BSP yet' }] },
     { k: 'last', all: 'Active · any time', opts: [{ v: '30', label: 'Active · 30 days' }, { v: '90', label: 'Active · 90 days' }, { v: 'quiet', label: 'Quiet · 90+ days' }] },
     { k: 'nurt', all: 'Nurturer · any', opts: [{ v: 'needs', label: 'Needs a nurturer' }] },
   ]
-  const grid = '34px 2.3fr 1.1fr 1fr 1.3fr 1.2fr 0.9fr'
+  const grid = '34px 2fr 1.15fr 1.4fr 1.1fr 1.1fr 0.85fr'
 
   return (
     <Pad>
@@ -437,7 +386,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
           {Icon.search(15)}
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email or pincode…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
-        <MobileFilterSheet count={Object.values(fil).filter(Boolean).length + (dateFrom || dateTo ? 1 : 0)}>
+        <MobileFilterSheet count={Object.values(fil).filter(Boolean).length}>
           {selectDefs.map((d) => (
             <select key={d.k} value={fil[d.k]} onChange={setF(d.k)} style={selStyle}>
               <option value="">{d.all}</option>
@@ -452,20 +401,6 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
         </MobileFilterSheet>
       </div>
 
-      {/* Date constraint — only meaningful once an activity group is chosen */}
-      {fil.group && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12, background: '#FBF6EC', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px' }}>
-          <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>{fil.group} performed:</span>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={selStyle} />
-          <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>to</span>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={selStyle} />
-          <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 12 }} onClick={preset('year')}>This year</button>
-          <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 12 }} onClick={preset('6mo')}>Last 6 months</button>
-          <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 12 }} onClick={preset('30d')}>Last 30 days</button>
-          <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 12 }} onClick={preset('all')}>All time</button>
-        </div>
-      )}
-
       <div className="card" style={{ overflow: 'hidden' }}>
         {/* Header: grid column labels on desktop/tablet; a compact select-all
             bar on phone (there are no columns to label in card mode). Checkbox here
@@ -479,10 +414,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
           <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--border)', fontSize: 12, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, background: 'var(--panel)', alignItems: 'center' }}>
             <Checkbox state={pageHeaderState} onClick={(e) => { e.stopPropagation(); togglePage() }} />
             <span>Volunteer</span>
-            <span>Stage</span>
             <span>Programmes</span>
-            <span>Where</span>
+            <span>Past activities</span>
             <span>Skill</span>
+            <span>Where</span>
             <span>Attended</span>
           </div>
         )}
@@ -500,13 +435,22 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ fontSize: 16, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</div>
-                  <span className="pill" style={STAGE_PILL[v.stage] || pill('#F1EADD', '#8C7E6B')}>{v.stage}</span>
                 </div>
                 <div style={{ fontSize: 12, color: v.phone ? 'var(--muted)' : 'var(--red)', marginTop: 2 }}>{v.phone || 'No phone on record'}</div>
-                <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4 }}>{v.programs} · {v.where}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4 }}>{v.where}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
                   {v.attended > 0 ? <span style={{ color: '#4E7C3F', fontWeight: 600 }}>{v.attended} attended</span> : 'No attendance'} · {v.last}
                 </div>
+                {v.programs.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                    {v.programs.map((p) => (<span key={p} style={{ fontSize: 12, fontWeight: 600, color: '#6A4CA0', background: '#F0EAF7', padding: '2px 7px', borderRadius: 6 }}>{p}</span>))}
+                  </div>
+                )}
+                {v.derivedTags.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                    {v.derivedTags.map((t) => (<span key={'d' + t} style={{ fontSize: 12, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
+                  </div>
+                )}
                 {v.skills.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
                     {v.skills.map((s) => (<span key={s} style={{ fontSize: 12, fontWeight: 600, color: '#33507D', background: '#E7EEF7', padding: '2px 7px', borderRadius: 6 }}>{s}</span>))}
@@ -514,7 +458,6 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
                 )}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                   {v.manualTags.map((t) => (<span key={'m' + t} style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--rust)', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
-                  {v.derivedTags.filter((d) => !v.manualTags.includes(d)).map((t) => (<span key={'d' + t} style={{ fontSize: 12, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
                   {tagRow === v.id ? (
                     <input autoFocus value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addRowTag(v.id); if (e.key === 'Escape') setTagRow(null) }} onBlur={() => addRowTag(v.id)} placeholder="tag…" style={{ width: 90, fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', outline: 'none' }} />
                   ) : (
@@ -536,7 +479,6 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
                   <div style={{ fontSize: 12, color: v.phone ? 'var(--muted)' : 'var(--red)', marginTop: 1 }}>{v.phone || 'No phone on record'}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                     {v.manualTags.map((t) => (<span key={'m' + t} style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--rust)', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
-                    {v.derivedTags.filter((d) => !v.manualTags.includes(d)).map((t) => (<span key={'d' + t} style={{ fontSize: 12, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
                     {tagRow === v.id ? (
                       <input autoFocus value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addRowTag(v.id); if (e.key === 'Escape') setTagRow(null) }} onBlur={() => addRowTag(v.id)} placeholder="tag…" style={{ width: 90, fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', outline: 'none' }} />
                     ) : (
@@ -545,14 +487,22 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
                   </div>
                 </div>
               </div>
-              <div><span className="pill" style={STAGE_PILL[v.stage] || pill('#F1EADD', '#8C7E6B')}>{v.stage}</span></div>
-              <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{v.programs}</div>
-              <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.where}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
+                {v.programs.length
+                  ? v.programs.map((p) => (<span key={p} style={{ fontSize: 12, fontWeight: 600, color: '#6A4CA0', background: '#F0EAF7', padding: '2px 7px', borderRadius: 6 }}>{p}</span>))
+                  : <span style={{ fontSize: 14, color: 'var(--muted-2)' }}>—</span>}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
+                {v.derivedTags.length
+                  ? v.derivedTags.map((t) => (<span key={t} style={{ fontSize: 12, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))
+                  : <span style={{ fontSize: 14, color: 'var(--muted-2)' }}>—</span>}
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
                 {v.skills.length
                   ? v.skills.map((s) => (<span key={s} style={{ fontSize: 12, fontWeight: 600, color: '#33507D', background: '#E7EEF7', padding: '2px 7px', borderRadius: 6 }}>{s}</span>))
                   : <span style={{ fontSize: 14, color: 'var(--muted-2)' }}>—</span>}
               </div>
+              <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.where}</div>
               <div style={{ fontSize: 14, color: 'var(--muted)' }}>
                 {v.attended > 0 ? <span style={{ color: '#4E7C3F', fontWeight: 600 }}>{v.attended} attended</span> : '—'}
                 <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>{v.last}</div>
