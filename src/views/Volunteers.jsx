@@ -40,9 +40,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
-  const [fil, setFil] = useState({ stage: '', lang: '', centre: '', ie: '', program: '', last: '', tag: '', atype: '', nurt: '' })
+  const [fil, setFil] = useState({ stage: '', centre: '', ie: '', program: '', last: '', tag: '', atype: '', skill: '', nurt: '' })
   const [tagIds, setTagIds] = useState(null) // manual-tag filter -> person ids
   const [atypeIds, setAtypeIds] = useState(null) // activity-type filter -> person ids who attended that type
+  const [skillIds, setSkillIds] = useState(null) // skill filter -> person ids who have that skill
   const [coveredIds, setCoveredIds] = useState(null) // 'needs nurturer' -> person ids WITH an active nurturer (to exclude)
 
   const sel = useTableSelection()
@@ -56,7 +57,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const [tagRow, setTagRow] = useState(null)
   const [tagInput, setTagInput] = useState('')
 
-  const [opts, setOpts] = useState({ centres: [], langs: [], ieYears: [], tags: [], atypes: [] })
+  const [opts, setOpts] = useState({ centres: [], ieYears: [], tags: [], atypes: [], skills: [] })
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 300)
@@ -80,24 +81,27 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const [centres, langsRes, ieRes, atypes, inUseRes] = await Promise.all([
+      const [centres, ieRes, atypes, inUseRes, skillRows] = await Promise.all([
         supabase.from('centers').select('id, name').order('name'),
-        supabase.from('volunteer_profiles').select('languages').not('languages', 'is', null).limit(2000),
         supabase.from('people').select('ie_date').eq('is_volunteer', true).not('ie_date', 'is', null).order('ie_date', { ascending: true }).limit(1),
         fetchActivityTypes().catch(() => []),
         supabase.from('activity_types_in_use').select('id'),
+        supabase.from('person_skills').select('skill:skills(id, label)').limit(5000),
       ])
       if (!alive) return
       // Only offer activity types that have captured ATTENDANCE — the rest can only
       // ever return an empty list, so they're hidden. (Team assignment isn't enough:
       // assigned people may not have shown up, so it's not who actually did it.)
       const inUse = new Set((inUseRes.data || []).map((r) => r.id))
-      const langs = uniq((langsRes.data || []).map((r) => r.languages)).sort()
+      // Skill filter offers only skills actually assigned to someone.
+      const skillMap = new Map()
+      for (const r of skillRows.data || []) if (r.skill?.id) skillMap.set(r.skill.id, r.skill.label)
+      const skills = [...skillMap.entries()].map(([v, label]) => ({ v, label })).sort((a, b) => a.label.localeCompare(b.label))
       const minYear = ieRes.data?.[0]?.ie_date ? new Date(ieRes.data[0].ie_date).getFullYear() : 2010
       const nowY = new Date().getFullYear()
       const ieYears = []
       for (let y = nowY; y >= minYear; y--) ieYears.push(String(y))
-      setOpts((o) => ({ ...o, centres: (centres.data || []).filter((c) => c.name !== 'All Centers').map((c) => ({ v: c.id, label: c.name || c.id })), langs, ieYears, atypes: (atypes || []).filter((t) => inUse.has(t.id)).map((t) => ({ v: t.id, label: t.label })) }))
+      setOpts((o) => ({ ...o, centres: (centres.data || []).filter((c) => c.name !== 'All Centers').map((c) => ({ v: c.id, label: c.name || c.id })), ieYears, atypes: (atypes || []).filter((t) => inUse.has(t.id)).map((t) => ({ v: t.id, label: t.label })), skills }))
       loadTagOptions()
     })()
     return () => {
@@ -120,6 +124,22 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       alive = false
     }
   }, [fil.tag])
+
+  // Skill filter -> person_ids who have that skill (person_skills).
+  useEffect(() => {
+    if (!fil.skill) {
+      setSkillIds(null)
+      return
+    }
+    let alive = true
+    setSkillIds('loading')
+    supabase.from('person_skills').select('person_id').eq('skill_id', fil.skill).then(({ data }) => {
+      if (alive) setSkillIds([...new Set((data || []).map((r) => r.person_id))])
+    })
+    return () => {
+      alive = false
+    }
+  }, [fil.skill])
 
   // Activity-TYPE filter -> people whose ATTENDANCE was captured for that type
   // (people_for_activity_type = attendance only). Team assignment is deliberately
@@ -158,8 +178,8 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     (q) => {
       if (Array.isArray(tagIds)) q = q.in('person_id', tagIds.length ? tagIds : [NIL])
       if (Array.isArray(atypeIds)) q = q.in('person_id', atypeIds.length ? atypeIds : [NIL])
+      if (Array.isArray(skillIds)) q = q.in('person_id', skillIds.length ? skillIds : [NIL])
       if (fil.nurt === 'needs' && Array.isArray(coveredIds) && coveredIds.length) q = q.not('person_id', 'in', `(${coveredIds.join(',')})`)
-      if (fil.lang) q = q.eq('languages', fil.lang)
       if (fil.centre) q = q.eq('center_id', fil.centre)
       if (fil.ie) q = q.gte('ie_date', `${fil.ie}-01-01`).lte('ie_date', `${fil.ie}-12-31`)
       const PROG_COL = { ie: 'ie_date', bsp: 'bsp_date', shoonya: 'shoonya_date', samyama: 'samyama_date' }
@@ -171,7 +191,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (searchOr) q = q.or(searchOr)
       return q
     },
-    [fil, debounced, tagIds, atypeIds, coveredIds],
+    [fil, debounced, tagIds, atypeIds, skillIds, coveredIds],
   )
 
   const fetchAllIds = useCallback(async () => {
@@ -194,7 +214,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const loadPage = useCallback(async () => {
     setLoading(true)
     setErr(null)
-    if ((fil.tag && !Array.isArray(tagIds)) || (fil.atype && !Array.isArray(atypeIds)) || (fil.nurt === 'needs' && !Array.isArray(coveredIds))) return
+    if ((fil.tag && !Array.isArray(tagIds)) || (fil.atype && !Array.isArray(atypeIds)) || (fil.skill && !Array.isArray(skillIds)) || (fil.nurt === 'needs' && !Array.isArray(coveredIds))) return
     const seq = ++reqSeq.current // cancel-in-flight: only the newest request applies
     try {
       let q = applyFilters(
@@ -264,7 +284,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     } finally {
       if (seq === reqSeq.current) setLoading(false)
     }
-  }, [applyFilters, page, pageSize, fil.tag, fil.atype, fil.nurt, tagIds, atypeIds, coveredIds])
+  }, [applyFilters, page, pageSize, fil.tag, fil.atype, fil.skill, fil.nurt, tagIds, atypeIds, skillIds, coveredIds])
 
   useEffect(() => {
     loadPage()
@@ -328,7 +348,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
   const setF = (k) => (e) => setFil((f) => ({ ...f, [k]: e.target.value }))
   const clearFil = () => {
-    setFil({ stage: '', lang: '', centre: '', ie: '', bsp: '', last: '', tag: '', atype: '', nurt: '' })
+    setFil({ stage: '', centre: '', ie: '', bsp: '', last: '', tag: '', atype: '', skill: '', nurt: '' })
     setSearch('')
   }
   const filterActive = !!(debounced || Object.values(fil).some(Boolean))
@@ -347,8 +367,8 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const selectDefs = [
     { k: 'program', all: 'All programmes', opts: [{ v: 'ie', label: 'Inner Engineering' }, { v: 'bsp', label: 'Bhava Spandana' }, { v: 'shoonya', label: 'Shoonya' }, { v: 'samyama', label: 'Samyama' }] },
     { k: 'atype', all: 'Any activity type', opts: opts.atypes },
+    { k: 'skill', all: 'Any skill', opts: opts.skills },
     { k: 'tag', all: 'Any tag', opts: opts.tags },
-    { k: 'lang', all: 'Any language', opts: opts.langs },
     { k: 'centre', all: 'All centres', opts: opts.centres },
     { k: 'ie', all: 'Any IE year', opts: opts.ieYears },
     { k: 'last', all: 'Active · any time', opts: [{ v: '30', label: 'Active · 30 days' }, { v: '90', label: 'Active · 90 days' }, { v: 'quiet', label: 'Quiet · 90+ days' }] },
