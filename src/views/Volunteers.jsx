@@ -262,14 +262,16 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
             attended: 0,
             derivedTags: [],
             manualTags: [],
+            skills: [],
           }
         })
 
       const ids = mapped.map((m) => m.id)
       if (ids.length) {
-        const [attRes, mtRes] = await Promise.all([
+        const [attRes, mtRes, skRes] = await Promise.all([
           supabase.from('attendance').select('person_id, atype:activity_types(label)').in('person_id', ids),
           supabase.from('manual_tags').select('person_id, tag').in('person_id', ids),
+          supabase.from('person_skills').select('person_id, skill:skills(label)').in('person_id', ids),
         ])
         const att = {}
         for (const a of attRes.data || []) {
@@ -280,10 +282,13 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
         }
         const mtags = {}
         for (const m of mtRes.data || []) (mtags[m.person_id] ||= []).push(m.tag)
+        const sks = {}
+        for (const s of skRes.data || []) { const l = s.skill?.label; if (l) (sks[s.person_id] ||= []).push(l) }
         for (const m of mapped) {
           const b = att[m.id]
           if (b) { m.attended = b.count; m.derivedTags = [...b.types] }
           m.manualTags = mtags[m.id] || []
+          m.skills = sks[m.id] || []
         }
       }
 
@@ -396,7 +401,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     { k: 'last', all: 'Active · any time', opts: [{ v: '30', label: 'Active · 30 days' }, { v: '90', label: 'Active · 90 days' }, { v: 'quiet', label: 'Quiet · 90+ days' }] },
     { k: 'nurt', all: 'Nurturer · any', opts: [{ v: 'needs', label: 'Needs a nurturer' }] },
   ]
-  const grid = '34px 2.3fr 1.1fr 1fr 1.3fr 0.9fr'
+  const grid = '34px 2.3fr 1.1fr 1fr 1.3fr 1.2fr 0.9fr'
 
   return (
     <Pad>
@@ -473,6 +478,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
             <span>Stage</span>
             <span>Programmes</span>
             <span>Where</span>
+            <span>Skill</span>
             <span>Attended</span>
           </div>
         )}
@@ -497,6 +503,11 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
                   {v.attended > 0 ? <span style={{ color: '#4E7C3F', fontWeight: 600 }}>{v.attended} attended</span> : 'No attendance'} · {v.last}
                 </div>
+                {v.skills.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                    {v.skills.map((s) => (<span key={s} style={{ fontSize: 12, fontWeight: 600, color: '#33507D', background: '#E7EEF7', padding: '2px 7px', borderRadius: 6 }}>{s}</span>))}
+                  </div>
+                )}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                   {v.manualTags.map((t) => (<span key={'m' + t} style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--rust)', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
                   {v.derivedTags.filter((d) => !v.manualTags.includes(d)).map((t) => (<span key={'d' + t} style={{ fontSize: 12, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
@@ -533,6 +544,11 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
               <div><span className="pill" style={STAGE_PILL[v.stage] || pill('#F1EADD', '#8C7E6B')}>{v.stage}</span></div>
               <div style={{ fontSize: 14, color: 'var(--ink-soft)' }}>{v.programs}</div>
               <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.where}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
+                {v.skills.length
+                  ? v.skills.map((s) => (<span key={s} style={{ fontSize: 12, fontWeight: 600, color: '#33507D', background: '#E7EEF7', padding: '2px 7px', borderRadius: 6 }}>{s}</span>))
+                  : <span style={{ fontSize: 14, color: 'var(--muted-2)' }}>—</span>}
+              </div>
               <div style={{ fontSize: 14, color: 'var(--muted)' }}>
                 {v.attended > 0 ? <span style={{ color: '#4E7C3F', fontWeight: 600 }}>{v.attended} attended</span> : '—'}
                 <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>{v.last}</div>

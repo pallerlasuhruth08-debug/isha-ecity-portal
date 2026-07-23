@@ -6,6 +6,7 @@ import { Loading, Empty } from './View'
 import CampaignForm from './CampaignForm'
 import AssignNurturerDialog from './AssignNurturerDialog'
 import SidePanel, { PanelHeader } from './SidePanel'
+import { ensureSkill } from '../lib/skills'
 
 const REACH = [
   { key: 'answered', label: 'Answered' },
@@ -27,6 +28,9 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
   const [nurturer, setNurturer] = useState(null)
   const [derived, setDerived] = useState([])
   const [manual, setManual] = useState([])
+  const [skills, setSkills] = useState([])
+  const [skillVocab, setSkillVocab] = useState([])
+  const [newSkill, setNewSkill] = useState('')
   const [events, setEvents] = useState([])
   const [calls, setCalls] = useState([])
   const [err, setErr] = useState(null)
@@ -40,7 +44,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
 
   const load = useCallback(async () => {
     try {
-      const [pr, vpr, ctr, nur, mt, att, jn] = await Promise.all([
+      const [pr, vpr, ctr, nur, mt, att, jn, ps, sv] = await Promise.all([
         supabase.from('people').select('*').eq('id', personId).single(),
         supabase.from('volunteer_profiles').select('*').eq('person_id', personId).maybeSingle(),
         supabase.from('people').select('center:centers!people_center_id_fkey(name)').eq('id', personId).maybeSingle(),
@@ -48,6 +52,8 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
         supabase.from('manual_tags').select('id, tag').eq('person_id', personId).order('created_at', { ascending: false }),
         supabase.from('attendance').select('time_in, activity_type_id, activities!attendance_activity_id_fkey(name, activity_date), atype:activity_types(label, kind)').eq('person_id', personId),
         supabase.from('journeys').select('type, campaign:campaigns(is_test), calls(reachability, sadhana_status, remarks, completed_at)').eq('person_id', personId),
+        supabase.from('person_skills').select('id, skill:skills(id, label)').eq('person_id', personId),
+        supabase.from('skills').select('id, label').eq('active', true).order('sort_order', { ascending: true }).order('label', { ascending: true }),
       ])
       if (pr.error) throw pr.error
       setP(pr.data)
@@ -55,6 +61,8 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
       setCenter(ctr.data?.center?.name || null)
       setNurturer((nur.data || []).map((r) => r.nurturer?.full_name).filter(Boolean).join(', ') || null)
       setManual(mt.data || [])
+      setSkills(ps.data || [])
+      setSkillVocab(sv.data || [])
       const evs = (att.data || [])
         .map((a) => ({ name: a.activities?.name, type: a.atype?.label || null, kind: a.atype?.kind || null, date: a.activities?.activity_date || a.time_in }))
         .sort((x, y) => new Date(y.date || 0) - new Date(x.date || 0))
@@ -88,6 +96,26 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
     const { data, error } = await supabase.from('manual_tags').insert({ person_id: personId, tag }).select('id, tag').single()
     if (error) return onToast(error.message.includes('duplicate') ? 'Tag already exists.' : 'Could not apply tag.')
     setManual((m) => [data, ...m]); onToast(`Applied “${tag}” tag.`); onChanged && onChanged()
+  }
+  async function addSkill(skillId) {
+    if (!skillId || skills.some((s) => s.skill?.id === skillId)) return
+    const { data, error } = await supabase.from('person_skills').insert({ person_id: personId, skill_id: skillId }).select('id, skill:skills(id, label)').single()
+    if (error) return onToast(error.message.includes('duplicate') ? 'Skill already added.' : 'Could not add skill.')
+    setSkills((s) => [...s, data]); onChanged && onChanged()
+  }
+  async function removeSkill(id) {
+    setSkills((s) => s.filter((x) => x.id !== id))
+    const { error } = await supabase.from('person_skills').delete().eq('id', id)
+    if (error) { onToast('Could not remove skill'); load() } else onChanged && onChanged()
+  }
+  async function createSkill() {
+    const label = newSkill.trim(); if (!label) return
+    setNewSkill('')
+    try {
+      const sk = await ensureSkill(label)
+      setSkillVocab((v) => (v.some((x) => x.id === sk.id) ? v : [...v, sk].sort((a, b) => a.label.localeCompare(b.label))))
+      await addSkill(sk.id)
+    } catch (e) { onToast('Could not add skill: ' + (e.message || e)) }
   }
   async function addAsVolunteer() {
     setBusy(true)
@@ -217,6 +245,28 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
             <div style={{ display: 'flex', gap: 6 }}>
               <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addTag()} placeholder="Add a tag…" style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 8, padding: '7px 10px', fontSize: 12.5, fontFamily: 'inherit', outline: 'none' }} />
               <button className="btn btn-ghost" onClick={addTag}>Add tag</button>
+            </div>
+          </Section>
+
+          {/* Skills — structured, pickable vocabulary (add new inline) */}
+          <Section title="Skills">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+              {skills.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>No skills added.</span>}
+              {skills.map((s) => (
+                <span key={s.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600, color: '#fff', background: '#33507D', padding: '3px 9px', borderRadius: 7 }}>
+                  {s.skill?.label}<span onClick={() => removeSkill(s.id)} style={{ cursor: 'pointer', opacity: 0.8 }}>✕</span>
+                </span>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+              <select value="" onChange={(e) => { addSkill(e.target.value); e.target.value = '' }} style={{ flex: 1, minWidth: 150, border: '1px solid var(--border)', borderRadius: 8, padding: '7px 10px', fontSize: 12.5, fontFamily: 'inherit', outline: 'none', background: '#fff' }}>
+                <option value="" disabled>Pick a skill…</option>
+                {skillVocab.filter((v) => !skills.some((s) => s.skill?.id === v.id)).map((v) => (<option key={v.id} value={v.id}>{v.label}</option>))}
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input value={newSkill} onChange={(e) => setNewSkill(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createSkill()} placeholder="Add a new skill…" style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 8, padding: '7px 10px', fontSize: 12.5, fontFamily: 'inherit', outline: 'none' }} />
+              <button className="btn btn-ghost" onClick={createSkill}>Add skill</button>
             </div>
           </Section>
 

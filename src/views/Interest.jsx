@@ -11,6 +11,7 @@ import { multiFieldOr } from '../lib/searchFilter'
 import { useTableSelection } from '../lib/useTableSelection'
 import { addRecipientsToCampaign } from '../lib/campaignRecipients'
 import { eventDays, fmtDay } from '../lib/planning'
+import { fetchSkills, ensureSkill } from '../lib/skills'
 
 // Interest types are DERIVED from existing data, not a new schema field:
 //  - 'volunteering'  = volunteer_profiles rows whose `interests` text[] does NOT
@@ -106,6 +107,9 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
   const [nurturers, setNurturers] = useState([])
   const [nurSel, setNurSel] = useState('')
   const [newTag, setNewTag] = useState('')
+  const [skills, setSkills] = useState([])
+  const [skillVocab, setSkillVocab] = useState([])
+  const [newSkill, setNewSkill] = useState('')
   const [note, setNote] = useState('')
   const [campaignPid, setCampaignPid] = useState(null)
   const [showForm, setShowForm] = useState(false)
@@ -117,7 +121,20 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUid(data.user?.id || null))
     supabase.from('nurturers').select('id, full_name').order('full_name').then(({ data }) => setNurturers(data || []))
+    fetchSkills().then(setSkillVocab).catch(() => setSkillVocab([]))
   }, [])
+
+  // Load this person's skills when a row opens (they carry over to the Volunteers
+  // tab automatically — same person_id). Rows without a resolved person_id yet
+  // start empty; the first skill added resolves/creates the person.
+  useEffect(() => {
+    const pid = selRow?.person_id
+    if (!pid) { setSkills([]); return }
+    let alive = true
+    supabase.from('person_skills').select('id, skill:skills(id, label)').eq('person_id', pid)
+      .then(({ data }) => { if (alive) setSkills(data || []) })
+    return () => { alive = false }
+  }, [selRow?.person_id, selRow?.key])
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 300)
@@ -255,6 +272,31 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       if (error) throw error
       setNewTag(''); onToast(`Tag "${tag}" added to ${selRow.full_name}.`)
     } catch (e) { onToast((e.message || '').includes('duplicate') ? 'Tag already exists.' : 'Could not add tag: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  async function addSkillInbox(skillId) {
+    if (!skillId || !selRow || skills.some((s) => s.skill?.id === skillId)) return
+    setBusy(true)
+    try {
+      const pid = await ensurePersonFor(selRow)
+      const { data, error } = await supabase.from('person_skills').insert({ person_id: pid, skill_id: skillId }).select('id, skill:skills(id, label)').single()
+      if (error) throw error
+      setSkills((s) => [...s, data])
+    } catch (e) { onToast((e.message || '').includes('duplicate') ? 'Skill already added.' : 'Could not add skill: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+  async function removeSkillInbox(id) {
+    setSkills((s) => s.filter((x) => x.id !== id))
+    const { error } = await supabase.from('person_skills').delete().eq('id', id)
+    if (error) onToast('Could not remove skill.')
+  }
+  async function createSkillInbox() {
+    const label = newSkill.trim(); if (!label) return
+    setNewSkill('')
+    try {
+      const sk = await ensureSkill(label)
+      setSkillVocab((v) => (v.some((x) => x.id === sk.id) ? v : [...v, sk].sort((a, b) => a.label.localeCompare(b.label))))
+      await addSkillInbox(sk.id)
+    } catch (e) { onToast('Could not add skill: ' + (e.message || e)) }
   }
 
   // Standing volunteering interest (volunteer_profiles) and IEO interest
@@ -615,6 +657,28 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
                   <button className="btn btn-ghost" style={btn} disabled={busy} onClick={addTag}>Add tag</button>
                 </div>
               )}
+            </div>
+
+            <div className="card" style={{ padding: 20 }}>
+              <SecH>Skills</SecH>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                {skills.length === 0 && <span style={{ fontSize: 13, color: 'var(--muted-2)' }}>No skills added.</span>}
+                {skills.map((s) => (
+                  <span key={s.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color: '#fff', background: '#33507D', padding: '3px 10px', borderRadius: 7 }}>
+                    {s.skill?.label}<span onClick={() => removeSkillInbox(s.id)} style={{ cursor: 'pointer', opacity: 0.8 }}>✕</span>
+                  </span>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                <select value="" disabled={busy} onChange={(e) => { addSkillInbox(e.target.value); e.target.value = '' }} style={{ flex: 1, minWidth: 160, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', outline: 'none' }}>
+                  <option value="" disabled>Pick a skill…</option>
+                  {skillVocab.filter((v) => !skills.some((s) => s.skill?.id === v.id)).map((v) => (<option key={v.id} value={v.id}>{v.label}</option>))}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input value={newSkill} onChange={(e) => setNewSkill(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createSkillInbox()} placeholder="Add a new skill…" style={{ flex: 1, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', outline: 'none' }} />
+                <button className="btn btn-ghost" style={btn} disabled={busy} onClick={createSkillInbox}>Add skill</button>
+              </div>
             </div>
 
             <div className="card" style={{ padding: 18 }}>
