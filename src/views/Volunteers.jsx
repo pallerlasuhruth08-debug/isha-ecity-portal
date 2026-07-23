@@ -95,9 +95,9 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
         supabase.from('activity_types_in_use').select('id'),
       ])
       if (!alive) return
-      // Only offer activity types that actually have people behind them (attended,
-      // assigned to a team of that type, or declared interest) — the rest can only
-      // ever return an empty list, so they're hidden.
+      // Only offer activity types that have captured ATTENDANCE — the rest can only
+      // ever return an empty list, so they're hidden. (Team assignment isn't enough:
+      // assigned people may not have shown up, so it's not who actually did it.)
       const inUse = new Set((inUseRes.data || []).map((r) => r.id))
       const langs = uniq((langsRes.data || []).map((r) => r.languages)).sort()
       const raws = uniq((rawRes.data || []).map((r) => r.activity))
@@ -158,10 +158,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     }
   }, [fil.tag])
 
-  // Activity-TYPE filter -> people who DO that activity: attended an event of that
-  // type, are assigned to a team of it, or declared interest (people_for_activity_type
-  // unions all three). Not attendance-only — so "hosting", "Kitchen" etc. return the
-  // volunteers actually tied to them, not just past attendees.
+  // Activity-TYPE filter -> people whose ATTENDANCE was captured for that type
+  // (people_for_activity_type = attendance only). Team assignment is deliberately
+  // NOT counted: assigned volunteers may not have shown up (rosters get shuffled on
+  // the day), so only recorded attendance proves they did the activity.
   useEffect(() => {
     if (!fil.atype) {
       setAtypeIds(null)
