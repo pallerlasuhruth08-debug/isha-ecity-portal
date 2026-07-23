@@ -421,7 +421,7 @@ export function CreateSessionForm({ activity, session = null, attnCount = 0, typ
   }, [activity.id])
 
   const allTypes = [...types, ...localTypes]
-  const typeOpts = allTypes.filter((t) => (t.kind || 'volunteer') === kind && t.active !== false)
+  const typeOpts = allTypes.filter((t) => (t.kind || 'volunteer') === kind && t.active !== false && (kind === 'meditator' || t.is_primary || t.id === typeId || localTypes.some((l) => l.id === t.id)))
   useEffect(() => { if (typeId && !typeOpts.some((t) => t.id === typeId)) setTypeId('') }, [kind]) // eslint-disable-line
 
   const autoTitle = `${allTypes.find((t) => t.id === typeId)?.label || 'Attendance'} — ${fmtDay(date)}`
@@ -567,6 +567,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
   const [ovrType, setOvrType] = useState(session.activity_type_id || '')
   const [ovrCentre, setOvrCentre] = useState(session.center_id || '')
   const [ovrSub, setOvrSub] = useState('') // "capturing for" sub-activity — stamped on each mark
+  const [subActs, setSubActs] = useState([]) // sub_activities (scoped per activity type)
   const [addingType, setAddingType] = useState(false)
   const [newType, setNewType] = useState('')
   const [openComment, setOpenComment] = useState(null) // person_id whose comments are open
@@ -579,10 +580,19 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
   useEffect(() => {
     supabase.from('centers').select('id, name, active').order('name')
       .then(({ data }) => setCentres((data || []).filter((c) => c.active && !['all', 'unassigned'].includes(c.id))))
+    supabase.from('sub_activities').select('id, label, activity_type_id, active').order('sort_order')
+      .then(({ data }) => setSubActs(data || []))
   }, [])
 
+  // Sub-activity list is scoped to the activity type being captured. Reset the
+  // selection whenever that type changes so a stale sub-activity can't carry over.
+  const effType = ovrType || session.activity_type_id
+  const subOpts = subActs.filter((s) => s.activity_type_id === effType && s.active !== false)
+  const subLabel = (id) => subActs.find((s) => s.id === id)?.label
+  useEffect(() => { setOvrSub('') }, [effType])
+
   const allTypes = [...types, ...localTypes]
-  const typeOpts = allTypes.filter((t) => (t.kind || 'volunteer') === session.type && t.active !== false)
+  const typeOpts = allTypes.filter((t) => (t.kind || 'volunteer') === session.type && t.active !== false && (session.type === 'meditator' || t.is_primary || t.id === ovrType || localTypes.some((l) => l.id === t.id)))
   const nameOf = (id) => allTypes.find((t) => t.id === id)?.label
 
   const load = useCallback(async () => {
@@ -742,13 +752,15 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
             </div>
           )}
         </div>
-        <div style={{ flex: 1, minWidth: 130 }}>
-          <span style={{ ..._lbl, marginBottom: 3, fontSize: 12 }}>Sub-activity (set once, marks many)</span>
-          <select value={ovrSub} onChange={(e) => setOvrSub(e.target.value)} style={_fld}>
-            <option value="">— none —</option>
-            {typeOpts.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-          </select>
-        </div>
+        {subOpts.length > 0 && (
+          <div style={{ flex: 1, minWidth: 130 }}>
+            <span style={{ ..._lbl, marginBottom: 3, fontSize: 12 }}>Sub-activity (set once, marks many)</span>
+            <select value={ovrSub} onChange={(e) => setOvrSub(e.target.value)} style={_fld}>
+              <option value="">— none —</option>
+              {subOpts.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </div>
+        )}
         <div style={{ flex: 1, minWidth: 130 }}>
           <span style={{ ..._lbl, marginBottom: 3, fontSize: 12 }}>Centre</span>
           <select value={ovrCentre} onChange={(e) => setOvrCentre(e.target.value)} style={_fld}>
@@ -795,7 +807,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>{initials(r.person?.full_name || '?')}</div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 500 }}>{r.person?.full_name || 'Unknown'}{r.sub_activity_type_id && <span style={{ fontSize: 11.5, fontWeight: 600, color: '#33507D', background: '#E7EEF7', padding: '1px 7px', borderRadius: 6, marginLeft: 8 }}>{nameOf(r.sub_activity_type_id)}</span>}</div>
+                  <div style={{ fontSize: 14, fontWeight: 500 }}>{r.person?.full_name || 'Unknown'}{r.sub_activity_type_id && <span style={{ fontSize: 11.5, fontWeight: 600, color: '#33507D', background: '#E7EEF7', padding: '1px 7px', borderRadius: 6, marginLeft: 8 }}>{subLabel(r.sub_activity_type_id)}</span>}</div>
                   {ovrDiffers(r) && <div style={{ fontSize: 12, color: 'var(--orange)' }}>{nameOf(r.activity_type_id)}{r.center_id && r.center_id !== session.center_id ? ` · ${r.center_id}` : ''}</div>}
                   {r.capture_source === 'public_link' && r.captured_name && (
                     <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>via link · captured by {r.captured_name}</div>

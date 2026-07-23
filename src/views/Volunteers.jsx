@@ -90,7 +90,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
         supabase.from('activity_types_in_use').select('id'),
         supabase.from('person_skills').select('skill:skills(id, label)').limit(5000),
         supabase.from('events_with_attendance').select('id, name, activity_date').order('activity_date', { ascending: false }),
-        supabase.from('sub_activities_in_use').select('id'),
+        supabase.from('sub_activities_in_use').select('id, label'),
       ])
       if (!alive) return
       // Only offer activity types that have captured ATTENDANCE — the rest can only
@@ -102,9 +102,8 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       for (const r of skillRows.data || []) if (r.skill?.id) skillMap.set(r.skill.id, r.skill.label)
       const skills = [...skillMap.entries()].map(([v, label]) => ({ v, label })).sort((a, b) => a.label.localeCompare(b.label))
       const events = (eventsRes.data || []).map((e) => ({ v: e.id, label: e.name || 'Untitled event' }))
-      // Sub-activities that have been captured, labelled from the activity-types list.
-      const subInUse = new Set((subInUseRes.data || []).map((r) => r.id))
-      const subs = (atypes || []).filter((t) => subInUse.has(t.id)).map((t) => ({ v: t.id, label: t.label }))
+      // Sub-activities that have actually been captured (labelled from sub_activities).
+      const subs = (subInUseRes.data || []).map((r) => ({ v: r.id, label: r.label }))
       const minYear = ieRes.data?.[0]?.ie_date ? new Date(ieRes.data[0].ie_date).getFullYear() : 2010
       const nowY = new Date().getFullYear()
       const ieYears = []
