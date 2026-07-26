@@ -6,8 +6,9 @@ import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import { ensureParticipation } from '../lib/volunteers'
 import CommentThread from '../components/CommentThread'
 import { fetchActivityTypes } from '../lib/activityTypes'
-import { fmtDay, groupPhases } from '../lib/planning'
-import { ensureSeriesWindow } from '../lib/series'
+import { fmtDay, groupPhases, seriesDatesUpTo, seriesEndDate, todayISO, addDaysISO, recurrenceLabel } from '../lib/planning'
+import { ensureSeriesWindow, SERIES_WINDOW_DAYS } from '../lib/series'
+import RecurrenceFields, { toRule } from '../components/RecurrenceFields'
 import EventList from '../components/EventList'
 import KebabMenu from '../components/KebabMenu'
 import { useBreakpoint } from '../lib/useBreakpoint'
@@ -858,21 +859,61 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
     } catch (e) { onToast('Could not archive: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
+  // Duplicate: clone everything except attendance (title, description, to-dos, teams,
+  // phases) into a new standalone event via the atomic duplicate_event RPC.
+  async function duplicate() {
+    setBusy(true)
+    try {
+      const { data, error } = await supabase.rpc('duplicate_event', { p_src: activity.id, p_by: me?.id || null })
+      if (error) throw error
+      onToast(`Duplicated as “${activity.name} (copy)” — find it in All events.`)
+      onChanged?.(data)
+    } catch (e) { onToast('Could not duplicate: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  // Add-to-Google-Calendar (this event, all-day; DTEND is exclusive so +1 day).
+  function addToGoogle() {
+    const s = activity.start_date || activity.activity_date
+    if (!s) return onToast('Event has no date.')
+    const e = activity.end_date || s
+    const plus1 = (iso) => { const [y, m, d] = iso.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10).replace(/-/g, '') }
+    const dates = `${s.replace(/-/g, '')}/${plus1(e)}`
+    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(activity.name || 'Event')}&dates=${dates}&details=${encodeURIComponent(activity.description || '')}&location=${encodeURIComponent(activity.center_id || '')}`
+    window.open(url, '_blank', 'noopener')
+  }
+
+  // Public subscribe link — a live iCal feed of this centre's events (calendar-feed
+  // edge function). webcal:// makes calendar apps subscribe + auto-refresh.
+  async function shareCalendar() {
+    const link = `webcal://oreljszgkligutxdwgxw.supabase.co/functions/v1/calendar-feed?center=${encodeURIComponent(activity.center_id || '')}`
+    try { await navigator.clipboard.writeText(link); onToast('Calendar subscribe link copied — paste into Google/Apple Calendar “Add by URL”.') }
+    catch { window.prompt('Copy this calendar subscribe link:', link) }
+  }
+
+  const menuItems = [
+    { label: 'Edit', onClick: () => setEditing(true), disabled: busy },
+    { label: 'Duplicate', onClick: duplicate, disabled: busy },
+    { label: 'Add to Google Calendar', onClick: addToGoogle, disabled: busy },
+    { label: 'Share calendar (subscribe link)', onClick: shareCalendar, disabled: busy },
+    activity.archived_at
+      ? { label: 'Unarchive', onClick: () => setArchived(false), disabled: busy }
+      : { label: 'Archive', onClick: () => setArchived(true), disabled: busy },
+  ]
+  const ghost = { className: 'btn btn-ghost', style: { fontSize: 12, padding: '7px 12px' } }
+
   return (
     <>
       {isPhone ? (
-        <KebabMenu items={[
-          { label: 'Edit', onClick: () => setEditing(true), disabled: busy },
-          activity.archived_at
-            ? { label: 'Unarchive', onClick: () => setArchived(false), disabled: busy }
-            : { label: 'Archive', onClick: () => setArchived(true), disabled: busy },
-        ]} />
+        <KebabMenu items={menuItems} />
       ) : (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: '7px 12px' }} onClick={() => setEditing(true)}>Edit</button>
+          <button {...ghost} disabled={busy} onClick={() => setEditing(true)}>Edit</button>
+          <button {...ghost} disabled={busy} onClick={duplicate}>Duplicate</button>
+          <button {...ghost} disabled={busy} onClick={addToGoogle} title="Add this event to Google Calendar">＋ Google Cal</button>
+          <button {...ghost} disabled={busy} onClick={shareCalendar} title="Copy a live subscribe link for this centre's calendar">Share calendar</button>
           {activity.archived_at
-            ? <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: '7px 12px' }} onClick={() => setArchived(false)}>Unarchive</button>
-            : <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: '7px 12px' }} onClick={() => setArchived(true)}>Archive</button>}
+            ? <button {...ghost} disabled={busy} onClick={() => setArchived(false)}>Unarchive</button>
+            : <button {...ghost} disabled={busy} onClick={() => setArchived(true)}>Archive</button>}
         </div>
       )}
       {editing && (
@@ -903,22 +944,74 @@ function EditEventForm({ activity, me, onClose, onSaved, onToast }) {
   const [description, setDescription] = useState(activity.description || '')
   const [centers, setCenters] = useState([])
   const [busy, setBusy] = useState(false)
+  // Series editing: when the event belongs to a recurring series, edits apply to
+  // THIS and FUTURE occurrences (and the rule itself).
+  const [series, setSeries] = useState(null)
+  const [typeId, setTypeId] = useState(activity.activity_type_id || '')
+  const [types, setTypes] = useState([])
+  const [recur, setRecur] = useState({ freq: 'none' })
+
   useEffect(() => { supabase.from('centers').select('id, name').order('name').then(({ data }) => setCenters(data || [])) }, [])
+  useEffect(() => {
+    if (!activity.series_id) return
+    fetchActivityTypes().then((all) => setTypes(all || [])).catch(() => setTypes([]))
+    supabase.from('event_series').select('*').eq('id', activity.series_id).maybeSingle().then(({ data }) => {
+      if (!data) return
+      setSeries(data)
+      setTypeId(data.activity_type_id || '')
+      setRecur({
+        freq: data.freq, interval: data.interval || 1,
+        endMode: data.end_date ? 'until' : 'never', until: data.end_date || '', count: 8,
+        monthlyMode: data.monthly_mode || 'date',
+      })
+    })
+  }, [activity.series_id])
 
   async function save() {
     if (!name.trim()) return onToast('Name cannot be empty.')
     setBusy(true)
     try {
-      const { error } = await supabase.from('activities').update({
-        name: name.trim(),
-        activity_date: date || null,
-        center_id: centerId || activity.center_id,
+      const stamp = { edited_at: new Date().toISOString(), edited_by: me?.id || null }
+      if (!series) {
+        const { error } = await supabase.from('activities').update({
+          name: name.trim(), activity_date: date || null,
+          center_id: centerId || activity.center_id, description: description.trim() || null, ...stamp,
+        }).eq('id', activity.id)
+        if (error) throw error
+        onToast('Event updated.')
+        onSaved?.()
+        return
+      }
+
+      // ── Series: update the rule + this-and-future occurrences ──
+      const stop = toRule(recur, series.start_date).freq === 'none'
+      const rule = stop ? { freq: series.freq, interval: series.interval } : toRule(recur, series.start_date)
+      const newEnd = stop ? todayISO() : (rule.until ? rule.until : seriesEndDate(series.start_date, rule))
+      const upd = {
+        name: name.trim(), center_id: centerId || series.center_id, activity_type_id: typeId || null,
         description: description.trim() || null,
-        edited_at: new Date().toISOString(),
-        edited_by: me?.id || null,
-      }).eq('id', activity.id)
-      if (error) throw error
-      onToast('Event updated.')
+        freq: rule.freq, interval: rule.interval, end_date: newEnd,
+        monthly_mode: rule.monthly_mode ?? null, month_week: rule.month_week ?? null, month_weekday: rule.month_weekday ?? null,
+      }
+      const { error: sErr } = await supabase.from('event_series').update(upd).eq('id', series.id)
+      if (sErr) throw sErr
+      // propagate descriptive fields to this + future occurrences
+      const { error: aErr } = await supabase.from('activities').update({
+        name: upd.name, center_id: upd.center_id, activity_type_id: upd.activity_type_id, description: upd.description, ...stamp,
+      }).eq('series_id', series.id).gte('activity_date', activity.activity_date)
+      if (aErr) throw aErr
+      // reconcile the future schedule: drop future occurrences that no longer fit the
+      // rule (and have no attendance), then re-materialize the rolling window.
+      const newSeries = { ...series, ...upd }
+      const valid = new Set(seriesDatesUpTo(newSeries, addDaysISO(todayISO(), SERIES_WINDOW_DAYS)))
+      const { data: fut } = await supabase.from('activities').select('id, activity_date').eq('series_id', series.id).gt('activity_date', todayISO())
+      for (const o of fut || []) {
+        if (valid.has(o.activity_date)) continue
+        const { count } = await supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('activity_id', o.id)
+        if (!count) await supabase.from('activities').delete().eq('id', o.id)
+      }
+      await ensureSeriesWindow()
+      onToast(stop ? 'Series updated — recurrence stopped after today.' : 'Series updated (this and future occurrences).')
       onSaved?.()
     } catch (e) { onToast('Could not save: ' + (e.message || e)) } finally { setBusy(false) }
   }
@@ -928,22 +1021,43 @@ function EditEventForm({ activity, me, onClose, onSaved, onToast }) {
   return (
     <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={onClose}>
       <div className="card modal-sheet" style={{ width: 460, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)', maxHeight: '88vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 2px' }}>Edit event</h3>
-        <div style={{ fontSize: 12, color: 'var(--muted)' }}>To change the type, use the Activity type selector on the event (it handles captured attendance).</div>
+        <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 2px' }}>{series ? 'Edit recurring event' : 'Edit event'}</h3>
+        {series ? (
+          <div style={{ fontSize: 12, color: 'var(--rust)', background: '#FBF1E4', border: '1px solid #E7C9B8', borderRadius: 8, padding: '7px 10px', marginTop: 6 }}>
+            🔁 Recurring — changes apply to <b>this and future</b> occurrences. {recurrenceLabel(series) ? `Currently: ${recurrenceLabel(series).toLowerCase()}.` : ''}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>To change the type, use the Activity type selector on the event (it handles captured attendance).</div>
+        )}
         <label style={{ ...label, marginTop: 16 }}>Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} autoFocus />
-        <label style={label}>Date</label>
-        <input type="date" value={date || ''} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+        {!series && (<>
+          <label style={label}>Date</label>
+          <input type="date" value={date || ''} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+        </>)}
         <label style={label}>Centre</label>
         <select value={centerId} onChange={(e) => setCenterId(e.target.value)} style={inputStyle}>
           <option value="">— select —</option>
           {centers.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
         </select>
+        {series && (<>
+          <label style={label}>Type (optional)</label>
+          <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={inputStyle}>
+            <option value="">— none —</option>
+            <optgroup label="Volunteer">{types.filter((t) => t.kind === 'volunteer').map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</optgroup>
+            <optgroup label="Meditator">{types.filter((t) => t.kind === 'meditator').map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</optgroup>
+          </select>
+        </>)}
         <label style={label}>Description</label>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} />
+        {series && (<>
+          <label style={label}>Repeats</label>
+          <RecurrenceFields value={recur} onChange={setRecur} startDate={series.start_date} />
+          <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginTop: 6 }}>Set “Does not repeat” to stop the series after today (past occurrences are kept).</div>
+        </>)}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={save}>{busy ? 'Saving…' : 'Save changes'}</button>
+          <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={save}>{busy ? 'Saving…' : series ? 'Save series' : 'Save changes'}</button>
         </div>
       </div>
     </div>
