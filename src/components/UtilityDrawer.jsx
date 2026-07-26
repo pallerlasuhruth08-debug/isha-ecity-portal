@@ -21,7 +21,7 @@ export default function UtilityDrawer({ open, onClose, me, onOpenEvent, onCreate
           <div onClick={onClose} style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 600, color: 'var(--orange)', cursor: 'pointer' }}>✕</div>
         </div>
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 16 }} className="scrollarea">
-          {open && tab === 'calendar' && <CalendarTab onOpenEvent={onOpenEvent} onCreateEvent={onCreateEvent} />}
+          {open && tab === 'calendar' && <CalendarTab onOpenEvent={onOpenEvent} onCreateEvent={onCreateEvent} me={me} />}
           {open && tab === 'notes' && <NotesTab me={me} />}
         </div>
       </aside>
@@ -29,10 +29,28 @@ export default function UtilityDrawer({ open, onClose, me, onOpenEvent, onCreate
   )
 }
 
-function CalendarTab({ onOpenEvent, onCreateEvent }) {
+// Public iCal feed (calendar-feed edge function). Scope to the user's centre when
+// they have one, else the whole sector.
+const CAL_FEED_BASE = 'oreljszgkligutxdwgxw.supabase.co/functions/v1/calendar-feed'
+function feedUrls(me) {
+  const c = me?.center_id && !['all', 'unassigned'].includes(me.center_id) ? me.center_id : ''
+  const https = `https://${CAL_FEED_BASE}${c ? `?center=${encodeURIComponent(c)}` : ''}`
+  return { https, webcal: https.replace(/^https:/, 'webcal:'), label: c || 'all centres' }
+}
+
+function CalendarTab({ onOpenEvent, onCreateEvent, me }) {
   const [events, setEvents] = useState(null)
   const [phasesByEvent, setPhasesByEvent] = useState({})
   const [series, setSeries] = useState([])
+  const [copied, setCopied] = useState(false)
+  const { https, webcal, label } = feedUrls(me)
+  async function copyLink() {
+    try { await navigator.clipboard.writeText(webcal); setCopied(true); setTimeout(() => setCopied(false), 2500) }
+    catch { window.prompt('Copy this calendar subscribe link:', webcal) }
+  }
+  function addToGoogle() {
+    window.open(`https://calendar.google.com/calendar/render?cid=${encodeURIComponent(https)}`, '_blank', 'noopener')
+  }
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -71,6 +89,18 @@ function CalendarTab({ onOpenEvent, onCreateEvent }) {
       />
       <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--muted-2)' }}>
         Click an event to open it{onCreateEvent ? ' · click a day to create one' : ''}. Dashed ↻ entries are upcoming repeats — click to open.
+      </div>
+
+      {/* Share this calendar — a live public feed (auto-updates as events change). */}
+      <div className="card" style={{ marginTop: 14, padding: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Share calendar</div>
+        <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 10 }}>Live subscribe feed for {label} — stays up to date automatically.</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-primary" onClick={addToGoogle} style={{ padding: '8px 12px', fontSize: 12.5 }}>＋ Add to Google Calendar</button>
+          <button className="btn btn-ghost" onClick={copyLink} style={{ padding: '8px 12px', fontSize: 12.5 }}>{copied ? '✓ Copied' : 'Copy subscribe link'}</button>
+        </div>
+        <div style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 8, wordBreak: 'break-all' }}>{webcal}</div>
+        <div style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 4 }}>Apple/Outlook: use “Subscribe / Add by URL” with the link above.</div>
       </div>
     </>
   )

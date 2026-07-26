@@ -871,30 +871,9 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
     } catch (e) { onToast('Could not duplicate: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
-  // Add-to-Google-Calendar (this event, all-day; DTEND is exclusive so +1 day).
-  function addToGoogle() {
-    const s = activity.start_date || activity.activity_date
-    if (!s) return onToast('Event has no date.')
-    const e = activity.end_date || s
-    const plus1 = (iso) => { const [y, m, d] = iso.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10).replace(/-/g, '') }
-    const dates = `${s.replace(/-/g, '')}/${plus1(e)}`
-    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(activity.name || 'Event')}&dates=${dates}&details=${encodeURIComponent(activity.description || '')}&location=${encodeURIComponent(activity.center_id || '')}`
-    window.open(url, '_blank', 'noopener')
-  }
-
-  // Public subscribe link — a live iCal feed of this centre's events (calendar-feed
-  // edge function). webcal:// makes calendar apps subscribe + auto-refresh.
-  async function shareCalendar() {
-    const link = `webcal://oreljszgkligutxdwgxw.supabase.co/functions/v1/calendar-feed?center=${encodeURIComponent(activity.center_id || '')}`
-    try { await navigator.clipboard.writeText(link); onToast('Calendar subscribe link copied — paste into Google/Apple Calendar “Add by URL”.') }
-    catch { window.prompt('Copy this calendar subscribe link:', link) }
-  }
-
   const menuItems = [
     { label: 'Edit', onClick: () => setEditing(true), disabled: busy },
     { label: 'Duplicate', onClick: duplicate, disabled: busy },
-    { label: 'Add to Google Calendar', onClick: addToGoogle, disabled: busy },
-    { label: 'Share calendar (subscribe link)', onClick: shareCalendar, disabled: busy },
     activity.archived_at
       ? { label: 'Unarchive', onClick: () => setArchived(false), disabled: busy }
       : { label: 'Archive', onClick: () => setArchived(true), disabled: busy },
@@ -909,8 +888,6 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button {...ghost} disabled={busy} onClick={() => setEditing(true)}>Edit</button>
           <button {...ghost} disabled={busy} onClick={duplicate}>Duplicate</button>
-          <button {...ghost} disabled={busy} onClick={addToGoogle} title="Add this event to Google Calendar">＋ Google Cal</button>
-          <button {...ghost} disabled={busy} onClick={shareCalendar} title="Copy a live subscribe link for this centre's calendar">Share calendar</button>
           {activity.archived_at
             ? <button {...ghost} disabled={busy} onClick={() => setArchived(false)}>Unarchive</button>
             : <button {...ghost} disabled={busy} onClick={() => setArchived(true)}>Archive</button>}
