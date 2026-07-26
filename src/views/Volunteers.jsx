@@ -146,7 +146,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     }
     let alive = true
     setEventIds('loading')
-    let q = supabase.from('attendance').select('person_id').eq('activity_id', fil.event).not('person_id', 'is', null)
+    let q = supabase.from('attendance').select('person_id').eq('activity_id', fil.event).eq('status', 'attended').not('person_id', 'is', null)
     if (fil.atype) q = q.eq('activity_type_id', fil.atype)
     q.then(({ data }) => {
       if (alive) setEventIds([...new Set((data || []).map((r) => r.person_id))])
@@ -165,7 +165,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     }
     let alive = true
     setSubIds('loading')
-    let q = supabase.from('attendance').select('person_id').eq('sub_activity_type_id', fil.sub).not('person_id', 'is', null)
+    let q = supabase.from('attendance').select('person_id').eq('sub_activity_type_id', fil.sub).eq('status', 'attended').not('person_id', 'is', null)
     if (fil.event) q = q.eq('activity_id', fil.event)
     if (fil.atype) q = q.eq('activity_type_id', fil.atype)
     q.then(({ data }) => {
@@ -303,7 +303,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       const ids = mapped.map((m) => m.id)
       if (ids.length) {
         const [attRes, mtRes, skRes] = await Promise.all([
-          supabase.from('attendance').select('person_id, atype:activity_types(label)').in('person_id', ids),
+          supabase.from('attendance').select('person_id, atype:activity_types(label)').in('person_id', ids).eq('status', 'attended'),
           supabase.from('manual_tags').select('person_id, tag').in('person_id', ids),
           supabase.from('person_skills').select('person_id, skill:skills(label)').in('person_id', ids),
         ])

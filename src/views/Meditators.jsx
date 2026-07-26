@@ -58,6 +58,21 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const [formIds, setFormIds] = useState([])
   const [resolving, setResolving] = useState(false)
   const [profileId, setProfileId] = useState(null)
+  // Event + Status filters (fed by IPRS import): pick an event, then Attended / Registered / both.
+  const [eventId, setEventId] = useState('all')
+  const [attStatus, setAttStatus] = useState('all')
+  const [eventOpts, setEventOpts] = useState([])
+  const [eventPersonIds, setEventPersonIds] = useState(null) // null = no event filter; array = resolved ids
+  useEffect(() => { supabase.rpc('meditator_events').then(({ data }) => setEventOpts(data || [])) }, [])
+  // Resolve the chosen event+status to a person-id set the people query intersects with.
+  useEffect(() => {
+    if (eventId === 'all') { setEventPersonIds(null); return }
+    let alive = true
+    setEventPersonIds('loading')
+    supabase.rpc('meditators_for_event', { p_activity: eventId, p_status: attStatus })
+      .then(({ data }) => { if (alive) setEventPersonIds([...new Set((data || []).map((r) => r.person_id))]) })
+    return () => { alive = false }
+  }, [eventId, attStatus])
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 300)
@@ -68,7 +83,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     setPage(0)
     sel.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounced, prog, recency, needsNurt])
+  }, [debounced, prog, recency, needsNurt, eventId, attStatus])
 
   // 'Needs a nurturer' -> exclude people who already have an active nurturer.
   useEffect(() => {
@@ -89,6 +104,10 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       q = q.eq('is_meditator', true)
       const pd = PROGRAM_BY_KEY[prog]
       if (pd && pd.col) q = q.not(pd.col, 'is', null)
+      // Event filter: intersect with the resolved attendee/registrant set for the chosen event.
+      if (Array.isArray(eventPersonIds)) {
+        q = eventPersonIds.length ? q.in('id', eventPersonIds) : q.eq('id', '00000000-0000-0000-0000-000000000000')
+      }
       if (recency === '30') q = q.gte('last_active_date', daysAgoISO(30))
       if (recency === '90') q = q.gte('last_active_date', daysAgoISO(90))
       if (recency === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
@@ -97,7 +116,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       if (searchOr) q = q.or(searchOr)
       return q
     },
-    [prog, recency, debounced, needsNurt, coveredIds],
+    [prog, recency, debounced, needsNurt, coveredIds, eventPersonIds],
   )
 
   const fetchAllIds = useCallback(async () => {
@@ -119,6 +138,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
 
   const loadPage = useCallback(async () => {
     if (needsNurt && !Array.isArray(coveredIds)) return // wait for the covered set
+    if (eventId !== 'all' && !Array.isArray(eventPersonIds)) return // wait for the event resolver
     setLoading(true)
     setErr(null)
     const seq = ++reqSeq.current // cancel-in-flight: only the newest request applies
@@ -139,7 +159,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     } finally {
       if (seq === reqSeq.current) setLoading(false)
     }
-  }, [applyFilters, page, pageSize, needsNurt, coveredIds])
+  }, [applyFilters, page, pageSize, needsNurt, coveredIds, eventId, eventPersonIds])
 
   useEffect(() => {
     loadPage()
@@ -244,11 +264,22 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
           {Icon.search(15)}
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email or pincode…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
-        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0)}>
+        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0) + (eventId !== 'all' ? 1 : 0)}>
           <select value={prog} onChange={(e) => setProg(e.target.value)} style={selStyle}>
             <option value="all">All programmes</option>
             {PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => (<option key={p.key} value={p.key}>{p.label}</option>))}
           </select>
+          <select value={eventId} onChange={(e) => setEventId(e.target.value)} style={selStyle}>
+            <option value="all">All events</option>
+            {eventOpts.map((ev) => (<option key={ev.id} value={ev.id}>{ev.name}{ev.activity_date ? ` · ${ev.activity_date}` : ''}</option>))}
+          </select>
+          {eventId !== 'all' && (
+            <select value={attStatus} onChange={(e) => setAttStatus(e.target.value)} style={selStyle}>
+              <option value="all">Attended + Registered</option>
+              <option value="attended">Attended</option>
+              <option value="registered">Registered</option>
+            </select>
+          )}
           <select value={recency} onChange={(e) => setRecency(e.target.value)} style={selStyle}>
             {RECENCY.map((r) => (<option key={r.key} value={r.key}>{r.label}</option>))}
           </select>

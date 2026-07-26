@@ -51,7 +51,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
         supabase.from('people').select('center:centers!people_center_id_fkey(name)').eq('id', personId).maybeSingle(),
         supabase.from('nurturing_assignments').select('nurturer:people!nurturing_assignments_nurturer_person_id_fkey(full_name)').eq('cared_person_id', personId).eq('active', true),
         supabase.from('manual_tags').select('id, tag').eq('person_id', personId).order('created_at', { ascending: false }),
-        supabase.from('attendance').select('time_in, activity_type_id, activities!attendance_activity_id_fkey(name, activity_date), atype:activity_types(label, kind)').eq('person_id', personId),
+        supabase.from('attendance').select('time_in, status, activity_type_id, activities!attendance_activity_id_fkey(name, activity_date), atype:activity_types(label, kind)').eq('person_id', personId),
         supabase.from('journeys').select('type, campaign:campaigns(is_test), calls(reachability, sadhana_status, remarks, completed_at)').eq('person_id', personId),
         supabase.from('person_skills').select('id, skill:skills(id, label)').eq('person_id', personId),
         supabase.from('skills').select('id, label').eq('active', true).order('sort_order', { ascending: true }).order('label', { ascending: true }),
@@ -65,11 +65,12 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
       setSkills(ps.data || [])
       setSkillVocab(sv.data || [])
       const evs = (att.data || [])
-        .map((a) => ({ name: a.activities?.name, type: a.atype?.label || null, kind: a.atype?.kind || null, date: a.activities?.activity_date || a.time_in }))
+        .map((a) => ({ name: a.activities?.name, type: a.atype?.label || null, kind: a.atype?.kind || null, status: a.status || 'attended', date: a.activities?.activity_date || a.time_in }))
         .sort((x, y) => new Date(y.date || 0) - new Date(x.date || 0))
       setEvents(evs)
       const types = new Set()
-      for (const a of att.data || []) { const t = a.atype?.label; if (t) types.add(t) }
+      // Derived activity-type chips reflect what the person actually DID → attended only.
+      for (const a of att.data || []) { if ((a.status || 'attended') !== 'attended') continue; const t = a.atype?.label; if (t) types.add(t) }
       setDerived([...types])
       const cs = []
       // Skip test-campaign calls — test contact never reads as real contact.
@@ -279,8 +280,8 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
               : (
                 <div className="card" style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                    <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Event</th><th style={th}>Type</th><th style={th}>Kind</th><th style={th}>Date</th></tr></thead>
-                    <tbody>{events.map((e, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{e.name || '—'}</td><td style={td}>{e.type || '—'}</td><td style={td}>{e.kind || '—'}</td><td style={td}>{fmt(e.date) || '—'}</td></tr>))}</tbody>
+                    <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Event</th><th style={th}>Type</th><th style={th}>Status</th><th style={th}>Date</th></tr></thead>
+                    <tbody>{events.map((e, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{e.name || '—'}</td><td style={td}>{e.type || '—'}</td><td style={td}>{e.status === 'registered' ? <span className="pill" style={pill('#F3E9D2', '#8A6D1F')}>Registered</span> : <span className="pill" style={pill('#E4F0DE', '#4E7C3F')}>Attended</span>}</td><td style={td}>{fmt(e.date) || '—'}</td></tr>))}</tbody>
                   </table>
                 </div>
               )}

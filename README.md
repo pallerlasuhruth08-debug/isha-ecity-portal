@@ -1,4 +1,4 @@
-# ECT Center — Volunteer Care Portal
+# Ecity Sector — Volunteer Care Portal
 
 Mobile-first React + Vite coordinator portal for volunteer & meditator nurturing at
 Isha Electronic City, wired to the live Supabase backend (`oreljszgkligutxdwgxw`).

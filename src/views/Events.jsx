@@ -99,7 +99,7 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
   const load = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('attendance')
-        .select('id, person_id').eq('activity_id', activity.id)
+        .select('id, person_id').eq('activity_id', activity.id).eq('status', 'attended')
       if (error) throw error
       setAttendees(data || [])
     } catch (e) {
@@ -844,37 +844,9 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
   const { isPhone } = useBreakpoint()
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [counts, setCounts] = useState(null) // null while loading
   const nowISO = () => new Date().toISOString()
 
-  useEffect(() => {
-    let alive = true
-    Promise.all([
-      supabase.from('attendance').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id),
-      supabase.from('event_todos').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id),
-      supabase.from('event_interest').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id),
-      supabase.from('comments').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id),
-      // Every event auto-gets 4 phase rows (pre_far/pre_near/day_of/post) on creation --
-      // scaffolding, not data. Only count ones that actually have progress recorded.
-      supabase.from('event_phases').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id).or('started_at.not.is.null,completed_at.not.is.null'),
-      supabase.from('activity_blocks').select('id', { count: 'exact', head: true }).eq('activity_id', activity.id),
-    ]).then(([att, todos, interest, comm, phases, blocks]) => {
-      if (!alive) return
-      setCounts({
-        attendance: att.count || 0,
-        interest: interest.count || 0,
-        todos: todos.count || 0,
-        blocks: blocks.count || 0,
-        comments: comm.count || 0,
-        phases: phases.count || 0,
-      })
-    })
-    return () => { alive = false }
-  }, [activity.id])
-
   if (!isCoordinator) return null
-
-  const hasData = counts && Object.values(counts).some((n) => n > 0)
 
   async function setArchived(on) {
     setBusy(true)
@@ -886,30 +858,6 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
     } catch (e) { onToast('Could not archive: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
-  async function hardDelete() {
-    if (!counts || hasData) return
-    if (!window.confirm(`Permanently delete “${activity.name}”? It has no attendance, interest submissions, to-dos, teams, comments, or phases. This cannot be undone.`)) return
-    setBusy(true)
-    try {
-      const { error } = await supabase.from('activities').delete().eq('id', activity.id)
-      if (error) throw error // RESTRICT FK also blocks if attendance somehow exists
-      onToast('Event deleted.')
-      onDeleted?.()
-    } catch (e) { onToast('Could not delete: ' + (e.message || e)) } finally { setBusy(false) }
-  }
-
-  const blockedLabel = () => {
-    if (!counts) return ''
-    const parts = []
-    if (counts.attendance) parts.push(`${counts.attendance} attendance record${counts.attendance === 1 ? '' : 's'}`)
-    if (counts.interest) parts.push(`${counts.interest} interest submission${counts.interest === 1 ? '' : 's'}`)
-    if (counts.todos) parts.push(`${counts.todos} to-do${counts.todos === 1 ? '' : 's'}`)
-    if (counts.blocks) parts.push(`${counts.blocks} team${counts.blocks === 1 ? '' : 's'}`)
-    if (counts.comments) parts.push(`${counts.comments} comment${counts.comments === 1 ? '' : 's'}`)
-    if (counts.phases) parts.push(`${counts.phases} planning phase${counts.phases === 1 ? '' : 's'}`)
-    return `Has ${parts.join(', ')} — archive instead`
-  }
-
   return (
     <>
       {isPhone ? (
@@ -918,12 +866,6 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
           activity.archived_at
             ? { label: 'Unarchive', onClick: () => setArchived(false), disabled: busy }
             : { label: 'Archive', onClick: () => setArchived(true), disabled: busy },
-          {
-            label: 'Delete',
-            onClick: hardDelete,
-            disabled: busy || !counts || hasData,
-            danger: !!counts && !hasData,
-          },
         ]} />
       ) : (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -931,12 +873,6 @@ export function EventActions({ activity, me, isCoordinator, onToast, onChanged, 
           {activity.archived_at
             ? <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: '7px 12px' }} onClick={() => setArchived(false)}>Unarchive</button>
             : <button className="btn btn-ghost" disabled={busy} style={{ fontSize: 12, padding: '7px 12px' }} onClick={() => setArchived(true)}>Archive</button>}
-          <button
-            title={hasData ? blockedLabel() : 'Delete (no related records)'}
-            disabled={busy || !counts || hasData}
-            onClick={hardDelete}
-            style={{ fontSize: 12, padding: '7px 12px', fontWeight: 600, borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: hasData || !counts ? 'var(--muted-2)' : 'var(--red)', cursor: (busy || !counts || hasData) ? 'default' : 'pointer' }}
-          >Delete</button>
         </div>
       )}
       {editing && (
