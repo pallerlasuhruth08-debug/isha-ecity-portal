@@ -32,6 +32,8 @@ export default function AttendancePortal({ token }) {
   const [results, setResults] = useState([])
   const [busy, setBusy] = useState(false)
   const [walk, setWalk] = useState(null) // {name, phone} walk-in mini form
+  const [scan, setScan] = useState(null) // { busy, rows:[{name,phone}], err } — OCR sheet review
+  const scanInput = useRef(null)
   const seq = useRef(0)
 
   const approved = session?.ok && session.status === 'approved'
@@ -131,6 +133,52 @@ export default function AttendancePortal({ token }) {
       if (!data.ok) { showToast(data.reason === 'not_open' ? 'Attendance is not open yet.' : data.reason === 'already' ? 'Already marked.' : 'Could not add.'); return }
       setWalk(null); showToast(`${data.full_name} — present ✓`); loadRoster()
     } catch (e) { showToast('Could not add: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  // Scan a photo of a written attendance sheet via the ocr-attendance edge function
+  // (Google Gemini vision; key stays server-side). Returns { rows: [{name, phone}] }.
+  async function onScanFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setScan({ busy: true, rows: [], err: null })
+    try {
+      const b64 = await new Promise((res, rej) => {
+        const r = new FileReader()
+        r.onload = () => res(String(r.result).split(',')[1])
+        r.onerror = rej
+        r.readAsDataURL(file)
+      })
+      const { data, error } = await supabase.functions.invoke('ocr-attendance', { body: { image: b64 } })
+      if (error) throw new Error(error.message || 'Scan failed')
+      if (data?.error) throw new Error(data.error)
+      const rows = (data?.rows || [])
+        .map((r) => ({ name: (r.name || '').trim(), phone: (r.phone || '').trim() }))
+        .filter((r) => r.name || r.phone)
+      if (rows.length === 0) { setScan({ busy: false, rows: [], err: 'No names read — try a clearer, straight-on photo.' }); return }
+      setScan({ busy: false, rows, err: null })
+    } catch (err) {
+      setScan({ busy: false, rows: [], err: err.message || String(err) })
+    }
+  }
+
+  // Mark every reviewed row present. attend_create_and_mark matches an existing
+  // person by phone (marks) or creates a walk-in (marks) — same RPC as manual walk-ins.
+  async function commitScan() {
+    const rows = (scan?.rows || []).filter((r) => (r.name || '').trim())
+    if (!rows.length) { setScan(null); return }
+    setBusy(true)
+    let done = 0, failed = 0
+    try {
+      for (const r of rows) {
+        const { data, error } = await supabase.rpc('attend_create_and_mark', { p_token: token, p_phone: caller.phone, p_name: r.name.trim(), p_newphone: (r.phone || '').trim() || null, p_activity_type_id: null, p_center_id: null })
+        if (error || !data?.ok) failed++
+        else done++
+      }
+      setScan(null)
+      showToast(`${done} marked present${failed ? ` · ${failed} skipped` : ''} ✓`)
+      loadRoster()
+    } finally { setBusy(false) }
   }
 
   async function unmark(attendanceId, nm) {
@@ -258,6 +306,39 @@ export default function AttendancePortal({ token }) {
                   </div>
                 )}
               </div>
+
+              {/* scan attendance sheet (OCR) */}
+              <input ref={scanInput} type="file" accept="image/*" capture="environment" onChange={onScanFile} style={{ display: 'none' }} />
+              {!scan && (
+                <button onClick={() => scanInput.current?.click()} disabled={busy} style={{ width: '100%', minHeight: 44, marginBottom: 12, background: 'none', border: '1px dashed var(--border)', borderRadius: 10, fontSize: 14, fontWeight: 600, color: 'var(--rust)', cursor: 'pointer' }}>📷 Scan attendance sheet</button>
+              )}
+              {scan?.busy && (
+                <div className="card" style={{ padding: 14, marginBottom: 12, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>Reading the sheet… (5–15s)</div>
+              )}
+              {scan && !scan.busy && scan.err && (
+                <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+                  <div style={{ fontSize: 14, color: 'var(--red)', marginBottom: 10 }}>{scan.err}</div>
+                  <button className="btn btn-ghost" onClick={() => setScan(null)} style={{ minHeight: 40 }}>Close</button>
+                </div>
+              )}
+              {scan && !scan.busy && scan.rows.length > 0 && (
+                <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-soft)', marginBottom: 8 }}>Detected {scan.rows.length} — check, then mark present</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {scan.rows.map((r, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input value={r.name} onChange={(e) => setScan((s) => ({ ...s, rows: s.rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) }))} placeholder="Name" style={{ ...fieldStyle, flex: 2 }} />
+                        <input value={r.phone} onChange={(e) => setScan((s) => ({ ...s, rows: s.rows.map((x, j) => (j === i ? { ...x, phone: e.target.value } : x)) }))} placeholder="Phone" inputMode="tel" style={{ ...fieldStyle, flex: 1.4 }} />
+                        <button onClick={() => setScan((s) => ({ ...s, rows: s.rows.filter((_, j) => j !== i) }))} title="Remove" style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 18, cursor: 'pointer', padding: 4 }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                    <button className="btn btn-primary" disabled={busy} onClick={commitScan} style={{ flex: 1, justifyContent: 'center', minHeight: 44 }}>{busy ? 'Marking…' : `Mark ${scan.rows.length} present`}</button>
+                    <button className="btn btn-ghost" onClick={() => setScan(null)} style={{ minHeight: 44 }}>Cancel</button>
+                  </div>
+                </div>
+              )}
 
               {/* present */}
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '.05em', margin: '4px 2px 8px' }}>Present · {(roster.present || []).length}</div>
