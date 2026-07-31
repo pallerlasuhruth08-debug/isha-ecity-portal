@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { STAGE_PILL, initials, avatarFor, pill } from '../lib/ui'
-import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerPill } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Checkbox, Pager, SelectionBar } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import { multiFieldOr, PEOPLE_SEARCH_FIELDS } from '../lib/searchFilter'
@@ -475,6 +475,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
         </MobileFilterSheet>
       </div>
 
+      {!loading && total > 0 && (
+        <Pager page={page} pageCount={pageCount} total={total} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} noun="volunteers" />
+      )}
+
       <div className="card" style={{ overflow: 'hidden' }}>
         {/* Header: grid column labels on desktop/tablet; a compact select-all
             bar on phone (there are no columns to label in card mode). Checkbox here
@@ -513,7 +517,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
                 <div style={{ fontSize: 12, color: v.phone ? 'var(--muted)' : 'var(--red)', marginTop: 2 }}>{v.phone || 'No phone on record'}</div>
                 <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4 }}>{v.where}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                  {v.attended > 0 ? <span style={{ color: '#4E7C3F', fontWeight: 600 }}>{v.attended} attended</span> : 'No attendance'} · {v.last}
+                  {v.attended > 0 ? <span style={{ color: 'var(--leaf)', fontWeight: 600 }}>{v.attended} attended</span> : 'No attendance'} · {v.last}
                 </div>
                 {v.programs.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
@@ -578,23 +582,18 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
               </div>
               <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.where}</div>
               <div style={{ fontSize: 14, color: 'var(--muted)' }}>
-                {v.attended > 0 ? <span style={{ color: '#4E7C3F', fontWeight: 600 }}>{v.attended} attended</span> : '—'}
+                {v.attended > 0 ? <span style={{ color: 'var(--leaf)', fontWeight: 600 }}>{v.attended} attended</span> : '—'}
                 <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>{v.last}</div>
               </div>
             </div>
           ))}
 
       </div>
-      {!loading && total > 0 && (
-        <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize}
-          selection={{
-            count: selCount, total, isFullySelected, onSelectAll: sel.selectAllMatching, onClear: sel.clear,
-            actions: [
-              ...(recipientDraft ? [] : [{ label: 'Assign to nurturer', onClick: openAssign, disabled: resolving }]),
-              { label: recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : (resolving ? 'Preparing…' : 'Create campaign'), onClick: recipientDraft ? addSelectedToCampaign : openCampaign, disabled: resolving, primary: true },
-            ],
-          }} />
-      )}
+      <SelectionBar count={selCount} total={total} isFullySelected={isFullySelected} onSelectAll={sel.selectAllMatching} onClear={sel.clear}
+        actions={[
+          ...(recipientDraft ? [] : [{ label: 'Assign to nurturer', onClick: openAssign, disabled: resolving }]),
+          { label: recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : (resolving ? 'Preparing…' : 'Create campaign'), onClick: recipientDraft ? addSelectedToCampaign : openCampaign, disabled: resolving, primary: true },
+        ]} />
 
       {showForm && (
         <CampaignForm audience="volunteer" personIds={formIds} eventId={campaignDraft?.eventId || null}
