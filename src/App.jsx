@@ -1,25 +1,35 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import Topbar from './components/Topbar'
+// Dashboard is the landing view and Login/Placeholder are tiny — keep those eager.
+// Every other screen is code-split: the entry bundle was ~1.3 MB because all 18
+// views were statically imported, so a coordinator opening the Dashboard also paid
+// for Admin, Campaigns, Hub and every public portal.
 import Dashboard from './views/Dashboard'
-import Volunteers from './views/Volunteers'
-import Campaigns from './views/Campaigns'
-import Meditators from './views/Meditators'
-import Interest from './views/Interest'
-import Advance from './views/Advance'
-import Nurturing from './views/Nurturing'
-import Events from './views/Events'
-import Planning from './views/Planning'
-import Hub from './views/Hub'
-import Unresolved from './views/Unresolved'
-import Admin from './views/Admin'
 import Placeholder from './views/Placeholder'
 import Login from './views/Login'
-import PublicAccept from './views/PublicAccept'
-import PublicInterest from './views/PublicInterest'
-import PublicVolunteerPortal from './views/PublicVolunteerPortal'
-import AttendancePortal from './views/AttendancePortal'
-import VolunteerPortalClaim from './views/VolunteerPortalClaim'
+const Volunteers = lazy(() => import('./views/Volunteers'))
+const Campaigns = lazy(() => import('./views/Campaigns'))
+const Meditators = lazy(() => import('./views/Meditators'))
+const Interest = lazy(() => import('./views/Interest'))
+const Advance = lazy(() => import('./views/Advance'))
+const Nurturing = lazy(() => import('./views/Nurturing'))
+const Events = lazy(() => import('./views/Events'))
+const Planning = lazy(() => import('./views/Planning'))
+const Hub = lazy(() => import('./views/Hub'))
+const Unresolved = lazy(() => import('./views/Unresolved'))
+const Admin = lazy(() => import('./views/Admin'))
+const PublicAccept = lazy(() => import('./views/PublicAccept'))
+const PublicInterest = lazy(() => import('./views/PublicInterest'))
+const PublicVolunteerPortal = lazy(() => import('./views/PublicVolunteerPortal'))
+const AttendancePortal = lazy(() => import('./views/AttendancePortal'))
+const VolunteerPortalClaim = lazy(() => import('./views/VolunteerPortalClaim'))
+
+// Neutral hold while a split chunk arrives. Deliberately quiet — a spinner that
+// flashes for 80ms is worse than a calm blank.
+function ViewFallback() {
+  return <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>Loading…</div>
+}
 import UtilityDrawer from './components/UtilityDrawer'
 import CreateEventModal from './components/CreateEventModal'
 import PwaUpdatePrompt from './components/PwaUpdatePrompt'
@@ -59,15 +69,15 @@ function readAttendRoute() {
 export default function App() {
   // Checked BEFORE any hook so the public pages bypass the auth gate entirely.
   const acceptId = readHashId('accept')
-  if (acceptId) return <><PublicAccept blockId={acceptId} /><PwaUpdatePrompt /></>
+  if (acceptId) return <Suspense fallback={<ViewFallback />}><PublicAccept blockId={acceptId} /><PwaUpdatePrompt /></Suspense>
   const interestId = readHashId('interest')
-  if (interestId) return <><PublicInterest eventId={interestId} /><PwaUpdatePrompt /></>
+  if (interestId) return <Suspense fallback={<ViewFallback />}><PublicInterest eventId={interestId} /><PwaUpdatePrompt /></Suspense>
   const volunteerToken = readHashToken('volunteer')
-  if (volunteerToken) return <><PublicVolunteerPortal token={volunteerToken} /><PwaUpdatePrompt /></>
+  if (volunteerToken) return <Suspense fallback={<ViewFallback />}><PublicVolunteerPortal token={volunteerToken} /><PwaUpdatePrompt /></Suspense>
   const vpRoute = readVolunteerPortalRoute()
-  if (vpRoute) return <><VolunteerPortalClaim token={vpRoute.token} splitId={vpRoute.splitId} /><PwaUpdatePrompt /></>
+  if (vpRoute) return <Suspense fallback={<ViewFallback />}><VolunteerPortalClaim token={vpRoute.token} splitId={vpRoute.splitId} /><PwaUpdatePrompt /></Suspense>
   const attendToken = readAttendRoute()
-  if (attendToken) return <><AttendancePortal token={attendToken} /><PwaUpdatePrompt /></>
+  if (attendToken) return <Suspense fallback={<ViewFallback />}><AttendancePortal token={attendToken} /><PwaUpdatePrompt /></Suspense>
 
   const { session, profile, sections } = useSession()
 
@@ -228,7 +238,9 @@ function Portal({ profile, email, sections }) {
           onSignOut={() => supabase.auth.signOut()}
           onMenu={isPhone ? () => setDrawerOpen(true) : undefined}
         />
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{content}</div>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <Suspense fallback={<ViewFallback />}>{content}</Suspense>
+        </div>
       </main>
 
       {/* Utility drawer (calendar + notes), separate from the left nav — a fixed
