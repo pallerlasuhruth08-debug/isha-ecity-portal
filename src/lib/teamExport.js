@@ -2,7 +2,6 @@
 // Teams tab already renders — activity blocks, block_assignments, people,
 // block_phases/event_phases (for the execution-period span), and person-in-event
 // comments. Nothing here is fabricated; a team/member with no data just shows blank.
-import { jsPDF } from 'jspdf'
 import { rangeLabel } from './planning'
 
 const ACTIVE_STATUSES = ['assigned', 'show', 'involved']
@@ -137,7 +136,14 @@ export function downloadCSV(filename, csv) {
 }
 
 // One section per team — readable roster (name/phone/email + comment lines), not a table.
-export function teamsToPDF(eventName, teams) {
+//
+// ASYNC because jsPDF is loaded at click time, not at import time. It was a static
+// import, which pulled jspdf + html2canvas + purify (~370 KB) into the Event Hub
+// chunk for every coordinator who ever opened the hub — the busiest screen in the
+// app — to serve the few who export a roster PDF. Nothing else about the function
+// changed; it still returns the document for the caller to .save().
+export async function teamsToPDF(eventName, teams) {
+  const { jsPDF } = await import('jspdf')
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   const marginX = 40
   const pageH = doc.internal.pageSize.getHeight()
