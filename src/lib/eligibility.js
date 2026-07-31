@@ -1,4 +1,4 @@
-import { PROGRAM_BY_KEY, MIN_ROWS_TO_TRUST } from './programs'
+import { PROGRAM_BY_KEY, MIN_ROWS_TO_TRUST } from './programCatalog.js'
 
 // ── What this is ────────────────────────────────────────────────────────────
 // Isha's advanced-programme prerequisites are a PUBLISHED chain over programme
