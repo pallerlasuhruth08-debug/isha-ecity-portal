@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { STAGE_PILL, initials, avatarFor, pill } from '../lib/ui'
-import { Pad, ErrorCard, Loading, Empty, Checkbox, Pager, SelectionBar } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Checkbox, Pager, SelectionBar, ActiveFilters } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import { multiFieldOr, PEOPLE_SEARCH_FIELDS } from '../lib/searchFilter'
@@ -417,16 +417,27 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
   const selStyle ={ padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 4px)' : undefined }
   const selectDefs = [
-    { k: 'program', all: 'All programmes', opts: PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => ({ v: p.key, label: p.label })) },
-    { k: 'event', all: 'Any event', opts: opts.events },
-    { k: 'atype', all: 'Any activity type', opts: opts.atypes },
-    ...(opts.subs.length ? [{ k: 'sub', all: 'Any sub-activity', opts: opts.subs }] : []),
-    { k: 'skill', all: 'Any skill', opts: opts.skills },
-    { k: 'tag', all: 'Any tag', opts: opts.tags },
-    { k: 'centre', all: 'All centres', opts: opts.centres },
-    { k: 'ie', all: 'Any IE year', opts: opts.ieYears },
-    { k: 'last', all: 'Active · any time', opts: [{ v: '30', label: 'Active · 30 days' }, { v: '90', label: 'Active · 90 days' }, { v: 'quiet', label: 'Quiet · 90+ days' }] },
-    { k: 'nurt', all: 'Nurturer · any', opts: [{ v: 'needs', label: 'Needs a nurturer' }] },
+    { k: 'program', all: 'All programmes', chip: 'Programme', opts: PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => ({ v: p.key, label: p.label })) },
+    { k: 'event', all: 'Any event', chip: 'Event', opts: opts.events },
+    { k: 'atype', all: 'Any activity type', chip: 'Activity type', opts: opts.atypes },
+    ...(opts.subs.length ? [{ k: 'sub', all: 'Any sub-activity', chip: 'Sub-activity', opts: opts.subs }] : []),
+    { k: 'skill', all: 'Any skill', chip: 'Skill', opts: opts.skills },
+    { k: 'tag', all: 'Any tag', chip: 'Tag', opts: opts.tags },
+    { k: 'centre', all: 'All centres', chip: 'Centre', opts: opts.centres },
+    { k: 'ie', all: 'Any IE year', chip: 'IE year', opts: opts.ieYears },
+    { k: 'last', all: 'Active · any time', chip: 'Activity', opts: [{ v: '30', label: 'Active · 30 days' }, { v: '90', label: 'Active · 90 days' }, { v: 'quiet', label: 'Quiet · 90+ days' }] },
+    { k: 'nurt', all: 'Nurturer · any', chip: 'Nurturer', opts: [{ v: 'needs', label: 'Needs a nurturer' }] },
+  ]
+  // Removable chips for every active filter (+ the search term). Value is the human
+  // label, resolved from each select's options.
+  const activeFilterItems = [
+    ...(debounced ? [{ key: 'q', label: 'Search', value: `"${debounced}"`, onRemove: () => setSearch('') }] : []),
+    ...selectDefs.filter((d) => fil[d.k]).map((d) => {
+      const raw = fil[d.k]
+      const opt = (d.opts || []).find((o) => (typeof o === 'string' ? o : o.v) === raw)
+      const value = opt ? (typeof opt === 'string' ? opt : opt.label) : raw
+      return { key: d.k, label: d.chip, value, onRemove: () => setFil((f) => ({ ...f, [d.k]: '' })) }
+    }),
   ]
   const grid = '34px 2fr 1.15fr 1.4fr 1.1fr 1.1fr 0.85fr'
 
@@ -475,9 +486,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
         </MobileFilterSheet>
       </div>
 
-      {!loading && total > 0 && (
-        <Pager page={page} pageCount={pageCount} total={total} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} noun="volunteers" />
-      )}
+      <ActiveFilters items={activeFilterItems} onClear={clearFil} />
 
       <div className="card" style={{ overflow: 'hidden' }}>
         {/* Header: grid column labels on desktop/tablet; a compact select-all
@@ -589,6 +598,11 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
           ))}
 
       </div>
+
+      {!loading && total > 0 && selCount === 0 && (
+        <Pager page={page} pageCount={pageCount} total={total} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} noun="volunteers" />
+      )}
+
       <SelectionBar count={selCount} total={total} isFullySelected={isFullySelected} onSelectAll={sel.selectAllMatching} onClear={sel.clear}
         actions={[
           ...(recipientDraft ? [] : [{ label: 'Assign to nurturer', onClick: openAssign, disabled: resolving }]),
