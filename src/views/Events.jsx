@@ -223,7 +223,6 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [pending, setPending] = useState([])
-  const [registered, setRegistered] = useState([]) // expected roster: activity-level status='registered'
 
   const load = useCallback(async () => {
     setErr(null)
@@ -235,11 +234,6 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
     const { data: att } = await supabase.from('attendance').select('session_id').eq('activity_id', activity.id).not('session_id', 'is', null)
     const c = {}; (att || []).forEach((r) => { c[r.session_id] = (c[r.session_id] || 0) + 1 })
     setCounts(c)
-    // Expected roster — people registered (signed up) but not yet marked present.
-    const { data: reg } = await supabase.from('attendance')
-      .select('id, person_id, captured_name, captured_phone, person:people!attendance_person_id_fkey(full_name, phone)')
-      .eq('activity_id', activity.id).eq('status', 'registered').order('captured_name')
-    setRegistered(reg || [])
     // Public-link access requests awaiting coordinator approval (across this event's sessions)
     const ids = (data || []).map((s) => s.id)
     if (ids.length) {
@@ -252,34 +246,6 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
   useEffect(() => { load() }, [load])
 
   const typeLabel = (id) => types.find((t) => t.id === id)?.label
-
-  // Ensure the event has a session to attach a mark to (reuse the first, else create
-  // one dated to the event — participant kind, since 'registered' rosters are IPRS
-  // participant sign-ups).
-  async function ensureSession() {
-    if (sessions && sessions.length) return sessions[0].id
-    const d = activity.activity_date || activity.start_date || new Date().toISOString().slice(0, 10)
-    const { data, error } = await supabase.from('attendance_sessions').insert({
-      activity_id: activity.id, title: `Attendance — ${fmtDay(d)}`, type: 'meditator',
-      session_date: d, center_id: activity.center_id, created_by: me?.id || null,
-    }).select('id').single()
-    if (error) throw error
-    return data.id
-  }
-  // Convert a registered person to present: reuse their row (keeps the IPRS id), flip
-  // status to attended and attach it to a session so it shows in the present list.
-  async function markPresent(r) {
-    setBusy(true)
-    try {
-      const sid = await ensureSession()
-      const { error } = await supabase.from('attendance')
-        .update({ status: 'attended', session_id: sid, attended_on: activity.activity_date || new Date().toISOString().slice(0, 10) })
-        .eq('id', r.id)
-      if (error) throw error
-      onToast(`${r.person?.full_name || r.captured_name || 'Marked'} — present.`)
-      load()
-    } catch (e) { onToast('Could not mark present: ' + (e.message || e)) } finally { setBusy(false) }
-  }
 
   // Public per-day capture link: generate a token on first use, then copy the URL.
   function genToken() {
@@ -368,30 +334,9 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
         </div>
       )}
 
-      {registered.length > 0 && (
-        <div className="card" style={{ padding: 12, marginBottom: 12, border: '1px solid #E7C9B8', background: '#FBF6EC' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#8C4A16' }}>Expected · registered <span style={{ color: 'var(--muted-2)', fontWeight: 600 }}>({registered.length})</span></div>
-          <div style={{ fontSize: 11.5, color: 'var(--muted)', margin: '2px 0 10px' }}>Signed up (from IPRS), not yet marked present.{isCoordinator ? ' Tap ✓ Present on the day.' : ''}</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {registered.map((r) => (
-              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.person?.full_name || r.captured_name || 'Unknown'}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{r.person?.phone || r.captured_phone || ''}</div>
-                </div>
-                {isCoordinator && (
-                  <button disabled={busy} onClick={() => markPresent(r)} className="tap44"
-                    style={{ fontSize: 12, fontWeight: 600, padding: '6px 10px', borderRadius: 8, border: '1px solid #CBD8C0', background: '#fff', color: '#4E7C3F', cursor: 'pointer', flexShrink: 0 }}>✓ Present</button>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!sessions ? <Loading label="Loading sessions…" /> : sessions.length === 0 && registered.length === 0 ? (
+      {!sessions ? <Loading label="Loading sessions…" /> : sessions.length === 0 ? (
         <Empty label="No attendance sessions yet — create one below." />
-      ) : sessions.length === 0 ? null : (
+      ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
           {sessions.map((s) => (
             <div key={s.id} className="rowhover" onClick={() => setOpenId(s.id)}
