@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "test": "node scripts/eligibility.test.mjs && node scripts/paging.test.mjs && node scripts/calllog.test.mjs && node scripts/calendar.test.mjs",
+    "test": "node scripts/eligibility.test.mjs && node scripts/paging.test.mjs && node scripts/calllog.test.mjs && node scripts/calendar.test.mjs && node scripts/attention.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
