@@ -30,6 +30,12 @@ const todayISO = () => new Date().toISOString().slice(0, 10)
 const uniq = (a) => [...new Set(a.filter(Boolean))]
 const NIL = '00000000-0000-0000-0000-000000000000'
 
+// One source of truth for the filter shape — initial state AND "Clear filters"
+// both use it, so the two can never drift out of sync (they previously did:
+// clearing wrote a stray `bsp` key and dropped `program`, leaving that select
+// uncontrolled).
+const INITIAL_FILTERS = { stage: '', centre: '', ie: '', program: '', last: '', tag: '', event: '', atype: '', sub: '', skill: '', nurt: '' }
+
 export default function Volunteers({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone }) {
   const { isPhone } = useBreakpoint()
   const [rows, setRows] = useState(null)
@@ -41,7 +47,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
-  const [fil, setFil] = useState({ stage: '', centre: '', ie: '', program: '', last: '', tag: '', event: '', atype: '', sub: '', skill: '', nurt: '' })
+  const [fil, setFil] = useState(() => ({ ...INITIAL_FILTERS }))
   const [tagIds, setTagIds] = useState(null) // manual-tag filter -> person ids
   const [eventIds, setEventIds] = useState(null) // event filter -> person ids who attended that event
   const [atypeIds, setAtypeIds] = useState(null) // activity-type filter -> person ids who attended that type
@@ -400,7 +406,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
   const setF = (k) => (e) => setFil((f) => ({ ...f, [k]: e.target.value }))
   const clearFil = () => {
-    setFil({ stage: '', centre: '', ie: '', bsp: '', last: '', tag: '', event: '', atype: '', sub: '', skill: '', nurt: '' })
+    setFil({ ...INITIAL_FILTERS })
     setSearch('')
   }
   const filterActive = !!(debounced || Object.values(fil).some(Boolean))

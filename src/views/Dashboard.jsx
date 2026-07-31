@@ -26,54 +26,11 @@ function weekStartISO() {
   return monday.toISOString().slice(0, 10)
 }
 
-// Insight-led recommended actions — ported from the design's recommendations engine.
-const RECS = [
-  {
-    tag: 'NEW MEDITATORS',
-    count: '63 people',
-    title: '63 IE graduates from June not yet contacted',
-    body: 'Reaching out within 2 weeks makes them 3× more likely to keep a daily practice.',
-    tint: '#F6E8D8',
-    ink: '#C2691F',
-    track: 'new',
-  },
-  {
-    tag: 'MEDITATORS',
-    count: '28 people',
-    title: '28 finished Shoonya last month — no check-in',
-    body: 'Early care in the first month roughly doubles retention into daily sadhana.',
-    tint: '#E9F0EF',
-    ink: '#2F6E5E',
-    track: 'meditators',
-  },
-  {
-    tag: 'ADVANCE PROGRAMMES',
-    count: '17 people',
-    title: '17 BSP-interested meditators ready to register',
-    body: 'They marked interest 2+ months ago — a nudge now converts best before the cohort fills.',
-    tint: '#F3E3D2',
-    ink: '#9C4A14',
-    track: 'advance',
-  },
-  {
-    tag: 'VOLUNTEERS',
-    count: '12 people',
-    title: '12 active volunteers quiet for 30+ days',
-    body: 'A personal call from their nurturer lifts re-engagement roughly 3×.',
-    tint: '#FBEAD9',
-    ink: '#C28A2A',
-    track: 'volunteer',
-  },
-]
+function daysAgoISO(n) {
+  return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
+}
 
-const TRACK_TABS = [
-  { key: 'all', label: 'All tracks' },
-  { key: 'new', label: 'New meditators' },
-  { key: 'advance', label: 'Advance programmes' },
-  { key: 'volunteer', label: 'Volunteer nurturing' },
-]
-
-export default function Dashboard({ me, onToast, onNavigate }) {
+export default function Dashboard({ me, onNavigate }) {
   // Greeting name = the REAL logged-in profile (never a hardcoded/persona name).
   // Falls back to the email local-part, then a bare greeting.
   const rawName = (me?.full_name || '').trim() || (me?.email ? me.email.split('@')[0] : '')
@@ -81,21 +38,28 @@ export default function Dashboard({ me, onToast, onNavigate }) {
 
   const [kpis, setKpis] = useState(null)
   const [err, setErr] = useState(null)
-  const [track, setTrack] = useState('all')
 
   useEffect(() => {
     let alive = true
     ;(async () => {
       try {
-        const [activeVols, newThisMonth, inNurturing, activitiesWeek, meditators] = await Promise.all([
+        const [
+          activeVols, newThisMonth, inNurturing, activitiesWeek, meditators,
+          quietVols, newIe, advanceNew, noPhone,
+        ] = await Promise.all([
           countRows('people', (q) => q.eq('is_volunteer', true)),
           countRows('volunteer_profiles', (q) => q.gte('interest_date', monthStartISO())),
           countRows('journeys', (q) => q.eq('status', 'active')),
           countRows('activities', (q) => q.gte('activity_date', weekStartISO())),
           countRows('people', (q) => q.eq('is_meditator', true)),
+          // ---- the four numbers behind "Needs attention" — all live queries ----
+          countRows('people', (q) => q.eq('is_volunteer', true).lt('last_active_date', daysAgoISO(90))),
+          countRows('people', (q) => q.eq('is_meditator', true).gte('ie_date', daysAgoISO(60))),
+          countRows('advanced_interest', (q) => q.eq('status', 'new')),
+          countRows('people', (q) => q.eq('is_volunteer', true).is('phone', null)),
         ])
         if (!alive) return
-        setKpis({ activeVols, newThisMonth, inNurturing, activitiesWeek, meditators, ivr: 7 })
+        setKpis({ activeVols, newThisMonth, inNurturing, activitiesWeek, meditators, quietVols, newIe, advanceNew, noPhone })
       } catch (e) {
         if (alive) setErr(e.message || String(e))
       }
@@ -107,7 +71,51 @@ export default function Dashboard({ me, onToast, onNavigate }) {
 
   const loading = !kpis && !err
   const k = kpis || {}
-  const shownRecs = track === 'all' ? RECS : RECS.filter((r) => r.track === track)
+
+  // Every row is a live count with a real destination. Nothing here is hardcoded —
+  // a row only appears when its query actually returns people.
+  const attention = [
+    {
+      key: 'quiet',
+      n: k.quietVols,
+      tag: 'VOLUNTEERS',
+      title: `${k.quietVols} volunteers with no activity in 90+ days`,
+      body: 'Worth a personal call from their nurturer before they drift further.',
+      cta: 'Open volunteers',
+      to: 'volunteers',
+      tint: 'var(--pill-warm-bg)', ink: 'var(--pill-warm-fg)',
+    },
+    {
+      key: 'newIe',
+      n: k.newIe,
+      tag: 'NEW MEDITATORS',
+      title: `${k.newIe} finished Inner Engineering in the last 60 days`,
+      body: 'Early contact is when a new meditator is most open to staying connected.',
+      cta: 'Open meditators',
+      to: 'meditators',
+      tint: 'var(--pill-orange-bg)', ink: 'var(--pill-orange-fg)',
+    },
+    {
+      key: 'advance',
+      n: k.advanceNew,
+      tag: 'ADVANCE PROGRAMMES',
+      title: `${k.advanceNew} advance-programme interests not yet contacted`,
+      body: 'These people raised their hand and are still marked “new”.',
+      cta: 'Open advance',
+      to: 'advance',
+      tint: 'var(--pill-rust-bg)', ink: 'var(--pill-rust-fg)',
+    },
+    {
+      key: 'noPhone',
+      n: k.noPhone,
+      tag: 'DATA',
+      title: `${k.noPhone} volunteers have no phone number on record`,
+      body: 'They cannot be reached by call or WhatsApp until this is filled in.',
+      cta: 'Open volunteers',
+      to: 'volunteers',
+      tint: 'var(--neutral-bg)', ink: 'var(--neutral-fg)',
+    },
+  ].filter((r) => r.n > 0)
 
   return (
     <Pad>
@@ -130,8 +138,6 @@ export default function Dashboard({ me, onToast, onNavigate }) {
           ink="#C2691F"
           value={k.activeVols}
           label="Active volunteers"
-          badge="+12"
-          badgeStyle={pill('var(--success-bg)', 'var(--success-fg)')}
         />
         <KpiCard
           loading={loading}
@@ -140,8 +146,6 @@ export default function Dashboard({ me, onToast, onNavigate }) {
           ink="#2F6E5E"
           value={k.newThisMonth}
           label="New this month"
-          badge="new"
-          badgeStyle={pill('var(--pill-warm-bg)', 'var(--pill-warm-fg)')}
         />
         <KpiCard
           loading={loading}
@@ -171,78 +175,50 @@ export default function Dashboard({ me, onToast, onNavigate }) {
           ink="#7A5230"
           value={k.meditators}
           label="Meditators in care"
-          badge="+24"
-          badgeStyle={pill('var(--success-bg)', 'var(--success-fg)')}
         />
         <KpiCard
           loading={loading}
           icon={Icon.phone(19)}
           tint="#FBE6E0"
           ink="#B5532F"
-          value={k.ivr}
-          label="IVR callbacks"
-          badge="pending"
-          badgeStyle={pill('var(--pill-warm-bg)', 'var(--pill-warm-fg)')}
+          value={k.quietVols}
+          label="Volunteers quiet 90+ days"
         />
       </div>
 
-      {/* Recommended actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-        <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Recommended actions</h3>
-        <span className="pill" style={pill('var(--neutral-bg)', 'var(--neutral-fg)')}>
-          AUTO-INSIGHT
-        </span>
-      </div>
-      <div className="mobile-hide" style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 14 }}>
-        Where care and outreach will do the most — across new meditators, advance programmes and
-        volunteer nurturing. Turn any one into a campaign.
+      {/* Needs attention — every row is a live count, and only shows if it's real. */}
+      <h3 style={{ fontSize: 'var(--fs-h2)', fontWeight: 600, margin: '0 0 6px' }}>Needs attention</h3>
+      <div className="mobile-hide" style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)', marginBottom: 14 }}>
+        Counted live from your records right now. Open a list to act on it.
       </div>
 
-      <div className="scroll-tabs" style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        {TRACK_TABS.map((t) => {
-          const on = t.key === track
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTrack(t.key)}
-              className="btn"
-              style={{
-                padding: '8px 14px',
-                fontSize: 12,
-                borderRadius: 20,
-                background: on ? '#241B14' : '#fff',
-                color: on ? '#F6ECDC' : 'var(--ink-soft)',
-                border: on ? 'none' : '1px solid var(--border)',
-              }}
-            >
-              {t.label}
-            </button>
-          )
-        })}
-      </div>
+      {loading && <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>Counting…</div>}
+
+      {!loading && attention.length === 0 && (
+        <div className="card" style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>
+          Nothing needs attention right now.
+        </div>
+      )}
 
       <div className="dash-grid2" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
-        {shownRecs.map((r, i) => (
-          <div key={i} className="card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {!loading && attention.map((r) => (
+          <div key={r.key} className="card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span className="pill" style={pill(r.tint, r.ink)}>
-                {r.tag}
+              <span className="pill" style={pill(r.tint, r.ink)}>{r.tag}</span>
+              <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--muted)', fontWeight: 600 }}>
+                {r.n} {r.n === 1 ? 'person' : 'people'}
               </span>
-              <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>{r.count}</span>
             </div>
             <div style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Newsreader',serif", color: 'var(--ink)' }}>
               {r.title}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{r.body}</div>
+            <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--muted)', lineHeight: 1.5 }}>{r.body}</div>
             <button
               className="btn btn-primary"
               style={{ alignSelf: 'flex-start', marginTop: 2 }}
-              onClick={() => {
-                onNavigate('campaigns')
-                onToast('Starting a campaign from this insight…')
-              }}
+              onClick={() => onNavigate(r.to)}
             >
-              Create campaign
+              {r.cta}
             </button>
           </div>
         ))}

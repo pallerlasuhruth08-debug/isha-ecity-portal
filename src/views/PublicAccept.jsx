@@ -49,7 +49,7 @@ export default function PublicAccept({ blockId }) {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', padding: '40px 18px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{ ...box, textAlign: 'center', marginBottom: 20 }}>
-        <div style={{ fontFamily: "'Newsreader',serif", fontSize: 22, fontWeight: 600, color: 'var(--orange)' }}>Isha E-City · Volunteer Care</div>
+        <div style={{ fontFamily: "'Newsreader',serif", fontSize: 22, fontWeight: 600, color: 'var(--orange)' }}>Electronic City · Volunteer Care</div>
       </div>
 
       {info === undefined && <div style={{ ...box, textAlign: 'center', color: 'var(--muted)' }}>Loading…</div>}
