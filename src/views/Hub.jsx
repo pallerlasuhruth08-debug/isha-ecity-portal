@@ -435,12 +435,12 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   }
 
   if (err) return <ErrorCard>{err}</ErrorCard>
-  if (!blocks) return <Loading label="Loading teams…" />
+  if (!blocks) return <Loading label="Loading event teams…" />
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: -2, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 14, fontWeight: 600 }}>Teams</span>
+        <span style={{ fontSize: 14, fontWeight: 600 }}>Event teams</span>
         <button onClick={() => setShowInfo((s) => !s)} title="Teams are this event's activity blocks — create teams, set members &amp; POCs here; a team's dates &amp; attendance mode are set in Planning (same block)."
           style={{ width: 18, height: 18, borderRadius: '50%', border: '1px solid var(--border)', background: showInfo ? '#EDE4D6' : '#fff', color: 'var(--muted)', fontSize: 12, cursor: 'pointer', lineHeight: 1, padding: 0 }}>ⓘ</button>
         {blocks.length > 0 && (
@@ -520,7 +520,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
       {showAssignUnassigned && (
         <AssignToTeamModal eventId={ev.id} busy={assignUnassignedBusy} onClose={() => setShowAssignUnassigned(false)} onPick={assignSelectedUnassigned} />
       )}
-      {blocks.length === 0 ? <Empty label="No teams yet — create one below." /> : blocks.map((b) => (
+      {blocks.length === 0 ? <Empty label="No event teams yet — create one below." /> : blocks.map((b) => (
         <TeamCard key={b.id} ev={ev} block={b} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator} types={types}
           assigns={assigns.filter((a) => a.block_id === b.id)} allAssigns={assigns} allBlocks={blocks} people={people}
           phaseSpan={phaseSpanByBlock[b.id]} teamDays={teamDaysByBlock[b.id] || []} eventDayList={eventDays(ev.start_date || ev.activity_date, ev.end_date)}

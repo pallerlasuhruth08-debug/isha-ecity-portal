@@ -43,7 +43,8 @@ function lastTouch(logs) {
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
 
-export default function Campaigns({ me, isCoordinator = false, onToast, openCampaignId = null, onCampaignConsumed, onAddRecipients }) {
+export default function Campaigns({ me, isCoordinator = false, onToast, onNavigate, openCampaignId = null, onCampaignConsumed, onAddRecipients }) {
+  const [newOpen, setNewOpen] = useState(false)
   const [campaigns, setCampaigns] = useState(null)
   const [journeys, setJourneys] = useState([])
   const [logsByJourney, setLogsByJourney] = useState({})
@@ -198,7 +199,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
       const status = contactStatus(logs)
       const callerKey = j.caller_source && j.caller_id ? `${j.caller_source}:${j.caller_id}` : null
       const assignee = (callerKey && callerNames[callerKey]) || j.assignee?.full_name || null
-      const src = j.caller_source === 'nurturing_team' ? ' · Team' : j.caller_source === 'volunteer' ? ' · Volunteer' : ''
+      const src = j.caller_source === 'nurturing_team' ? ' · Care group' : j.caller_source === 'volunteer' ? ' · Volunteer' : ''
       // Messaging-campaign batch assignee — distinct from the calling-campaign
       // "assigned" caller above. Recipients self-organize into campaign_splits
       // (batches) that volunteers claim via the portal; this reads who claimed
@@ -300,15 +301,38 @@ export default function Campaigns({ me, isCoordinator = false, onToast, openCamp
         <p className="mobile-hide" style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 560 }}>
           Pinpointed campaigns for volunteers and meditators — matched to insights so the right programme reaches the right cohort at the right time.
         </p>
-        {testCount > 0 && (
-          <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: '8px 12px' }} onClick={() => setShowTest((s) => !s)}>
-            {showTest ? 'Hide test' : `Show test (${testCount})`}
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {testCount > 0 && (
+            <button className="btn btn-ghost" style={{ fontSize: 12.5, padding: '8px 12px' }} onClick={() => setShowTest((s) => !s)}>
+              {showTest ? 'Hide test' : `Show test (${testCount})`}
+            </button>
+          )}
+          {/* The Campaigns page had no way to start a campaign — the only routes in
+              were from the Dashboard or a people list, so arriving here with the
+              intention "I want to send something" was a dead end. A campaign is
+              defined by WHO it reaches, so this doesn't invent a new creation flow;
+              it asks the one question that has to be answered first and takes you
+              to the list where you answer it. */}
+          {isCoordinator && (
+            <button className="btn btn-primary" style={{ fontSize: 12.5, padding: '8px 12px' }} onClick={() => setNewOpen((v) => !v)} aria-expanded={newOpen}>
+              + New campaign
+            </button>
+          )}
+        </div>
       </div>
+
+      {newOpen && (
+        <div className="card" style={{ padding: 16, marginBottom: 18, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13.5, color: 'var(--ink-soft)' }}><strong>Who is this for?</strong> Pick the people first — you'll build the message from the list.</div>
+          <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost" onClick={() => onNavigate && onNavigate('volunteers')}>Choose volunteers →</button>
+            <button className="btn btn-ghost" onClick={() => onNavigate && onNavigate('meditators')}>Choose meditators →</button>
+          </div>
+        </div>
+      )}
       {visibleCamps.length === 0 && (
         <div className="card" style={{ padding: 28, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
-          {showTest ? 'No test campaigns.' : 'No campaigns yet. Create one from the Dashboard insights or the Volunteers list.'}
+          {showTest ? 'No test campaigns.' : 'No campaigns yet. Start one with “+ New campaign” above — you\'ll pick the people first, then write the message.'}
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(330px,1fr))', gap: 16 }}>
@@ -1016,7 +1040,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
                   style={{ maxWidth: '100%', fontSize: 12, padding: '5px 6px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff', color: p.callerKey ? 'var(--ink-soft)' : 'var(--red)' }}
                 >
                   <option value="">— unassigned —</option>
-                  {c.callerPool.map((cp) => <option key={cp.key} value={cp.key}>{cp.name}{cp.source === 'nurturing_team' ? ' · Team' : ' · Volunteer'}</option>)}
+                  {c.callerPool.map((cp) => <option key={cp.key} value={cp.key}>{cp.name}{cp.source === 'nurturing_team' ? ' · Care group' : ' · Volunteer'}</option>)}
                 </select>
               ) : p.assigned}
             </div>
@@ -1180,7 +1204,7 @@ function AssignCallerModal({ row, callerPool, busy, onAssign, onClose }) {
           style={{ width: '100%', minHeight: 44, fontSize: 14, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 9, background: '#fff', color: 'var(--ink)' }}
         >
           <option value="">— unassigned —</option>
-          {callerPool.map((cp) => <option key={cp.key} value={cp.key}>{cp.name}{cp.source === 'nurturing_team' ? ' · Team' : ' · Volunteer'}</option>)}
+          {callerPool.map((cp) => <option key={cp.key} value={cp.key}>{cp.name}{cp.source === 'nurturing_team' ? ' · Care group' : ' · Volunteer'}</option>)}
         </select>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
           <button className="btn btn-ghost" onClick={onClose}>Close</button>

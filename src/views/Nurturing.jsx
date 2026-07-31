@@ -56,7 +56,7 @@ export default function Nurturing({ me, isCoordinator = false, onToast }) {
   useEffect(() => { loadTeams() }, [loadTeams])
 
   if (err) return <Pad><ErrorCard>{err}</ErrorCard></Pad>
-  if (!teams) return <Pad><Loading label="Loading teams…" /></Pad>
+  if (!teams) return <Pad><Loading label="Loading care groups…" /></Pad>
 
   // Level 3 — nurturer's held people
   if (teamId && nurturerId) {
@@ -82,7 +82,7 @@ export default function Nurturing({ me, isCoordinator = false, onToast }) {
       <div className="mobile-hide" style={{ marginBottom: 18 }}>
         <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)' }}>Nurturing teams. Assignment happens on the Volunteers &amp; Meditators screens — this view is for oversight.</p>
       </div>
-      {teams.length === 0 && <Empty label="No teams yet." />}
+      {teams.length === 0 && <Empty label="No care groups yet." />}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 16 }}>
         {teams.map((t, i) => (
           <div key={t.id} className="card rowhover" onClick={() => setTeamId(t.id)} style={{ padding: 22, cursor: 'pointer' }}>
@@ -300,7 +300,7 @@ function NurturerDetail({ nurturerPersonId, me, onBack, onToast, onOpenProfile }
 
   return (
     <Pad>
-      <BackLink onClick={onBack} label="Team roster" />
+      <BackLink onClick={onBack} label="Care group roster" />
       <div className="card" style={{ padding: 22, marginBottom: 18, display: 'flex', alignItems: 'center', gap: 14 }}>
         <div style={{ width: 46, height: 46, borderRadius: '50%', background: avatarFor(1), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 600 }}>{initials(nurturer?.full_name || '?')}</div>
         <div>

@@ -18,8 +18,6 @@ import KebabMenu from '../components/KebabMenu'
 
 const credKey = (token) => `claim_portal_${token}`
 const box = { maxWidth: 480, margin: '0 auto', width: '100%' }
-const fieldStyle = { padding: '13px 14px', border: '1px solid var(--border)', borderRadius: 10, fontSize: 16, fontFamily: 'inherit', background: '#fff', color: 'var(--ink)', outline: 'none', width: '100%', boxSizing: 'border-box' }
-const fieldLabel = { display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--muted-2)', marginBottom: 6 }
 
 export default function VolunteerPortalClaim({ token, splitId: initialBatchId }) {
   const [info, setInfo] = useState(undefined) // undefined=loading, null=invalid, {}=valid
@@ -104,6 +102,15 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
     }
   }
 
+  // Poll while pending so an approval lands on its own. The volunteer should never
+  // have to tap Refresh to find out whether a human noticed them. 20s is frequent
+  // enough to feel immediate and light enough to leave open on a phone.
+  useEffect(() => {
+    if (!(session?.ok && session.status === 'pending')) return
+    const t = setInterval(() => { identify() }, 20000)
+    return () => clearInterval(t)
+  }, [session, identify])
+
   // Auto-assignment: runs once approved, if we don't already know a batch (either
   // from the URL or from the session's own batch_id). Idempotent server-side, so
   // a returning approved volunteer with a stored batch just gets it echoed back.
@@ -135,7 +142,8 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
   function submit() {
     setErr(null)
     if (!name.trim()) return setErr('Please enter your name.')
-    if (!phone.trim()) return setErr('Please enter your phone number.')
+    const p = checkMobile(phone)
+    if (!p.ok) return setErr(p.reason)
     const c = { name: name.trim(), phone: phone.trim() }
     localStorage.setItem(credKey(token), JSON.stringify(c))
     setCaller(c)
@@ -230,14 +238,12 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
         <div className="card" style={{ ...box, padding: 16 }}>
           <div style={{ fontSize: 12, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>Volunteer messaging</div>
           <h1 style={{ fontFamily: "'Newsreader',serif", fontSize: 22, fontWeight: 600, margin: '4px 0 16px' }}>{info.campaign_name}</h1>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-            <label style={fieldLabel}>Your name
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Priya Kumar" style={{ ...fieldStyle, marginTop: 6 }} />
-            </label>
-            <label style={fieldLabel}>Your phone number
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile number" inputMode="tel" style={{ ...fieldStyle, marginTop: 6 }} />
-            </label>
-          </div>
+          <Field label="Your name" required value={name} onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Priya Kumar" autoComplete="name" enterKeyHint="next" />
+          <Field label="Your mobile number" required value={phone} onChange={(e) => setPhone(e.target.value)}
+            hint="The number the centre has on record for you."
+            placeholder="9XXXXXXXXX" inputMode="numeric" autoComplete="tel" maxLength={15}
+            enterKeyHint="go" onKeyDown={(e) => e.key === 'Enter' && submit()} />
           {err && <div style={{ fontSize: 14, color: 'var(--red)', marginBottom: 12 }}>{err}</div>}
           <button className="btn btn-primary" onClick={submit} style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: 15, minHeight: 48 }}>Continue</button>
         </div>
@@ -260,28 +266,44 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
           <div style={{ fontSize: 15, color: 'var(--ink-soft)', marginBottom: 14, lineHeight: 1.5 }}>
             We couldn't find your phone number in our records. Please enter the email address you used during Inner Engineering registration.
           </div>
-          <label style={fieldLabel}>Email address
-            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" inputMode="email" style={{ ...fieldStyle, marginTop: 6 }} />
-          </label>
+          <Field label="Email address" required value={email} onChange={(e) => setEmail(e.target.value)}
+            hint="The address you used when you registered for Inner Engineering."
+            placeholder="you@example.com" inputMode="email" autoComplete="email" type="email"
+            enterKeyHint="go" onKeyDown={(e) => e.key === 'Enter' && verifyEmail(false)} />
           {emailErr && <div style={{ fontSize: 14, color: 'var(--red)', marginTop: 10 }}>{emailErr}</div>}
           <button className="btn btn-primary" disabled={emailBusy} onClick={() => verifyEmail(false)} style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: 15, minHeight: 48, marginTop: 14 }}>{emailBusy ? 'Verifying…' : 'Verify with email →'}</button>
           <button disabled={emailBusy} onClick={() => verifyEmail(true)} style={{ width: '100%', textAlign: 'center', marginTop: 10, background: 'none', border: 'none', color: 'var(--muted)', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', minHeight: 44 }}>Skip — request coordinator approval</button>
         </div>
       )}
 
-      {/* Neither phone nor email matched -- coordinator has to approve manually. */}
+      {/* Neither phone nor email matched -- coordinator has to approve manually.
+          This screen used to say "check back shortly" and hand the volunteer a
+          Refresh button: no timeframe, no fallback, and a person left tapping a
+          button to find out whether anyone had noticed them. It now polls on their
+          behalf and, more importantly, tells them how long to wait and exactly what
+          to do if nothing happens. */}
       {info && caller && session?.ok && session.status === 'pending' && (
         <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
-          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Your access request is pending approval</div>
-          <div style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 16 }}>The coordinator has been notified. Please check back shortly.</div>
-          <button className="btn btn-ghost" onClick={identify} style={{ width: '100%', justifyContent: 'center', minHeight: 44 }}>Refresh status</button>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Waiting for your coordinator to approve you</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.55, marginBottom: 14 }}>
+            We couldn't match your phone or email to our records, so a coordinator is checking by hand.
+            They've been notified. This usually takes a few hours, and often longer at the weekend.
+          </div>
+          <div style={{ fontSize: 13.5, color: 'var(--ink-soft)', lineHeight: 1.55, marginBottom: 16, textAlign: 'left', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 13px' }}>
+            <strong>You don't need to keep this page open.</strong> Open the same link again later and you'll go straight in once you're approved.
+            If you haven't heard anything by tomorrow, call the centre on <a href="tel:+918095963111" style={{ color: 'var(--orange)', fontWeight: 600 }}>8095963111</a>.
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>Checking automatically…</div>
         </div>
       )}
 
       {info && caller && session?.ok && session.status === 'rejected' && (
         <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
-          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Your request was not approved</div>
-          <div style={{ fontSize: 14, color: 'var(--muted)' }}>Please contact your coordinator.</div>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>We couldn't give you access to this list</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.55 }}>
+            This usually means the number you entered isn't the one we have on record. Call the centre on{' '}
+            <a href="tel:+918095963111" style={{ color: 'var(--orange)', fontWeight: 600 }}>8095963111</a> and we'll sort it out.
+          </div>
         </div>
       )}
 

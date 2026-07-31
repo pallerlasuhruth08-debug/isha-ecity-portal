@@ -30,7 +30,7 @@ function daysAgoISO(n) {
   return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
 }
 
-export default function Dashboard({ me, onNavigate }) {
+export default function Dashboard({ me, onNavigate, onOpenList }) {
   // Greeting name = the REAL logged-in profile (never a hardcoded/persona name).
   // Falls back to the email local-part, then a bare greeting.
   const rawName = (me?.full_name || '').trim() || (me?.email ? me.email.split('@')[0] : '')
@@ -81,8 +81,8 @@ export default function Dashboard({ me, onNavigate }) {
       tag: 'VOLUNTEERS',
       title: `${k.quietVols} volunteers with no activity in 90+ days`,
       body: 'Worth a personal call from their nurturer before they drift further.',
-      cta: 'Open volunteers',
-      to: 'volunteers',
+      cta: 'Open these volunteers',
+      to: 'volunteers', preset: { last: 'quiet' },
       tint: 'var(--pill-warm-bg)', ink: 'var(--pill-warm-fg)',
     },
     {
@@ -91,8 +91,8 @@ export default function Dashboard({ me, onNavigate }) {
       tag: 'NEW MEDITATORS',
       title: `${k.newIe} finished Inner Engineering in the last 60 days`,
       body: 'Early contact is when a new meditator is most open to staying connected.',
-      cta: 'Open meditators',
-      to: 'meditators',
+      cta: 'Open these meditators',
+      to: 'meditators', preset: { ieWindow: '60' },
       tint: 'var(--pill-orange-bg)', ink: 'var(--pill-orange-fg)',
     },
     {
@@ -101,7 +101,7 @@ export default function Dashboard({ me, onNavigate }) {
       tag: 'ADVANCE PROGRAMMES',
       title: `${k.advanceNew} advance-programme interests not yet contacted`,
       body: 'These people raised their hand and are still marked “new”.',
-      cta: 'Open advance',
+      cta: 'Open advance programmes',
       to: 'advance',
       tint: 'var(--pill-rust-bg)', ink: 'var(--pill-rust-fg)',
     },
@@ -111,8 +111,8 @@ export default function Dashboard({ me, onNavigate }) {
       tag: 'DATA',
       title: `${k.noPhone} volunteers have no phone number on record`,
       body: 'They cannot be reached by call or WhatsApp until this is filled in.',
-      cta: 'Open volunteers',
-      to: 'volunteers',
+      cta: 'Open these volunteers',
+      to: 'volunteers', preset: { contact: 'no_phone' },
       tint: 'var(--neutral-bg)', ink: 'var(--neutral-fg)',
     },
   ].filter((r) => r.n > 0)
@@ -121,75 +121,15 @@ export default function Dashboard({ me, onNavigate }) {
     <Pad>
       <h2 className="dash-greeting" style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>Namaskaram{firstName ? `, ${firstName}` : ''}</h2>
       <div className="mobile-hide" style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 22 }}>
-        Here's what's moving across the center today.
+        The work first, the numbers after.
       </div>
 
       {err && <ErrorCard>Couldn't load live counts: {err}</ErrorCard>}
 
-      {/* KPI grid */}
-      <div
-        className="dash-grid"
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}
-      >
-        <KpiCard
-          loading={loading}
-          icon={Icon.volunteers(19)}
-          tint="#F6E8D8"
-          ink="#C2691F"
-          value={k.activeVols}
-          label="Active volunteers"
-        />
-        <KpiCard
-          loading={loading}
-          icon={Icon.interest(19)}
-          tint="#E9F0EF"
-          ink="#2F6E5E"
-          value={k.newThisMonth}
-          label="New this month"
-        />
-        <KpiCard
-          loading={loading}
-          icon={Icon.nurturing(19)}
-          tint="#F3E3D2"
-          ink="#9C4A14"
-          value={k.inNurturing}
-          label="In nurturing journey"
-        />
-        <KpiCard
-          loading={loading}
-          icon={Icon.planning(19)}
-          tint="#EAF2E5"
-          ink="#4E7C3F"
-          value={k.activitiesWeek}
-          label="Activities this week"
-        />
-      </div>
-      <div
-        className="dash-grid2"
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 30 }}
-      >
-        <KpiCard
-          loading={loading}
-          icon={Icon.meditators(19)}
-          tint="#F1EADD"
-          ink="#7A5230"
-          value={k.meditators}
-          label="Meditators in care"
-        />
-        <KpiCard
-          loading={loading}
-          icon={Icon.phone(19)}
-          tint="#FBE6E0"
-          ink="#B5532F"
-          value={k.quietVols}
-          label="Volunteers quiet 90+ days"
-        />
-      </div>
-
       {/* Needs attention — every row is a live count, and only shows if it's real. */}
       <h3 style={{ fontSize: 'var(--fs-h2)', fontWeight: 600, margin: '0 0 6px' }}>Needs attention</h3>
       <div className="mobile-hide" style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)', marginBottom: 14 }}>
-        Counted live from your records right now. Open a list to act on it.
+        Counted live from your records right now. Opening a row takes you to that exact list, already filtered.
       </div>
 
       {loading && <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>Counting…</div>}
@@ -216,13 +156,77 @@ export default function Dashboard({ me, onNavigate }) {
             <button
               className="btn btn-primary"
               style={{ alignSelf: 'flex-start', marginTop: 2 }}
-              onClick={() => onNavigate(r.to)}
+              onClick={() => (r.preset && onOpenList ? onOpenList(r.to, r.preset) : onNavigate(r.to))}
             >
               {r.cta}
             </button>
           </div>
         ))}
       </div>
+
+      {/* The centre at a glance — deliberately BELOW the worklist. These numbers are
+          orientation, not instruction; putting six of them above the fold made the
+          landing screen a report when a coordinator needs it to be a to-do list. */}
+      <h3 style={{ fontSize: 'var(--fs-h2)', fontWeight: 600, margin: '30px 0 14px' }}>The centre at a glance</h3>
+      <div
+        className="dash-grid"
+        style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}
+      >
+        <KpiCard
+          loading={loading}
+          icon={Icon.volunteers(19)}
+          tint="var(--pill-orange-bg)"
+          ink="var(--pill-orange-fg)"
+          value={k.activeVols}
+          label="Active volunteers"
+        />
+        <KpiCard
+          loading={loading}
+          icon={Icon.interest(19)}
+          tint="var(--info-bg)"
+          ink="var(--info-fg)"
+          value={k.newThisMonth}
+          label="New this month"
+        />
+        <KpiCard
+          loading={loading}
+          icon={Icon.nurturing(19)}
+          tint="var(--pill-rust-bg)"
+          ink="var(--pill-rust-fg)"
+          value={k.inNurturing}
+          label="In nurturing journey"
+        />
+        <KpiCard
+          loading={loading}
+          icon={Icon.planning(19)}
+          tint="var(--success-bg)"
+          ink="var(--success-fg)"
+          value={k.activitiesWeek}
+          label="Activities this week"
+        />
+      </div>
+      <div
+        className="dash-grid2"
+        style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 30 }}
+      >
+        <KpiCard
+          loading={loading}
+          icon={Icon.meditators(19)}
+          tint="var(--neutral-bg)"
+          ink="var(--ink-soft)"
+          value={k.meditators}
+          label="Meditators in care"
+        />
+        <KpiCard
+          loading={loading}
+          icon={Icon.phone(19)}
+          tint="var(--danger-bg)"
+          ink="var(--danger-fg)"
+          value={k.quietVols}
+          label="Volunteers quiet 90+ days"
+        />
+      </div>
+
     </Pad>
   )
 }

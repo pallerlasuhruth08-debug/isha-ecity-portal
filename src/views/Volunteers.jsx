@@ -42,9 +42,9 @@ const NIL = '00000000-0000-0000-0000-000000000000'
 // both use it, so the two can never drift out of sync (they previously did:
 // clearing wrote a stray `bsp` key and dropped `program`, leaving that select
 // uncontrolled).
-const INITIAL_FILTERS = { stage: '', centre: '', ie: '', program: '', last: '', tag: '', event: '', atype: '', sub: '', skill: '', nurt: '', ready: '' }
+const INITIAL_FILTERS = { stage: '', centre: '', ie: '', program: '', last: '', tag: '', event: '', atype: '', sub: '', skill: '', nurt: '', ready: '', contact: '' }
 
-export default function Volunteers({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone }) {
+export default function Volunteers({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone, preset = null, onPresetConsumed }) {
   const { isPhone } = useBreakpoint()
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
@@ -56,6 +56,15 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const [search, setSearch] = useState('')
   const [debounced, setDebounced] = useState('')
   const [fil, setFil] = useState(() => ({ ...INITIAL_FILTERS }))
+  // Arriving from a Dashboard worklist row: land with the filter ALREADY applied,
+  // so the count you clicked is the list you get. Landing on an unfiltered list and
+  // making the coordinator rebuild the query is how a worklist stops being used.
+  useEffect(() => {
+    if (!preset) return
+    setFil({ ...INITIAL_FILTERS, ...preset })
+    setPage(0)
+    onPresetConsumed && onPresetConsumed()
+  }, [preset, onPresetConsumed])
   const [tagIds, setTagIds] = useState(null) // manual-tag filter -> person ids
   const [eventIds, setEventIds] = useState(null) // event filter -> person ids who attended that event
   const [atypeIds, setAtypeIds] = useState(null) // activity-type filter -> person ids who attended that type
@@ -270,6 +279,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (fil.last === '30') q = q.gte('last_active_date', daysAgoISO(30))
       if (fil.last === '90') q = q.gte('last_active_date', daysAgoISO(90))
       if (fil.last === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
+      // Data quality as a first-class filter: a volunteer with no number cannot be
+      // called or messaged, so "who can't we reach" is a real working list, not an
+      // export-and-clean-later job.
+      if (fil.contact === 'no_phone') q = q.is('phone', null)
       const searchOr = multiFieldOr(debounced, PEOPLE_SEARCH_FIELDS) // name|phone|email|pincode, sanitized
       if (searchOr) q = q.or(searchOr)
       return q
@@ -458,6 +471,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     { k: 'ie', all: 'Any IE year', chip: 'IE year', opts: opts.ieYears },
     { k: 'last', all: 'Active · any time', chip: 'Activity', opts: [{ v: '30', label: 'Active · 30 days' }, { v: '90', label: 'Active · 90 days' }, { v: 'quiet', label: 'Quiet · 90+ days' }] },
     { k: 'nurt', all: 'Nurturer · any', chip: 'Nurturer', opts: [{ v: 'needs', label: 'Needs a nurturer' }] },
+    { k: 'contact', all: 'Contactable · any', chip: 'Contact', opts: [{ v: 'no_phone', label: 'No phone on record' }] },
     { k: 'ready', all: 'Ready for · any', chip: 'Ready for', opts: COHORT_PROGRAMMES.flatMap((c) => [
       { v: c.key, label: `Ready now · ${c.label}` },
       ...(c.hasRipening ? [{ v: `${c.key}:soon`, label: `Ready soon · ${c.label}` }] : []),

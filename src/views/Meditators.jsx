@@ -41,7 +41,7 @@ function lastActive(d) {
   return `Quiet ${Math.round(days / 30)}mo`
 }
 
-export default function Meditators({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone }) {
+export default function Meditators({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone, preset = null, onPresetConsumed }) {
   const { isPhone } = useBreakpoint()
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
@@ -56,6 +56,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const [progKeys, setProgKeys] = useState(() => new Set(['ie', 'bsp', 'shoonya', 'samyama'])) // programmes with data (dynamic)
   useEffect(() => { programsWithData().then(setProgKeys) }, [])
   const [recency, setRecency] = useState('any')
+  const [ieWindow, setIeWindow] = useState('any')   // 'any' | '60' — recently initiated
   // Smart list: "ready for <programme>". Resolved to person ids from the
   // generated person_eligibility view, so the cohort and the verdict on each
   // profile come from the same rules.
@@ -111,6 +112,15 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   useEffect(() => {
     setPage(0)
   }, [pageSize])
+  // Land with the Dashboard's filter already applied — see Volunteers for why.
+  useEffect(() => {
+    if (!preset) return
+    if (preset.ieWindow) setIeWindow(preset.ieWindow)
+    if (preset.recency) setRecency(preset.recency)
+    if (preset.ready) setReady(preset.ready)
+    setPage(0)
+    onPresetConsumed && onPresetConsumed()
+  }, [preset, onPresetConsumed])
   useEffect(() => {
     if (ready === 'all') { setReadyIds(null); return }
     let alive = true
@@ -135,13 +145,16 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       if (recency === '30') q = q.gte('last_active_date', daysAgoISO(30))
       if (recency === '90') q = q.gte('last_active_date', daysAgoISO(90))
       if (recency === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
+      // The single most time-sensitive cohort in the whole product: someone who has
+      // just finished Inner Engineering is at their most open, and that window shuts.
+      if (ieWindow === '60') q = q.gte('ie_date', daysAgoISO(60))
       if (needsNurt && Array.isArray(coveredIds) && coveredIds.length) q = q.not('id', 'in', `(${coveredIds.join(',')})`)
       if (Array.isArray(readyIds)) q = readyIds.length ? q.in('id', readyIds) : q.eq('id', '00000000-0000-0000-0000-000000000000')
       const searchOr = multiFieldOr(debounced, PEOPLE_SEARCH_FIELDS) // name|phone|email|pincode, sanitized
       if (searchOr) q = q.or(searchOr)
       return q
     },
-    [prog, recency, debounced, needsNurt, coveredIds, eventPersonIds, readyIds],
+    [prog, recency, ieWindow, debounced, needsNurt, coveredIds, eventPersonIds, readyIds],
   )
 
   const fetchAllIds = useCallback(async () => {
@@ -258,9 +271,10 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     ...(eventId !== 'all' && attStatus !== 'all' ? [{ key: 'status', label: 'Status', value: attStatus === 'attended' ? 'Attended' : 'Registered', onRemove: () => setAttStatus('all') }] : []),
     ...(recency !== 'any' ? [{ key: 'recency', label: 'Activity', value: RECENCY.find((r) => r.key === recency)?.label || recency, onRemove: () => setRecency('any') }] : []),
     ...(needsNurt ? [{ key: 'nurt', label: 'Nurturer', value: 'Needs a nurturer', onRemove: () => setNeedsNurt(false) }] : []),
+    ...(ieWindow !== 'any' ? [{ key: 'iew', label: 'Inner Engineering', value: 'Finished · last 60 days', onRemove: () => setIeWindow('any') }] : []),
     ...(ready !== 'all' ? [{ key: 'ready', label: 'Ready for', value: readyLabel(ready), onRemove: () => setReady('all') }] : []),
   ]
-  const clearAllFilters = () => { setSearch(''); setProg('all'); setEventId('all'); setAttStatus('all'); setRecency('any'); setNeedsNurt(false); setReady('all') }
+  const clearAllFilters = () => { setSearch(''); setProg('all'); setEventId('all'); setAttStatus('all'); setRecency('any'); setNeedsNurt(false); setReady('all'); setIeWindow('any') }
 
   return (
     <Pad>
@@ -311,7 +325,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
           {Icon.search(15)}
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email or pincode…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
-        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0) + (eventId !== 'all' ? 1 : 0) + (ready !== 'all' ? 1 : 0)}>
+        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0) + (eventId !== 'all' ? 1 : 0) + (ready !== 'all' ? 1 : 0) + (ieWindow !== 'any' ? 1 : 0)}>
           <select value={prog} onChange={(e) => setProg(e.target.value)} style={selStyle}>
             <option value="all">All programmes</option>
             {PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => (<option key={p.key} value={p.key}>{p.label}</option>))}
@@ -327,6 +341,10 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
               <option value="registered">Registered</option>
             </select>
           )}
+          <select value={ieWindow} onChange={(e) => setIeWindow(e.target.value)} style={selStyle}>
+            <option value="any">Inner Engineering · any time</option>
+            <option value="60">Finished IE · last 60 days</option>
+          </select>
           <select value={recency} onChange={(e) => setRecency(e.target.value)} style={selStyle}>
             {RECENCY.map((r) => (<option key={r.key} value={r.key}>{r.label}</option>))}
           </select>
