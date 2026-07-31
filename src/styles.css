@@ -76,6 +76,26 @@ input[type="date"] { cursor: pointer; }
   --shadow-lg: 0 18px 44px rgba(60, 40, 20, 0.18);
   --shadow-md: 0 4px 12px rgba(176, 84, 26, 0.35);
   --radius: 14px;
+
+  /* status pairs (formalize inline tints) */
+  --success-bg:#eaf2e5; --success-fg:#4e7c3f;
+  --warning-bg:#fbf1e6; --warning-fg:#8c4a16;
+  --danger-bg:#fbe6e0;  --danger-fg:#b5532f;
+  --info-bg:#e9f0ef;    --info-fg:#2f6e5e;
+  --neutral-bg:#f1eadd; --neutral-fg:#8c7e6b;
+
+  /* type scale */
+  --fs-display:28px; --fs-h1:22px; --fs-h2:18px; --fs-title:15px;
+  --fs-body:14px; --fs-small:13px; --fs-caption:12px; --fs-micro:11px;
+
+  /* spacing (4px) */
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
+  --space-5:20px; --space-6:24px; --space-8:32px; --space-10:40px;
+
+  /* radius · focus · motion */
+  --radius-sm:10px; --radius-pill:999px;
+  --focus-ring:0 0 0 3px rgba(194,105,31,.35);
+  --dur-fast:120ms; --dur:200ms;
 }
 
 * {
@@ -101,6 +121,23 @@ h3 {
 }
 button {
   font-family: inherit;
+}
+
+/* Visible keyboard focus on every interactive element (WCAG 2.4.7). */
+a, button, input, select, textarea, [role="button"], [tabindex] { outline: none; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible {
+  box-shadow: var(--focus-ring);
+  border-color: var(--orange);
+}
+
+/* Respect reduced-motion (confetti, pulse, transitions). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
 }
 
 /* scrollbars */
