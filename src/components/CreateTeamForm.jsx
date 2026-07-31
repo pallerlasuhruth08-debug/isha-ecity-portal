@@ -210,7 +210,7 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
           <span style={lbl}>Lead / POC <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· optional</span></span>
           {lead ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="pill" style={pill('#F3E3D2', '#9C4A14')}>{lead.full_name}</span>
+              <span className="pill" style={pill('var(--pill-rust-bg)', 'var(--pill-rust-fg)')}>{lead.full_name}</span>
               <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setLead(null)}>Change</button>
             </div>
           ) : (

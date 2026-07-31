@@ -172,8 +172,8 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
               <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{[p.city, p.pincode].filter(Boolean).join(' · ') || center}</div>
             </div>
             <div style={{ display: 'flex', gap: 5 }}>
-              {p.is_volunteer && <span className="pill" style={pill('#F6E8D8', '#C2691F')}>Volunteer</span>}
-              {p.is_meditator && <span className="pill" style={pill('#F3E3D2', '#9C4A14')}>Meditator</span>}
+              {p.is_volunteer && <span className="pill" style={pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)')}>Volunteer</span>}
+              {p.is_meditator && <span className="pill" style={pill('var(--pill-rust-bg)', 'var(--pill-rust-fg)')}>Meditator</span>}
             </div>
           </div>
         )}
@@ -281,7 +281,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
                 <div className="card" style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                     <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Event</th><th style={th}>Type</th><th style={th}>Status</th><th style={th}>Date</th></tr></thead>
-                    <tbody>{events.map((e, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{e.name || '—'}</td><td style={td}>{e.type || '—'}</td><td style={td}>{e.status === 'registered' ? <span className="pill" style={pill('#F3E9D2', '#8A6D1F')}>Registered</span> : <span className="pill" style={pill('#E4F0DE', '#4E7C3F')}>Attended</span>}</td><td style={td}>{fmt(e.date) || '—'}</td></tr>))}</tbody>
+                    <tbody>{events.map((e, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{e.name || '—'}</td><td style={td}>{e.type || '—'}</td><td style={td}>{e.status === 'registered' ? <span className="pill" style={pill('var(--pill-yellow-bg)', 'var(--pill-yellow-fg)')}>Registered</span> : <span className="pill" style={pill('var(--success-bg)', 'var(--success-fg)')}>Attended</span>}</td><td style={td}>{fmt(e.date) || '—'}</td></tr>))}</tbody>
                   </table>
                 </div>
               )}

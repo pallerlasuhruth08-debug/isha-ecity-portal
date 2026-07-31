@@ -88,7 +88,7 @@ export default function AssignNurturerDialog({ personIds = [], label = '', me, o
     <button key={n.personId} disabled={busy} onClick={() => assign(n.personId, n.full_name)} className="rowhover" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 10, background: '#fff', cursor: 'pointer', textAlign: 'left', width: '100%' }}>
       <div style={{ width: 30, height: 30, borderRadius: '50%', background: '#C2691F', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>{initials(n.full_name || '?')}</div>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600 }}>{n.full_name}{n.is_poc && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), marginLeft: 8 }}>POC</span>}</div>
+        <div style={{ fontSize: 13.5, fontWeight: 600 }}>{n.full_name}{n.is_poc && <span className="pill" style={{ ...pill('var(--success-bg)', 'var(--success-fg)'), marginLeft: 8 }}>POC</span>}</div>
         <div style={{ fontSize: 12, color: 'var(--muted)' }}>{n.pincode ? `pincode ${n.pincode}` : 'no pincode'}</div>
       </div>
     </button>

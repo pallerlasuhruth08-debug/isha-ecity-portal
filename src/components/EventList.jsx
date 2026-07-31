@@ -64,7 +64,7 @@ export default function EventList({ events, phasesByEvent = {}, onOpen, right = 
                 <div style={{ fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {e.name}
                   {e.series_id && <span title="Recurring event" style={{ marginLeft: 8, fontSize: 12, color: 'var(--muted-2)' }}>↻</span>}
-                  {e.archived_at && <span className="pill" style={{ ...pill('#F1EADD', '#8C7E6B'), marginLeft: 8, fontSize: 10 }}>archived</span>}
+                  {e.archived_at && <span className="pill" style={{ ...pill('var(--neutral-bg)', 'var(--neutral-fg)'), marginLeft: 8, fontSize: 10 }}>archived</span>}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>{rangeLabel(e.start_date || e.activity_date, e.end_date)} · {e.center_id}</div>
               </div>

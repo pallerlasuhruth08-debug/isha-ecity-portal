@@ -45,7 +45,7 @@ export default function AssignToTeamModal({ eventId, busy, onClose, onPick }) {
                   title={isLocked ? 'Locked — unlock this team to assign into it' : undefined}
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 9, border: '1px solid var(--border)', background: isLocked ? 'var(--panel)' : '#fff', cursor: isLocked ? 'not-allowed' : (busy ? 'default' : 'pointer'), textAlign: 'left', opacity: busy || isLocked ? 0.6 : 1 }}>
                   <span style={{ fontSize: 14, fontWeight: 600 }}>{isLocked && '🔒 '}{t.heading}</span>
-                  <span className="pill" style={full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')}>{t.filled}/{t.volunteers_needed || 0}{full ? ' · full' : ''}</span>
+                  <span className="pill" style={full ? pill('var(--success-bg)', 'var(--success-fg)') : pill('var(--pill-warm-bg)', 'var(--pill-orange-fg)')}>{t.filled}/{t.volunteers_needed || 0}{full ? ' · full' : ''}</span>
                 </button>
               )
             })}
