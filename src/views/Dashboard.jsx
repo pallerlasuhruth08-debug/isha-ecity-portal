@@ -4,7 +4,7 @@ import { Icon } from '../lib/icons'
 import { pill } from '../lib/ui'
 import { Pad, ErrorCard } from '../components/View'
 import KpiCard from '../components/KpiCard'
-import { flaggedPhases, groupPhases, PHASE_SHORT, FLAG_META, fmtDay } from '../lib/planning'
+import { eventsNeedingAttention, groupPhases, fmtDay } from '../lib/planning'
 
 // A count(*) helper — head:true keeps it cheap (no rows returned).
 async function countRows(table, build = (q) => q) {
@@ -26,6 +26,13 @@ function weekStartISO() {
   monday.setDate(d.getDate() - day)
   return monday.toISOString().slice(0, 10)
 }
+function weekEndISO() {
+  return new Date(new Date(weekStartISO()).getTime() + 6 * 86400000).toISOString().slice(0, 10)
+}
+
+// A worklist is read only if it fits on a screen. Past this, the rest is one tap
+// away in the Event Hub — which is where you would go to act on them anyway.
+const SHOW_EVENTS = 4
 
 function daysAgoISO(n) {
   return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
@@ -39,11 +46,16 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
 
   const [kpis, setKpis] = useState(null)
   const [err, setErr] = useState(null)
-  // Overdue / at-risk event phases across EVERY event. This list existed already,
-  // buried in the Planning screen — which is only reachable per-event from a hub,
-  // so the one view that answered "what is slipping anywhere?" could only be found
-  // by someone who already knew where to look. It belongs on the worklist.
-  const [flagged, setFlagged] = useState([])
+  // Events whose preparation is slipping — ONE ROW PER EVENT, not one per phase.
+  //
+  // The first version of this shipped as a flat list of every flagged phase and was
+  // an object lesson in optimising a component against the product: 56 rows, four
+  // per event, for events as old as December 2025, pushed three screens of noise
+  // above the actual people worklist. A list where everything is overdue is not a
+  // signal. Now: finished events are dropped, phases roll up to their event, and
+  // only the few most urgent are shown here — the rest live in the Event Hub, which
+  // is where you would go to act on them anyway.
+  const [attentionEvents, setAttentionEvents] = useState([])
 
   useEffect(() => {
     let alive = true
@@ -55,8 +67,15 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
         ] = await Promise.all([
           countRows('people', (q) => q.eq('is_volunteer', true)),
           countRows('volunteer_profiles', (q) => q.gte('interest_date', monthStartISO())),
-          countRows('journeys', (q) => q.eq('status', 'active')),
-          countRows('activities', (q) => q.gte('activity_date', weekStartISO())),
+          // People who actually have a nurturer. This used to count `journeys` rows
+          // with status='active' and call the result "In nurturing journey" — 6,954,
+          // which was MORE than the 6,096 meditators and 1,285 volunteers on record,
+          // because one person can hold several journeys. A number larger than the
+          // population it describes teaches a coordinator to distrust the whole panel.
+          countRows('nurturing_assignments', (q) => q.eq('active', true).not('nurturer_person_id', 'is', null)),
+          // Bounded to THIS week at both ends. It was `>= monday` with no upper bound,
+          // so every future activity ever scheduled counted as "this week".
+          countRows('activities', (q) => q.gte('activity_date', weekStartISO()).lte('activity_date', weekEndISO()).is('archived_at', null)),
           countRows('people', (q) => q.eq('is_meditator', true)),
           // ---- the four numbers behind "Needs attention" — all live queries ----
           countRows('people', (q) => q.eq('is_volunteer', true).lt('last_active_date', daysAgoISO(90))),
@@ -79,11 +98,11 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
     let alive = true
     ;(async () => {
       const [a, ph] = await Promise.all([
-        supabase.from('activities').select('id, name').is('archived_at', null),
+        supabase.from('activities').select('id, name, activity_date, start_date, end_date').is('archived_at', null),
         supabase.from('event_phases').select('activity_id, kind, sort_order, start_by, finish_by, started_at, completed_at'),
       ])
       if (!alive || a.error || ph.error) return
-      setFlagged(flaggedPhases(a.data || [], groupPhases(ph.data)))
+      setAttentionEvents(eventsNeedingAttention(a.data || [], groupPhases(ph.data)))
     })()
     return () => { alive = false }
   }, [])
@@ -153,39 +172,47 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
 
       {loading && <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>Counting…</div>}
 
-      {!loading && attention.length === 0 && flagged.length === 0 && (
+      {!loading && attention.length === 0 && attentionEvents.length === 0 && (
         <div className="card" style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>
           Nothing needs attention right now.
         </div>
       )}
 
-      {/* Event phases that are slipping. Separate from the people rows above because
-          the unit of work is an EVENT, not a list of people — one click goes straight
-          to that event's hub rather than to a filtered list. */}
-      {flagged.length > 0 && (
+      {/* Events whose preparation is slipping. Separate from the people rows because
+          the unit of work is an EVENT, not a list of people — one click goes to that
+          event's hub. Deliberately compact: at most SHOW_EVENTS rows, because a
+          worklist that needs three screens of scrolling stops being read at all. */}
+      {attentionEvents.length > 0 && (
         <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: 'var(--danger-border)', background: 'var(--danger-bg)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
             <div style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--danger-fg)' }}>Event preparation slipping</div>
             <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--muted)' }}>
-              {flagged.length} phase{flagged.length > 1 ? 's' : ''} across all events
+              {attentionEvents.length} upcoming {attentionEvents.length === 1 ? 'event' : 'events'}
             </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {flagged.map(({ event, phase, flag }) => {
-              const m = FLAG_META[flag]
-              return (
-                <button key={phase.activity_id + phase.kind} className="rowhover" onClick={() => onOpenEvent?.(event.id)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, cursor: 'pointer', background: '#fff', border: '1px solid var(--danger-border)', textAlign: 'left', font: 'inherit', width: '100%' }}>
-                  <span className="pill" style={pill(m.bg, m.fg)}>{m.label}</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{event.name}</span>
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>· {PHASE_SHORT[phase.kind] || phase.kind}</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted-2)', whiteSpace: 'nowrap' }}>
-                    {flag === 'overdue' ? `start by ${fmtDay(phase.start_by)}` : `finish by ${fmtDay(phase.finish_by)}`}
-                  </span>
-                </button>
-              )
-            })}
+            {attentionEvents.slice(0, SHOW_EVENTS).map((r) => (
+              <button key={r.event.id} className="rowhover" onClick={() => onOpenEvent?.(r.event.id)}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 9, cursor: 'pointer', background: '#fff', border: '1px solid var(--danger-border)', textAlign: 'left', font: 'inherit', width: '100%' }}>
+                <span className="pill" style={pill(r.overdue ? 'var(--danger-bg)' : 'var(--pill-orange-bg)', r.overdue ? 'var(--danger-fg)' : 'var(--pill-orange-fg)')}>
+                  {r.overdue ? `${r.overdue} overdue` : `${r.atRisk} at risk`}
+                </span>
+                <span style={{ fontSize: 13.5, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.event.name}</span>
+                {r.overdue > 0 && r.atRisk > 0 && (
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>· {r.atRisk} more at risk</span>
+                )}
+                <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted-2)', whiteSpace: 'nowrap' }}>
+                  {r.earliest ? `due ${fmtDay(r.earliest)}` : ''}
+                </span>
+              </button>
+            ))}
           </div>
+          {attentionEvents.length > SHOW_EVENTS && (
+            <button onClick={() => onNavigate('hub')}
+              style={{ marginTop: 10, background: 'none', border: 'none', color: 'var(--danger-fg)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
+              {attentionEvents.length - SHOW_EVENTS} more in the Event Hub →
+            </button>
+          )}
         </div>
       )}
 
@@ -215,7 +242,18 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
 
       {/* The centre at a glance — deliberately BELOW the worklist. These numbers are
           orientation, not instruction; putting six of them above the fold made the
-          landing screen a report when a coordinator needs it to be a to-do list. */}
+          landing screen a report when a coordinator needs it to be a to-do list.
+          
+          Every label here was rewritten to say what the query actually counts.
+          "Active volunteers" counted every volunteer on record, active or not.
+          "In nurturing journey" counted journey ROWS — 6,954, more than the whole
+          database — and "Meditators in care" counted everyone flagged as a
+          meditator, which is not care. Numbers that overstate the work being done
+          are the same trust problem as the fake deltas this panel replaced; they
+          are just harder to catch. "Volunteers quiet 90+ days" is gone from here
+          because it is already a worklist card above, with a button that opens the
+          list — a number you cannot act on next to the same number you can is
+          noise. */}
       <h3 style={{ fontSize: 'var(--fs-h2)', fontWeight: 600, margin: '30px 0 14px' }}>The centre at a glance</h3>
       <div
         className="dash-grid"
@@ -227,7 +265,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
           tint="var(--pill-orange-bg)"
           ink="var(--pill-orange-fg)"
           value={k.activeVols}
-          label="Active volunteers"
+          label="Volunteers on record"
         />
         <KpiCard
           loading={loading}
@@ -243,7 +281,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
           tint="var(--pill-rust-bg)"
           ink="var(--pill-rust-fg)"
           value={k.inNurturing}
-          label="In nurturing journey"
+          label="People with a nurturer"
         />
         <KpiCard
           loading={loading}
@@ -264,15 +302,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
           tint="var(--neutral-bg)"
           ink="var(--ink-soft)"
           value={k.meditators}
-          label="Meditators in care"
-        />
-        <KpiCard
-          loading={loading}
-          icon={Icon.phone(19)}
-          tint="var(--danger-bg)"
-          ink="var(--danger-fg)"
-          value={k.quietVols}
-          label="Volunteers quiet 90+ days"
+          label="Meditators on record"
         />
       </div>
 
