@@ -230,16 +230,72 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
             <button className="btn btn-ghost" onClick={() => setShowAssignNurt(true)}>Add to nurturer</button>
           </div>
 
-          <Section title="Personal Details">
-            <Row label="Name" value={p.full_name} strong />
+          {/* ── Before you call ──────────────────────────────────────────────
+              A coordinator opens this panel in the seconds before speaking to a
+              person. What shapes that conversation is: when did we last speak,
+              were they at something recently, and does anyone look after them.
+              All three were at the BOTTOM of the panel, under age, gender,
+              marital status, country, city and eleven empty rows — so the Call
+              button sat above everything you needed to read before pressing it.
+              This is those three facts, in one line, where the decision is. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14, marginBottom: 2 }}>
+            <Fact label="Last spoke" value={calls[0]?.when ? fmt(calls[0].when) : 'Never'} tone={calls.length ? 'ok' : 'warn'} />
+            <Fact label="Last seen at" value={events[0] ? `${events[0].name || 'an activity'}${events[0].date ? ` · ${fmt(events[0].date)}` : ''}` : 'Nothing recorded'} tone={events.length ? 'ok' : 'warn'} />
+            <Fact label="Nurturer" value={nurturer || 'Nobody yet'} tone={nurturer ? 'ok' : 'warn'} />
+          </div>
+
+          {/* Attendance and Call History moved ABOVE the demographics. They are
+              the answer to "what do I say", and they were beneath five sections
+              of census data. The order now runs: who → what happened → why I am
+              calling → the reference material. */}
+
+          {/* Attendance — one typed timeline (event, satsang, meditator & volunteer) */}
+          <Section title="Attendance" count={events.length}>
+            {events.length === 0
+              ? <Empty label="No attendance recorded yet." />
+              : (
+                <div className="card" style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                    <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Event</th><th style={th}>Type</th><th style={th}>Status</th><th style={th}>Date</th></tr></thead>
+                    <tbody>{events.map((e, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{e.name || '—'}</td><td style={td}>{e.type || '—'}</td><td style={td}>{e.status === 'registered' ? <span className="pill" style={pill('var(--pill-yellow-bg)', 'var(--pill-yellow-fg)')}>Registered</span> : <span className="pill" style={pill('var(--success-bg)', 'var(--success-fg)')}>Attended</span>}</td><td style={td}>{fmt(e.date) || '—'}</td></tr>))}</tbody>
+                  </table>
+                </div>
+              )}
+          </Section>
+
+          {/* Call History */}
+          <Section title="Call History" count={calls.length}>
+            {calls.length === 0
+              ? <Empty label="No calls logged yet." />
+              : (
+                <div className="card" style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                    <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Call Status</th><th style={th}>Response</th><th style={th}>Remarks</th><th style={th}>Date</th></tr></thead>
+                    <tbody>{calls.map((c) => (<tr key={c.key} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{c.when ? 'Completed' : 'Scheduled'}{c.outcome ? <> · <span className="pill" style={pillForAnyOutcome(c.outcome)}>{labelForOutcome(c.outcome)}</span></> : ''}</td><td style={td}>{c.sadhana || '—'}</td><td style={td}>{c.remarks || '—'}</td><td style={td}>{fmt(c.when) || '—'}</td></tr>))}</tbody>
+                  </table>
+                </div>
+              )}
+          </Section>
+
+          {/* Programme Path — DERIVED, never stored. Isha publishes the prerequisite
+              chain for advanced programmes and we already hold every date it needs,
+              so what a person is ready for is a computation, not a coordinator's
+              guess. Programmes without a published rule are omitted on purpose. */}
+          <Section title="Programme Path">
+            <PathPanel person={p} coverage={coverage} />
+          </Section>
+
+          {/* The name is already the heading of this panel; repeating it as the
+              first row was the panel introducing someone it had just introduced. */}
+          <Section title="Personal Details" blanks={countBlank([ageOf(p.date_of_birth), p.gender, p.marital_status])}>
             <Row label="Age" value={ageOf(p.date_of_birth)} />
             <Row label="Gender" value={genderOf(p.gender)} />
             <Row label="Marital Status" value={p.marital_status} />
           </Section>
 
-          <Section title="Contact Details">
-            <Row label="Phone" value={p.phone} empty="No phone on record" action={hasPhone && <a href={`tel:${p.phone}`} style={{ color: 'var(--muted)' }}>{Icon.phone(17)}</a>} />
-            <Row label="WhatsApp" value={p.phone} empty="No phone on record" action={hasPhone && <a href={wa} target="_blank" rel="noreferrer" style={{ color: 'var(--muted)' }}>{Icon.campaigns(17)}</a>} />
+          <Section title="Contact Details" blanks={countBlank([p.email, p.country, p.city, p.pincode, p.street])}>
+            <Row label="Phone" value={p.phone} keepEmpty empty="No phone on record" action={hasPhone && <a href={`tel:${p.phone}`} style={{ color: 'var(--muted)' }}>{Icon.phone(17)}</a>} />
+            <Row label="WhatsApp" value={p.phone} keepEmpty empty="No phone on record" action={hasPhone && <a href={wa} target="_blank" rel="noreferrer" style={{ color: 'var(--muted)' }}>{Icon.campaigns(17)}</a>} />
             <Row label="Email" value={p.email} />
             <Row label="Country" value={p.country} />
             <Row label="City" value={p.city} />
@@ -256,15 +312,8 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
             <Row label="Last Transaction Date" value={fmt(p.last_active_date)} />
           </Section>
 
-          {/* Programme Path — DERIVED, never stored. Isha publishes the prerequisite
-              chain for advanced programmes and we already hold every date it needs,
-              so what a person is ready for is a computation, not a coordinator's
-              guess. Programmes without a published rule are omitted on purpose. */}
-          <Section title="Programme Path">
-            <PathPanel person={p} coverage={coverage} />
-          </Section>
 
-          <Section title="Other Information">
+          <Section title="Other Information" blanks={countBlank([vp?.interest_details, vp?.in_person, vp?.deeper_step, vp?.skills_hobbies, p.occupation || vp?.occupation, vp?.remarks, boolOf(p.has_bond_of_grace), boolOf(p.has_devi_yantra), boolOf(p.has_sadhguru_sannidhi), boolOf(p.is_donor), nurturer])}>
             <Row label="Volunteering Interest Details" value={vp?.interest_details} wrap />
             <Row label="Would you like to volunteer in-person?" value={vp?.in_person} wrap />
             <Row label="Take a deeper step" value={vp?.deeper_step} wrap />
@@ -318,34 +367,6 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
               <button className="btn btn-ghost" onClick={createSkill}>Add skill</button>
             </div>
           </Section>
-
-          {/* Attendance — one typed timeline (event, satsang, meditator & volunteer) */}
-          <Section title="Attendance" count={events.length}>
-            {events.length === 0
-              ? <Empty label="No attendance recorded yet." />
-              : (
-                <div className="card" style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                    <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Event</th><th style={th}>Type</th><th style={th}>Status</th><th style={th}>Date</th></tr></thead>
-                    <tbody>{events.map((e, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{e.name || '—'}</td><td style={td}>{e.type || '—'}</td><td style={td}>{e.status === 'registered' ? <span className="pill" style={pill('var(--pill-yellow-bg)', 'var(--pill-yellow-fg)')}>Registered</span> : <span className="pill" style={pill('var(--success-bg)', 'var(--success-fg)')}>Attended</span>}</td><td style={td}>{fmt(e.date) || '—'}</td></tr>))}</tbody>
-                  </table>
-                </div>
-              )}
-          </Section>
-
-          {/* Call History */}
-          <Section title="Call History" count={calls.length}>
-            {calls.length === 0
-              ? <Empty label="No calls logged yet." />
-              : (
-                <div className="card" style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                    <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Call Status</th><th style={th}>Response</th><th style={th}>Remarks</th><th style={th}>Date</th></tr></thead>
-                    <tbody>{calls.map((c) => (<tr key={c.key} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{c.when ? 'Completed' : 'Scheduled'}{c.outcome ? <> · <span className="pill" style={pillForAnyOutcome(c.outcome)}>{labelForOutcome(c.outcome)}</span></> : ''}</td><td style={td}>{c.sadhana || '—'}</td><td style={td}>{c.remarks || '—'}</td><td style={td}>{fmt(c.when) || '—'}</td></tr>))}</tbody>
-                  </table>
-                </div>
-              )}
-          </Section>
         </div>
       )}
 
@@ -372,7 +393,21 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
 const th = { padding: '9px 12px', fontSize: 10.5, letterSpacing: '.04em', textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap' }
 const td = { padding: '9px 12px', color: 'var(--ink-soft)', verticalAlign: 'top' }
 
-function Section({ title, count, children }) {
+const countBlank = (vals) => vals.filter(isBlank).length
+
+// One fact from the "before you call" strip. `warn` is deliberately muted rather
+// than red — never having spoken to somebody is the normal state for most of this
+// database, and colouring it as an error would make the whole panel shout.
+function Fact({ label, value, tone }) {
+  return (
+    <div style={{ flex: '1 1 170px', minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, padding: '8px 11px', background: tone === 'warn' ? 'var(--panel)' : '#fff' }}>
+      <div style={{ fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: tone === 'warn' ? 'var(--muted)' : 'var(--ink)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</div>
+    </div>
+  )
+}
+
+function Section({ title, count, children, blanks = 0 }) {
   return (
     <div style={{ marginTop: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -381,6 +416,11 @@ function Section({ title, count, children }) {
         {count != null && <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 20, padding: '1px 8px' }}>{count}</span>}
       </div>
       {children}
+      {blanks > 0 && (
+        <div style={{ fontSize: 12, color: 'var(--muted-2)', paddingTop: 8 }}>
+          {blanks} more {blanks === 1 ? 'field is' : 'fields are'} not filled in.
+        </div>
+      )}
     </div>
   )
 }
@@ -451,8 +491,16 @@ function explainBlockers(r) {
 }
 
 // Label-left / value-right row; explicit empty state; optional trailing action icon.
-function Row({ label, value, empty = 'Not on record', strong, wrap, action }) {
-  const isEmpty = value == null || value === ''
+// A row with nothing in it is not information, it is furniture. This profile
+// rendered eleven consecutive "Not on record" lines under Other Information —
+// a screenful of absence sitting between a coordinator and the two things that
+// actually shape a call. Empty rows now collapse and Section reports the count
+// once, quietly, so nothing is hidden without being acknowledged.
+const isBlank = (v) => v == null || v === '' || v === false
+
+function Row({ label, value, empty = 'Not on record', strong, wrap, action, keepEmpty }) {
+  const isEmpty = isBlank(value)
+  if (isEmpty && !keepEmpty && !action) return null
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr auto', gap: 12, alignItems: 'start', padding: '9px 0', borderBottom: '1px solid #F4EEE2' }}>
       <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{label}</div>
