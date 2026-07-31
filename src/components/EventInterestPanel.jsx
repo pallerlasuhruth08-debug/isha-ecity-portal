@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { Loading, Empty, Checkbox, PagerPill } from './View'
+import { Loading, Empty, Checkbox, Pager } from './View'
 import SidePanel, { PanelHeader } from './SidePanel'
 import { eventDays, eventDaysWithSetup, fmtDay } from '../lib/planning'
 import { useTableSelection } from '../lib/useTableSelection'
@@ -12,11 +12,11 @@ import AssignToTeamModal from './AssignToTeamModal'
 import { multiFieldOr } from '../lib/searchFilter'
 
 export const EI_STATUS = [
-  { v: 'interested', label: 'Interested', pill: pill('#F1EADD', '#8C7E6B') },
-  { v: 'contacted', label: 'Contacted', pill: pill('#FCF4CB', '#8A6D1B') },
-  { v: 'approved', label: 'Approved', pill: pill('#EAF2E5', '#4E7C3F') },
-  { v: 'declined', label: 'Declined', pill: pill('#FBE6E0', '#B5532F') },
-  { v: 'no_response', label: 'No Response', pill: pill('#FBEAD9', '#C2691F') },
+  { v: 'interested', label: 'Interested', pill: pill('var(--neutral-bg)', 'var(--neutral-fg)') },
+  { v: 'contacted', label: 'Contacted', pill: pill('var(--pill-yellow-bg)', 'var(--pill-yellow-fg)') },
+  { v: 'approved', label: 'Approved', pill: pill('var(--success-bg)', 'var(--success-fg)') },
+  { v: 'declined', label: 'Declined', pill: pill('var(--danger-bg)', 'var(--danger-fg)') },
+  { v: 'no_response', label: 'No Response', pill: pill('var(--pill-warm-bg)', 'var(--pill-orange-fg)') },
 ]
 export const EI_STATUS_MAP = Object.fromEntries(EI_STATUS.map((s) => [s.v, s]))
 
@@ -548,8 +548,8 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
 
       </div>
       {!loading && total > 0 && (
-        <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize}
-          selection={{
+        <Pager page={page} pageCount={pageCount} total={total} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} noun="interests"
+          selection={selCount > 0 ? {
             count: selCount, total, isFullySelected, onSelectAll: sel.selectAllMatching, onClear: sel.clear,
             actions: [
               ...(isCoordinator && scopedEventId && !recipientDraft ? [{
@@ -560,7 +560,7 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
                 onClick: recipientDraft ? addSelectedToCampaign : openCampaign, disabled: resolving, primary: true,
               },
             ],
-          }} />
+          } : null} />
       )}
 
       {selected && (
@@ -661,7 +661,7 @@ function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailabil
                   ))}
                 </>
               ) : (
-                avail.length ? avail.map((d) => <span key={d} className="pill" style={pill('#F6E8D8', 'var(--orange)')}>Day {days.indexOf(d)} · {fmtDay(d)}</span>)
+                avail.length ? avail.map((d) => <span key={d} className="pill" style={pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)')}>Day {days.indexOf(d)} · {fmtDay(d)}</span>)
                   : <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>Not set</span>
               )}
             </div>

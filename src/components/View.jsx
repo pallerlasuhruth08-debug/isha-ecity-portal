@@ -1,5 +1,4 @@
 // Small shared primitives used across the ported views.
-import { useEffect, useRef, useState } from 'react'
 
 export function Pad({ children }) {
   return (
@@ -111,86 +110,16 @@ export function Checkbox({ state, onClick, size = 19, label = 'Select' }) {
   )
 }
 
-// Floating pagination pill: page nav + rows-per-page, hidden until the user scrolls
-// past the first viewport height of the (scrollable) page, then fades in bottom-center.
-// Tapping a chevron changes page and scrolls back to top. While a selection is active
-// (`selection.count > 0`), the pill is taken over by a select-all + actions bar instead —
-// same position, always visible regardless of scroll (the two never compete for the same
-// spot). This is the ONE place selection state + its actions (Create campaign, Assign, …)
-// live — there's no separate top banner, so there's only one "selected" readout on screen.
-export function PagerPill({ page, pageCount, onPage, pageSize, onPageSize, selection }) {
-  const ref = useRef(null)
-  const [visible, setVisible] = useState(false)
-  const selecting = !!(selection && selection.count > 0)
-
-  useEffect(() => {
-    const scroller = ref.current?.closest('.main-pad') || window
-    const getY = () => (scroller === window ? window.scrollY : scroller.scrollTop)
-    const getH = () => (scroller === window ? window.innerHeight : scroller.clientHeight)
-    const onScroll = () => setVisible(getY() > getH() * 0.8)
-    scroller.addEventListener('scroll', onScroll, { passive: true })
-    onScroll()
-    return () => scroller.removeEventListener('scroll', onScroll)
-  }, [])
-
-  if (!selecting && pageCount <= 1) return null
-
-  function go(p) {
-    onPage(p)
-    ;(ref.current?.closest('.main-pad') || window).scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  if (selecting) {
-    const { count, total, isFullySelected, onSelectAll, onClear, actions = [] } = selection
-    return (
-      <div ref={ref} className="pager-pill pager-pill-select pager-pill-visible">
-        {/* Label + clear are ONE atomic flex item, so wrapping always keeps them
-            together on row 1 — only the (bulkier) actions group drops to row 2. */}
-        <div className="pager-pill-select-top">
-          <span className="pager-pill-label">
-            {isFullySelected ? `All ${count} selected` : `${count} selected`}
-            {!isFullySelected && onSelectAll && total > count && (
-              <button className="pager-pill-link" onClick={onSelectAll}>· Select all {total}</button>
-            )}
-          </span>
-          <button className="pager-pill-clear" onClick={onClear} aria-label="Clear selection">✕</button>
-        </div>
-        {actions.length > 0 && (
-          <div className="pager-pill-actions">
-            {actions.map((a) => (
-              <button key={a.label} className={'pager-pill-btn' + (a.primary ? ' pager-pill-btn-primary' : '')} disabled={a.disabled} onClick={a.onClick}>{a.label}</button>
-            ))}
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <div ref={ref} className={'pager-pill' + (visible ? ' pager-pill-visible' : '')}>
-      <button className="pager-pill-chevron" disabled={page === 0} onClick={() => go(Math.max(0, page - 1))} aria-label="Previous page">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6" /></svg>
-      </button>
-      <span className="pager-pill-label">Page {page + 1} of {pageCount}</span>
-      <button className="pager-pill-chevron" disabled={page + 1 >= pageCount} onClick={() => go(Math.min(pageCount - 1, page + 1))} aria-label="Next page">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
-      </button>
-      {onPageSize && (
-        <select className="pager-pill-rows" value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} aria-label="Rows per page">
-          {[25, 50, 100].map((o) => <option key={o} value={o}>{o} / page</option>)}
-        </select>
-      )}
-    </div>
-  )
-}
+// PagerPill (scroll-gated floating pill) removed — every list now uses the sticky <Pager>.
 
 
-export function Pager({ page, pageCount, total, onPage, pageSize, onPageSize, noun = 'rows', selection = null }) {
+export function Pager({ page, pageCount, total, onPage, pageSize, onPageSize, noun = 'rows', selection = null, bottomOffset = 12 }) {
   const from = total === 0 ? 0 : page * pageSize + 1
   const to = Math.min(total, (page + 1) * pageSize)
   // Shared sticky-bottom bar geometry — pagination and selection are two modes of
   // the SAME bar, so a selection never spawns a separate floating popover.
-  const barBase = { position: 'sticky', bottom: 12, zIndex: 20, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '11px 14px', borderRadius: 12, margin: '12px 0 0', boxShadow: '0 6px 20px rgba(0,0,0,.12)' }
+  // bottomOffset lifts the bar above a page's own fixed bottom CTA (e.g. Meditators phone).
+  const barBase = { position: 'sticky', bottom: bottomOffset, zIndex: 20, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '11px 14px', borderRadius: 12, margin: '12px 0 0', boxShadow: '0 6px 20px rgba(0,0,0,.12)' }
   // Selection mode: same bar, accent fill, page nav hidden ("select all N matching"
   // removes the need to paginate mid-selection).
   if (selection && selection.count > 0) {
