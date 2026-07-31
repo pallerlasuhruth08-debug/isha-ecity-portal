@@ -1,4 +1,10 @@
 // Shared UI helpers ported from the design's palette/pill logic.
+
+// The one place the centre's name is written. It appeared in four files in two
+// different forms ("Isha Electronic City · Volunteer Care" and "Electronic City ·
+// Volunteer Care"), which is exactly the sort of drift a newcomer reads as "am I
+// on the right page?" on the one screen where they have no other signal.
+export const BRAND = 'Isha Electronic City · Volunteer Care'
 export const AVATARS = [
   '#C2691F',
   '#2F6E5E',
