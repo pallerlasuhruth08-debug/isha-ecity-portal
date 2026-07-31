@@ -7,7 +7,8 @@ import CampaignForm from './CampaignForm'
 import AssignNurturerDialog from './AssignNurturerDialog'
 import SidePanel, { PanelHeader } from './SidePanel'
 import { ensureSkill } from '../lib/skills'
-import { PROGRAMS } from '../lib/programs'
+import { PROGRAMS, programsWithData } from '../lib/programs'
+import { eligibility } from '../lib/eligibility'
 
 const REACH = [
   { key: 'answered', label: 'Answered' },
@@ -34,6 +35,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
   const [newSkill, setNewSkill] = useState('')
   const [events, setEvents] = useState([])
   const [calls, setCalls] = useState([])
+  const [tracked, setTracked] = useState(null) // programme keys with data anywhere; null until known
   const [err, setErr] = useState(null)
   const [newTag, setNewTag] = useState('')
   const [showCampaign, setShowCampaign] = useState(false)
@@ -112,6 +114,11 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
   }, [personId])
 
   useEffect(() => { load() }, [load])
+
+  // Which programmes are recorded at all. Independent of the person, so it loads
+  // once and is never re-fetched per profile. Programme Path needs it to tell
+  // "they haven't done this" apart from "nobody records this".
+  useEffect(() => { let live = true; programsWithData().then((s) => { if (live) setTracked(s) }).catch(() => {}); return () => { live = false } }, [])
 
   async function addTag() {
     const tag = newTag.trim(); if (!tag) return
@@ -249,6 +256,14 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
             <Row label="Last Transaction Date" value={fmt(p.last_active_date)} />
           </Section>
 
+          {/* Programme Path — DERIVED, never stored. Isha publishes the prerequisite
+              chain for advanced programmes and we already hold every date it needs,
+              so what a person is ready for is a computation, not a coordinator's
+              guess. Programmes without a published rule are omitted on purpose. */}
+          <Section title="Programme Path">
+            <PathPanel person={p} tracked={tracked} />
+          </Section>
+
           <Section title="Other Information">
             <Row label="Volunteering Interest Details" value={vp?.interest_details} wrap />
             <Row label="Would you like to volunteer in-person?" value={vp?.in_person} wrap />
@@ -368,6 +383,60 @@ function Section({ title, count, children }) {
       {children}
     </div>
   )
+}
+
+// Programme Path — read-only view of lib/eligibility. Three states a coordinator
+// can act on: ready now, ready on a date (needs only time), and blocked on a
+// named prerequisite. Completed programmes already appear under Key Information,
+// so only the once-in-a-lifetime warning is repeated here.
+function PathPanel({ person, tracked }) {
+  const e = eligibility(person, new Date(), tracked)
+  const rows = [
+    ...e.eligible.filter((s) => !s.rule.entry).map((s) => ({ ...s, tone: 'ready' })),
+    ...e.blocked.map((s) => ({ ...s, tone: s.readyOn ? 'ripening' : 'blocked' })),
+    ...e.indeterminate.map((s) => ({ ...s, tone: 'unknown' })),
+  ]
+  const noIE = e.states.find((s) => s.key === 'ie' && s.status === 'eligible')
+  const bspDone = e.completed.some((s) => s.key === 'bsp')
+
+  if (noIE) return <Empty label="No Inner Engineering date on record — that is the gate for every advanced programme." />
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {rows.length === 0 && <Empty label="Every programme with a published prerequisite is already completed." />}
+      {rows.map((r) => (
+        <div key={r.key} style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: 12, alignItems: 'start', padding: '9px 0', borderBottom: '1px solid #F4EEE2' }}>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{r.label}</div>
+          <div style={{ fontSize: 13, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 8 }}>
+            {r.tone === 'ready' && <span className="pill" style={pill('var(--success-bg)', 'var(--success-fg)')}>Eligible now</span>}
+            {r.tone === 'ripening' && <span className="pill" style={pill('var(--pill-yellow-bg)', 'var(--pill-yellow-fg)')}>Ready {fmt(r.readyOn)}</span>}
+            {r.tone === 'blocked' && <span className="pill" style={pill('var(--neutral-bg)', 'var(--neutral-fg)')}>Not yet</span>}
+            {r.tone === 'unknown' && <span className="pill" style={pill('var(--neutral-bg)', 'var(--muted-2)')}>Can’t tell</span>}
+            <span style={{ color: 'var(--muted)' }}>{explainBlockers(r)}</span>
+          </div>
+        </div>
+      ))}
+      {bspDone && (
+        <div style={{ fontSize: 12, color: 'var(--pill-rust-fg)', background: 'var(--pill-rust-bg)', borderRadius: 8, padding: '7px 10px', marginTop: 4 }}>
+          Bhava Spandana is attended once in a lifetime — do not offer it again.
+        </div>
+      )}
+    </div>
+  )
+}
+
+function explainBlockers(r) {
+  if (!r.blockers.length) return ''
+  const missing = r.blockers.filter((b) => b.reason === 'missing').map((b) => b.label)
+  const recent = r.blockers.filter((b) => b.reason === 'too_recent')
+  const untracked = r.blockers.filter((b) => b.reason === 'untracked').map((b) => b.label)
+  const parts = []
+  if (missing.length) parts.push(`needs ${missing.join(', ')}`)
+  for (const b of recent) parts.push(`${b.label} must be ${b.minDaysBefore} days prior`)
+  // Say what we know AND why the verdict still isn't safe — an untracked column
+  // is a gap in the sync, and naming it is the only way it ever gets fixed.
+  if (untracked.length) parts.push(`${untracked.join(', ')} ${untracked.length > 1 ? 'are' : 'is'} not recorded for anyone yet`)
+  return parts.join(' · ')
 }
 
 // Label-left / value-right row; explicit empty state; optional trailing action icon.
