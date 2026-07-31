@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
@@ -13,6 +13,7 @@ import AssignNurturerDialog from '../components/AssignNurturerDialog'
 import { addRecipientsToCampaign } from '../lib/campaignRecipients'
 import { PROGRAMS, PROGRAM_BY_KEY, programsWithData } from '../lib/programs'
 import { COHORT_PROGRAMMES, eligibilityCohort } from '../lib/cohorts'
+import { usePagedQuery, useDebounced, fetchAllMatchingIds } from '../lib/usePagedQuery'
 
 // "samyama" -> "Ready now · Samyama"; "samyama:soon" -> "Ready soon · Samyama"
 function readyLabel(v) {
@@ -43,15 +44,8 @@ function lastActive(d) {
 
 export default function Meditators({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone, preset = null, onPresetConsumed }) {
   const { isPhone } = useBreakpoint()
-  const [rows, setRows] = useState(null)
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(25)
-  const [err, setErr] = useState(null)
-  const [loading, setLoading] = useState(true)
-
   const [search, setSearch] = useState('')
-  const [debounced, setDebounced] = useState('')
+  const debounced = useDebounced(search)
   const [prog, setProg] = useState('all')
   const [progKeys, setProgKeys] = useState(() => new Set(['ie', 'bsp', 'shoonya', 'samyama'])) // programmes with data (dynamic)
   useEffect(() => { programsWithData().then(setProgKeys) }, [])
@@ -65,7 +59,6 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const [needsNurt, setNeedsNurt] = useState(false)
   const [coveredIds, setCoveredIds] = useState(null) // person ids WITH an active nurturer (to exclude)
   const sel = useTableSelection()
-  const reqSeq = useRef(0)
   const [showForm, setShowForm] = useState(false)
   const [showAssign, setShowAssign] = useState(false)
   const [assignIds, setAssignIds] = useState([])
@@ -88,17 +81,6 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     return () => { alive = false }
   }, [eventId, attStatus])
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(search.trim()), 300)
-    return () => clearTimeout(t)
-  }, [search])
-
-  useEffect(() => {
-    setPage(0)
-    sel.clear()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounced, prog, recency, needsNurt, eventId, attStatus])
-
   // 'Needs a nurturer' -> exclude people who already have an active nurturer.
   useEffect(() => {
     if (!needsNurt) { setCoveredIds(null); return }
@@ -109,16 +91,12 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     })
     return () => { alive = false }
   }, [needsNurt])
-  useEffect(() => {
-    setPage(0)
-  }, [pageSize])
   // Land with the Dashboard's filter already applied — see Volunteers for why.
   useEffect(() => {
     if (!preset) return
     if (preset.ieWindow) setIeWindow(preset.ieWindow)
     if (preset.recency) setRecency(preset.recency)
     if (preset.ready) setReady(preset.ready)
-    setPage(0)
     onPresetConsumed && onPresetConsumed()
   }, [preset, onPresetConsumed])
   useEffect(() => {
@@ -157,51 +135,37 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     [prog, recency, ieWindow, debounced, needsNurt, coveredIds, eventPersonIds, readyIds],
   )
 
-  const fetchAllIds = useCallback(async () => {
-    const ids = []
-    let from = 0
-    const CHUNK = 1000
-    for (let guard = 0; guard < 50; guard++) {
-      let q = applyFilters(supabase.from('people').select('id'))
-      q = q.order('id', { ascending: true }).range(from, from + CHUNK - 1)
-      const { data, error } = await q
-      if (error) throw error
-      const batch = (data || []).map((r) => r.id)
-      ids.push(...batch)
-      if (batch.length < CHUNK) break
-      from += CHUNK
-    }
-    return ids
-  }, [applyFilters])
+  const fetchAllIds = useCallback(
+    () => fetchAllMatchingIds(() => applyFilters(supabase.from('people').select('id')), 'id'),
+    [applyFilters],
+  )
 
-  const loadPage = useCallback(async () => {
-    if (needsNurt && !Array.isArray(coveredIds)) return // wait for the covered set
-    if (eventId !== 'all' && !Array.isArray(eventPersonIds)) return // wait for the event resolver
-    setLoading(true)
-    setErr(null)
-    const seq = ++reqSeq.current // cancel-in-flight: only the newest request applies
-    try {
-      let q = applyFilters(
-        supabase.from('people').select('id, full_name, phone, area, pincode, center_id, ie_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date', { count: 'exact' }),
-      )
-      q = q.order('id', { ascending: true }).range(page * pageSize, page * pageSize + pageSize - 1)
-      const { data, count, error } = await q
-      if (error) throw error
-      if (seq !== reqSeq.current) return
-      setRows(data || [])
-      setTotal(count ?? 0)
-    } catch (e) {
-      if (seq !== reqSeq.current) return
-      setErr(e.message || String(e))
-      setRows([])
-    } finally {
-      if (seq === reqSeq.current) setLoading(false)
-    }
-  }, [applyFilters, page, pageSize, needsNurt, coveredIds, eventId, eventPersonIds])
+  const buildPage = useCallback(
+    () => applyFilters(
+      supabase.from('people').select('id, full_name, phone, area, pincode, center_id, ie_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date', { count: 'exact' }),
+    ).order('id', { ascending: true }),
+    [applyFilters],
+  )
 
+  // Nurturer coverage, the event roster and the eligibility cohort each resolve to a
+  // person-id set before the list query can be correct. Query only once all have settled.
+  const filtersReady =
+    !(needsNurt && !Array.isArray(coveredIds)) &&
+    !(eventId !== 'all' && !Array.isArray(eventPersonIds)) &&
+    readyIds !== 'loading'
+
+  const { rows, total, page, pageSize, loading, err, setPage, setPageSize, pageCount, reload: loadPage } =
+    usePagedQuery(buildPage, { ready: filtersReady })
+
+  // A new filter is a new list: back to page 1, selection dropped. `ready` and
+  // `ieWindow` are in here now — they were not before, so arriving on the smart list
+  // from page 5 of a different filter left you on page 5 of a list that may only have
+  // two pages, looking at an empty screen. (Rows-per-page resets inside usePagedQuery.)
   useEffect(() => {
-    loadPage()
-  }, [loadPage])
+    setPage(0)
+    sel.clear()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debounced, prog, recency, needsNurt, eventId, attStatus, ready, ieWindow, setPage])
 
   async function openCampaign() {
     if (sel.count(total) === 0) {
@@ -250,7 +214,6 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   }
 
   const loadingOpts = !rows && !err
-  const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const selCount = sel.count(total)
   const isFullySelected = sel.headerState(total) === 'all'
 

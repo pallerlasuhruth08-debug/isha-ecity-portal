@@ -4,6 +4,7 @@ import { Icon } from '../lib/icons'
 import { pill } from '../lib/ui'
 import { Pad, ErrorCard } from '../components/View'
 import KpiCard from '../components/KpiCard'
+import { flaggedPhases, groupPhases, PHASE_SHORT, FLAG_META, fmtDay } from '../lib/planning'
 
 // A count(*) helper — head:true keeps it cheap (no rows returned).
 async function countRows(table, build = (q) => q) {
@@ -30,7 +31,7 @@ function daysAgoISO(n) {
   return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
 }
 
-export default function Dashboard({ me, onNavigate, onOpenList }) {
+export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
   // Greeting name = the REAL logged-in profile (never a hardcoded/persona name).
   // Falls back to the email local-part, then a bare greeting.
   const rawName = (me?.full_name || '').trim() || (me?.email ? me.email.split('@')[0] : '')
@@ -38,6 +39,11 @@ export default function Dashboard({ me, onNavigate, onOpenList }) {
 
   const [kpis, setKpis] = useState(null)
   const [err, setErr] = useState(null)
+  // Overdue / at-risk event phases across EVERY event. This list existed already,
+  // buried in the Planning screen — which is only reachable per-event from a hub,
+  // so the one view that answered "what is slipping anywhere?" could only be found
+  // by someone who already knew where to look. It belongs on the worklist.
+  const [flagged, setFlagged] = useState([])
 
   useEffect(() => {
     let alive = true
@@ -67,6 +73,19 @@ export default function Dashboard({ me, onNavigate, onOpenList }) {
     return () => {
       alive = false
     }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const [a, ph] = await Promise.all([
+        supabase.from('activities').select('id, name').is('archived_at', null),
+        supabase.from('event_phases').select('activity_id, kind, sort_order, start_by, finish_by, started_at, completed_at'),
+      ])
+      if (!alive || a.error || ph.error) return
+      setFlagged(flaggedPhases(a.data || [], groupPhases(ph.data)))
+    })()
+    return () => { alive = false }
   }, [])
 
   const loading = !kpis && !err
@@ -134,9 +153,39 @@ export default function Dashboard({ me, onNavigate, onOpenList }) {
 
       {loading && <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>Counting…</div>}
 
-      {!loading && attention.length === 0 && (
+      {!loading && attention.length === 0 && flagged.length === 0 && (
         <div className="card" style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>
           Nothing needs attention right now.
+        </div>
+      )}
+
+      {/* Event phases that are slipping. Separate from the people rows above because
+          the unit of work is an EVENT, not a list of people — one click goes straight
+          to that event's hub rather than to a filtered list. */}
+      {flagged.length > 0 && (
+        <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: 'var(--danger-border)', background: 'var(--danger-bg)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--danger-fg)' }}>Event preparation slipping</div>
+            <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--muted)' }}>
+              {flagged.length} phase{flagged.length > 1 ? 's' : ''} across all events
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {flagged.map(({ event, phase, flag }) => {
+              const m = FLAG_META[flag]
+              return (
+                <button key={phase.activity_id + phase.kind} className="rowhover" onClick={() => onOpenEvent?.(event.id)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, cursor: 'pointer', background: '#fff', border: '1px solid var(--danger-border)', textAlign: 'left', font: 'inherit', width: '100%' }}>
+                  <span className="pill" style={pill(m.bg, m.fg)}>{m.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{event.name}</span>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>· {PHASE_SHORT[phase.kind] || phase.kind}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted-2)', whiteSpace: 'nowrap' }}>
+                    {flag === 'overdue' ? `start by ${fmtDay(phase.start_by)}` : `finish by ${fmtDay(phase.finish_by)}`}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
         </div>
       )}
 

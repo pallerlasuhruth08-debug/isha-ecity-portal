@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { usePagedQuery, fetchAllMatchingIds } from '../lib/usePagedQuery'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
@@ -39,12 +40,6 @@ export default function Advance({ me, onToast }) {
   const { isPhone } = useBreakpoint()
   const [prog, setProg] = useState('bsp')
   const [summary, setSummary] = useState([]) // {program, status} for all rows (small table)
-  const [rows, setRows] = useState(null)
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(25)
-  const [err, setErr] = useState(null)
-  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(null)
   const sel = useTableSelection()
   const [showForm, setShowForm] = useState(false)
@@ -57,59 +52,35 @@ export default function Advance({ me, onToast }) {
     supabase.from('advanced_interest').select('program, status').then(({ data }) => setSummary(data || []))
   }, [])
 
+  // One person can register interest in the same programme twice, so the id walk
+  // is deduped before it becomes a campaign audience.
+  const fetchAllIds = useCallback(
+    async () => [...new Set(await fetchAllMatchingIds(
+      () => supabase.from('advanced_interest').select('person_id').eq('program', prog),
+      'person_id',
+    ))],
+    [prog],
+  )
+
+  const buildPage = useCallback(
+    () => supabase
+      .from('advanced_interest')
+      .select('id, person_id, program, status, interest_date, source, person:people!advanced_interest_person_id_fkey(full_name, phone)', { count: 'exact' })
+      .eq('program', prog)
+      .order('interest_date', { ascending: false }),
+    [prog],
+  )
+
+  const { rows, total, page, pageSize, loading, err, setPage, setPageSize, setRows, pageCount, reload: loadPage } =
+    usePagedQuery(buildPage)
+
+  // A new programme is a new list: back to page 1, selection dropped. (Rows-per-page
+  // resets the page inside usePagedQuery, so it is not repeated here.)
   useEffect(() => {
     setPage(0)
     sel.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prog])
-  useEffect(() => {
-    setPage(0)
-  }, [pageSize])
-
-  const fetchAllIds = useCallback(async () => {
-    const ids = []
-    let from = 0
-    const CHUNK = 1000
-    for (let guard = 0; guard < 50; guard++) {
-      const { data, error } = await supabase
-        .from('advanced_interest')
-        .select('person_id')
-        .eq('program', prog)
-        .order('person_id', { ascending: true })
-        .range(from, from + CHUNK - 1)
-      if (error) throw error
-      const batch = (data || []).map((r) => r.person_id)
-      ids.push(...batch)
-      if (batch.length < CHUNK) break
-      from += CHUNK
-    }
-    return [...new Set(ids)]
-  }, [prog])
-
-  const loadPage = useCallback(async () => {
-    setLoading(true)
-    setErr(null)
-    try {
-      const { data, count, error } = await supabase
-        .from('advanced_interest')
-        .select('id, person_id, program, status, interest_date, source, person:people!advanced_interest_person_id_fkey(full_name, phone)', { count: 'exact' })
-        .eq('program', prog)
-        .order('interest_date', { ascending: false })
-        .range(page * pageSize, page * pageSize + pageSize - 1)
-      if (error) throw error
-      setRows(data || [])
-      setTotal(count ?? 0)
-    } catch (e) {
-      setErr(e.message || String(e))
-      setRows([])
-    } finally {
-      setLoading(false)
-    }
-  }, [prog, page, pageSize])
-
-  useEffect(() => {
-    loadPage()
-  }, [loadPage])
+  }, [prog, setPage])
 
   const counts = useMemo(() => {
     const c = {}
@@ -155,7 +126,6 @@ export default function Advance({ me, onToast }) {
   }
 
   const cur = PROGRAMS.find((p) => p.key === prog)
-  const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const selCount = sel.count(total)
   const grid = '34px 2fr 1.2fr 1fr 0.9fr 1fr'
 

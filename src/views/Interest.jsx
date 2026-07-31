@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { usePagedQuery, useDebounced, fetchAllMatchingIds } from '../lib/usePagedQuery'
 import { supabase } from '../lib/supabase'
 import { pill, initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty, Checkbox, Pager } from '../components/View'
@@ -78,18 +79,8 @@ async function ensurePersonId(name, phone) {
 export default function Interest({ onToast, eventScopeId = null, onScopeConsumed, recipientDraft = null, onRecipientsDone }) {
   const { isPhone } = useBreakpoint()
 
-  // Server-side pagination over the unified interest_inbox_list view (same pattern as
-  // Volunteers' volunteer_list view): count + range, reset to page 0 on filter change.
-  const [rows, setRows] = useState(null)
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(25)
-  const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState(null)
-  const [reloadKey, setReloadKey] = useState(0)
-
   const [search, setSearch] = useState('')
-  const [debounced, setDebounced] = useState('')
+  const debounced = useDebounced(search)
   const [typeFilter, setTypeFilter] = useState('all')
   // Defaults to the untriaged queue (old Interest Inbox only ever showed status='new'
   // volunteering interest) — everyone else is one pill tap away via the status row,
@@ -99,7 +90,6 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
   const [evList, setEvList] = useState([])
 
   const sel = useTableSelection()
-  const reqSeq = useRef(0)
 
   const [selRow, setSelRow] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -136,18 +126,13 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
     return () => { alive = false }
   }, [selRow?.person_id, selRow?.key])
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(search.trim()), 300)
-    return () => clearTimeout(t)
-  }, [search])
-
-  useEffect(() => { setPage(0); sel.clear() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [debounced, typeFilter, statusFilter, eventFilter])
-  useEffect(() => { setPage(0) }, [pageSize])
-
   // Arriving from an event hub's "Volunteer Interests" jump → scope to that event.
   useEffect(() => { if (eventScopeId) { setEventFilter(eventScopeId); onScopeConsumed?.() } }, [eventScopeId, onScopeConsumed])
 
-  // Distinct events for the event pill row — spans all pages, loaded once.
+  // Distinct events for the event pill row — spans all pages. Re-read on reload:
+  // a newly triaged interest can be the first one for its event, and the pill row
+  // spans all pages so the page query alone would not surface it.
+  const [evKey, setEvKey] = useState(0)
   useEffect(() => {
     supabase.from('event_interest').select('activity:activities!event_interest_activity_id_fkey(id, name, activity_date, start_date, end_date)').limit(5000)
       .then(({ data }) => {
@@ -155,7 +140,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
         for (const r of data || []) if (r.activity) m.set(r.activity.id, r.activity)
         setEvList([...m.values()])
       })
-  }, [reloadKey])
+  }, [evKey])
 
   const applyFilters = useCallback((q) => {
     if (typeFilter !== 'all') q = q.eq('interest_type', typeFilter)
@@ -166,46 +151,26 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
     return q
   }, [typeFilter, statusFilter, eventFilter, debounced])
 
-  const fetchAllKeys = useCallback(async () => {
-    const keys = []
-    let from = 0
-    const CHUNK = 1000
-    for (let g = 0; g < 50; g++) {
-      let q = applyFilters(supabase.from('interest_inbox_list').select('key'))
-      q = q.order('key', { ascending: true }).range(from, from + CHUNK - 1)
-      const { data, error } = await q
-      if (error) throw error
-      const batch = (data || []).map((r) => r.key)
-      keys.push(...batch)
-      if (batch.length < CHUNK) break
-      from += CHUNK
-    }
-    return keys
-  }, [applyFilters])
+  const fetchAllKeys = useCallback(
+    () => fetchAllMatchingIds(() => applyFilters(supabase.from('interest_inbox_list').select('key')), 'key'),
+    [applyFilters],
+  )
 
-  const loadPage = useCallback(async () => {
-    setLoading(true); setErr(null)
-    const seq = ++reqSeq.current
-    try {
-      let q = applyFilters(supabase.from('interest_inbox_list').select('*', { count: 'exact' }))
-      q = q.order('sort_date', { ascending: false }).order('key', { ascending: true }).range(page * pageSize, page * pageSize + pageSize - 1)
-      const { data, count, error } = await q
-      if (error) throw error
-      if (seq !== reqSeq.current) return
-      setRows(data || [])
-      setTotal(count ?? 0)
-    } catch (e) {
-      if (seq !== reqSeq.current) return
-      setErr(e.message || String(e))
-      setRows([])
-    } finally {
-      if (seq === reqSeq.current) setLoading(false)
-    }
-  }, [applyFilters, page, pageSize])
+  const buildPage = useCallback(
+    () => applyFilters(supabase.from('interest_inbox_list').select('*', { count: 'exact' }))
+      .order('sort_date', { ascending: false })
+      .order('key', { ascending: true }),
+    [applyFilters],
+  )
 
-  useEffect(() => { loadPage() }, [loadPage, reloadKey])
+  const { rows, total, page, pageSize, loading, err, setPage, setPageSize, setRows, pageCount, reload: reloadRows } =
+    usePagedQuery(buildPage)
 
-  const reload = () => setReloadKey((k) => k + 1)
+  const reload = useCallback(() => { reloadRows(); setEvKey((k) => k + 1) }, [reloadRows])
+
+  // A new filter is a new list: back to page 1, selection dropped. (Rows-per-page
+  // resets the page inside usePagedQuery, so it is not repeated here.)
+  useEffect(() => { setPage(0); sel.clear() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [debounced, typeFilter, statusFilter, eventFilter, setPage])
 
   const patchRow = (key, fields) => {
     setRows((prev) => (prev || []).map((r) => (r.key === key ? { ...r, ...fields } : r)))
@@ -404,7 +369,6 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
     onToast(`Exported ${(rows || []).length} rows.`)
   }
 
-  const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const selCount = sel.count(total)
   const isFullySelected = sel.headerState(total) === 'all'
   const pageIds = rows ? rows.map((r) => r.key) : []

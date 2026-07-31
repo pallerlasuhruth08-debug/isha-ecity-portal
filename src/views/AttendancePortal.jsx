@@ -137,7 +137,8 @@ export default function AttendancePortal({ token }) {
 
   // Scan a photo of an attendance sheet with Tesseract.js — an open-source OCR
   // engine that runs entirely in the browser (WASM). No API key, no server cost.
-  // Loaded on demand from a CDN; the recognized text is parsed into name/phone rows.
+  // Loaded on demand from a CDN and then cached by the service worker, so the
+  // large first download is paid once per device and later scans work offline.
   function parseRows(text) {
     const out = []
     for (const raw of String(text || '').split('\n')) {
@@ -156,22 +157,40 @@ export default function AttendancePortal({ token }) {
     return out
   }
 
+  // Tesseract reports its own stages; these are the ones worth showing a human.
+  // "Reading the sheet…" for a minute with no movement is indistinguishable from
+  // a hang, which is exactly how this failed on venue wi-fi.
+  const OCR_STAGE = {
+    'loading tesseract core': 'Downloading the scanner…',
+    'initializing tesseract': 'Starting the scanner…',
+    'loading language traineddata': 'Downloading the language pack…',
+    'initializing api': 'Getting ready…',
+    'recognizing text': 'Reading the sheet…',
+  }
+
   async function onScanFile(e) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    setScan({ busy: true, rows: [], err: null })
+    setScan({ busy: true, rows: [], err: null, stage: 'Starting…', pct: 0 })
     try {
       if (!window.Tesseract) {
+        setScan((s) => ({ ...s, stage: 'Downloading the scanner…', pct: 0 }))
         await new Promise((res, rej) => {
           const sc = document.createElement('script')
           sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
           sc.onload = res
-          sc.onerror = () => rej(new Error('Could not load the OCR engine — check your connection.'))
+          sc.onerror = () => rej(new Error("Couldn't reach the scanner download. The signal here may be too weak — you can still search and add people by hand below, which always works."))
           document.head.appendChild(sc)
         })
       }
-      const { data: { text } } = await window.Tesseract.recognize(file, 'eng')
+      const { data: { text } } = await window.Tesseract.recognize(file, 'eng', {
+        logger: (m) => {
+          const stage = OCR_STAGE[m.status]
+          if (!stage) return
+          setScan((s) => (s && s.busy ? { ...s, stage, pct: Math.round((m.progress || 0) * 100) } : s))
+        },
+      })
       const rows = parseRows(text)
       if (rows.length === 0) { setScan({ busy: false, rows: [], err: 'No names read — try a clearer, straight-on photo.' }); return }
       setScan({ busy: false, rows, err: null })
@@ -328,10 +347,25 @@ export default function AttendancePortal({ token }) {
               {/* scan attendance sheet (OCR) */}
               <input ref={scanInput} type="file" accept="image/*" capture="environment" onChange={onScanFile} style={{ display: 'none' }} />
               {!scan && (
-                <button onClick={() => scanInput.current?.click()} disabled={busy} style={{ width: '100%', minHeight: 44, marginBottom: 12, background: 'none', border: '1px dashed var(--border)', borderRadius: 10, fontSize: 14, fontWeight: 600, color: 'var(--rust)', cursor: 'pointer' }}>📷 Scan attendance sheet</button>
+                <button onClick={() => scanInput.current?.click()} disabled={busy} style={{ width: '100%', minHeight: 44, marginBottom: 12, background: 'none', border: '1px dashed var(--border)', borderRadius: 10, fontSize: 14, fontWeight: 600, color: 'var(--rust)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', justifyContent: 'center', padding: '10px 12px' }}>
+                  <span>📷 Scan attendance sheet</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--muted)' }}>First scan on this phone downloads the scanner · after that it works offline</span>
+                </button>
               )}
               {scan?.busy && (
-                <div className="card" style={{ padding: 14, marginBottom: 12, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>Reading the sheet… (first scan downloads the OCR engine — up to a minute)</div>
+                <div className="card" aria-live="polite" style={{ padding: 14, marginBottom: 12, fontSize: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: 'var(--ink-soft)', fontWeight: 600, marginBottom: 8 }}>
+                    <span>{scan.stage || 'Working…'}</span>
+                    <span style={{ color: 'var(--muted)', fontWeight: 500 }}>{scan.pct ? `${scan.pct}%` : ''}</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 3, background: 'var(--neutral-bg)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${scan.pct || 3}%`, background: 'var(--orange)', transition: 'width .3s' }} />
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+                    Slow signal? Close this and use the search box above — marking people by hand always works.
+                  </div>
+                  <button className="btn btn-ghost" onClick={() => setScan(null)} style={{ minHeight: 40, marginTop: 10 }}>Close</button>
+                </div>
               )}
               {scan && !scan.busy && scan.err && (
                 <div className="card" style={{ padding: 14, marginBottom: 12 }}>

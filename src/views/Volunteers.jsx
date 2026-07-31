@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { STAGE_PILL, initials, avatarFor, pill } from '../lib/ui'
@@ -13,6 +13,7 @@ import AssignNurturerDialog from '../components/AssignNurturerDialog'
 import { fetchActivityTypes } from '../lib/activityTypes'
 import { PROGRAMS, PROGRAM_BY_KEY, programsWithData } from '../lib/programs'
 import { COHORT_PROGRAMMES, eligibilityCohort } from '../lib/cohorts'
+import { usePagedQuery, useDebounced, fetchAllMatchingIds } from '../lib/usePagedQuery'
 
 // "samyama" -> "Ready now · Samyama"; "samyama:soon" -> "Ready soon · Samyama"
 function readyLabel(v) {
@@ -46,15 +47,8 @@ const INITIAL_FILTERS = { stage: '', centre: '', ie: '', program: '', last: '', 
 
 export default function Volunteers({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone, preset = null, onPresetConsumed }) {
   const { isPhone } = useBreakpoint()
-  const [rows, setRows] = useState(null)
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(25)
-  const [err, setErr] = useState(null)
-  const [loading, setLoading] = useState(true)
-
   const [search, setSearch] = useState('')
-  const [debounced, setDebounced] = useState('')
+  const debounced = useDebounced(search)
   const [fil, setFil] = useState(() => ({ ...INITIAL_FILTERS }))
   // Arriving from a Dashboard worklist row: land with the filter ALREADY applied,
   // so the count you clicked is the list you get. Landing on an unfiltered list and
@@ -62,7 +56,6 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   useEffect(() => {
     if (!preset) return
     setFil({ ...INITIAL_FILTERS, ...preset })
-    setPage(0)
     onPresetConsumed && onPresetConsumed()
   }, [preset, onPresetConsumed])
   const [tagIds, setTagIds] = useState(null) // manual-tag filter -> person ids
@@ -74,7 +67,6 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const [readyIds, setReadyIds] = useState(null) // null = off, 'loading', array, or { tooBroad } 
 
   const sel = useTableSelection()
-  const reqSeq = useRef(0)
   const [showForm, setShowForm] = useState(false)
   const [showAssign, setShowAssign] = useState(false)
   const [assignIds, setAssignIds] = useState([])
@@ -87,20 +79,6 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const [opts, setOpts] = useState({ centres: [], ieYears: [], tags: [], atypes: [], skills: [], events: [], subs: [] })
   const [progKeys, setProgKeys] = useState(() => new Set(['ie', 'bsp', 'shoonya', 'samyama'])) // programmes with data (dynamic)
   useEffect(() => { programsWithData().then(setProgKeys) }, [])
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(search.trim()), 300)
-    return () => clearTimeout(t)
-  }, [search])
-
-  useEffect(() => {
-    setPage(0)
-    sel.clear()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounced, fil])
-  useEffect(() => {
-    setPage(0)
-  }, [pageSize])
 
   const loadTagOptions = useCallback(async () => {
     const { data } = await supabase.from('manual_tags').select('tag').limit(4000)
@@ -290,101 +268,92 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     [fil, debounced, tagIds, eventIds, atypeIds, subIds, skillIds, coveredIds, readyIds],
   )
 
-  const fetchAllIds = useCallback(async () => {
-    const ids = []
-    let from = 0
-    const CHUNK = 1000
-    for (let g = 0; g < 50; g++) {
-      let q = applyFilters(supabase.from('volunteer_list').select('person_id'))
-      q = q.order('person_id', { ascending: true }).range(from, from + CHUNK - 1)
-      const { data, error } = await q
-      if (error) throw error
-      const batch = (data || []).map((r) => r.person_id)
-      ids.push(...batch)
-      if (batch.length < CHUNK) break
-      from += CHUNK
-    }
-    return ids
-  }, [applyFilters])
+  const fetchAllIds = useCallback(
+    () => fetchAllMatchingIds(() => applyFilters(supabase.from('volunteer_list').select('person_id')), 'person_id'),
+    [applyFilters],
+  )
 
-  const loadPage = useCallback(async () => {
-    setLoading(true)
-    setErr(null)
-    if ((fil.tag && !Array.isArray(tagIds)) || (fil.event && !Array.isArray(eventIds)) || (fil.atype && !Array.isArray(atypeIds)) || (fil.sub && !Array.isArray(subIds)) || (fil.skill && !Array.isArray(skillIds)) || (fil.nurt === 'needs' && !Array.isArray(coveredIds))) return
-    const seq = ++reqSeq.current // cancel-in-flight: only the newest request applies
-    try {
-      let q = applyFilters(
-        supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date, tags, last_activity_at', { count: 'exact' }),
-      )
-      // Query-level sort over the FULL dataset: most-recent activity first (nulls last),
-      // person_id as a stable tiebreak — so page 1 is globally most-recent.
-      q = q
-        .order('last_activity_at', { ascending: false, nullsFirst: false })
-        .order('person_id', { ascending: true })
-        .range(page * pageSize, page * pageSize + pageSize - 1)
-      const { data, count, error } = await q
-      if (error) throw error
+  // Query-level sort over the FULL dataset: most-recent activity first (nulls last),
+  // person_id as a stable tiebreak — so page 1 is globally most-recent.
+  const buildPage = useCallback(
+    () => applyFilters(
+      supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date, tags, last_activity_at', { count: 'exact' }),
+    )
+      .order('last_activity_at', { ascending: false, nullsFirst: false })
+      .order('person_id', { ascending: true }),
+    [applyFilters],
+  )
 
-      const mapped = (data || [])
-        .filter((r) => r.id)
-        .map((r) => {
-          const isCore = (r.tags || []).includes('core_team')
-          return {
-            id: r.id,
-            name: r.full_name || 'Unknown',
-            phone: r.phone || '',
-            stage: isCore ? 'Core Group' : STATUS_TO_STAGE[r.status] || 'New',
-            programs: PROGRAMS.filter((pr) => r[pr.col]).map((pr) => pr.chip),
-            where: [r.area, r.pincode].filter(Boolean).join(' · ') || r.center_id || '—',
-            last: lastActiveLabel(r.last_activity_at),
-            attended: 0,
-            derivedTags: [],
-            manualTags: [],
-            skills: [],
-          }
-        })
+  // Several filters are two-step: pick a tag, resolve it to person ids, THEN query.
+  // Until every pending resolver has settled the query would be silently wrong —
+  // an unfiltered list wearing a filter chip — so the hook holds instead of firing.
+  const filtersReady =
+    !(fil.tag && !Array.isArray(tagIds)) &&
+    !(fil.event && !Array.isArray(eventIds)) &&
+    !(fil.atype && !Array.isArray(atypeIds)) &&
+    !(fil.sub && !Array.isArray(subIds)) &&
+    !(fil.skill && !Array.isArray(skillIds)) &&
+    !(fil.nurt === 'needs' && !Array.isArray(coveredIds)) &&
+    readyIds !== 'loading'
 
-      const ids = mapped.map((m) => m.id)
-      if (ids.length) {
-        const [attRes, mtRes, skRes] = await Promise.all([
-          supabase.from('attendance').select('person_id, atype:activity_types(label)').in('person_id', ids).eq('status', 'attended'),
-          supabase.from('manual_tags').select('person_id, tag').in('person_id', ids),
-          supabase.from('person_skills').select('person_id, skill:skills(label)').in('person_id', ids),
-        ])
-        const att = {}
-        for (const a of attRes.data || []) {
-          const b = (att[a.person_id] ||= { count: 0, types: new Set() })
-          b.count += 1
-          const t = a.atype?.label
-          if (t) b.types.add(t)
+  const enrichPage = useCallback(async (data) => {
+    const mapped = data
+      .filter((r) => r.id)
+      .map((r) => {
+        const isCore = (r.tags || []).includes('core_team')
+        return {
+          id: r.id,
+          name: r.full_name || 'Unknown',
+          phone: r.phone || '',
+          stage: isCore ? 'Core Group' : STATUS_TO_STAGE[r.status] || 'New',
+          programs: PROGRAMS.filter((pr) => r[pr.col]).map((pr) => pr.chip),
+          where: [r.area, r.pincode].filter(Boolean).join(' · ') || r.center_id || '—',
+          last: lastActiveLabel(r.last_activity_at),
+          attended: 0,
+          derivedTags: [],
+          manualTags: [],
+          skills: [],
         }
-        const mtags = {}
-        for (const m of mtRes.data || []) (mtags[m.person_id] ||= []).push(m.tag)
-        const sks = {}
-        for (const s of skRes.data || []) { const l = s.skill?.label; if (l) (sks[s.person_id] ||= []).push(l) }
-        for (const m of mapped) {
-          const b = att[m.id]
-          if (b) { m.attended = b.count; m.derivedTags = [...b.types] }
-          m.manualTags = mtags[m.id] || []
-          m.skills = sks[m.id] || []
-        }
+      })
+
+    const ids = mapped.map((m) => m.id)
+    if (ids.length) {
+      const [attRes, mtRes, skRes] = await Promise.all([
+        supabase.from('attendance').select('person_id, atype:activity_types(label)').in('person_id', ids).eq('status', 'attended'),
+        supabase.from('manual_tags').select('person_id, tag').in('person_id', ids),
+        supabase.from('person_skills').select('person_id, skill:skills(label)').in('person_id', ids),
+      ])
+      const att = {}
+      for (const a of attRes.data || []) {
+        const b = (att[a.person_id] ||= { count: 0, types: new Set() })
+        b.count += 1
+        const t = a.atype?.label
+        if (t) b.types.add(t)
       }
-
-      if (seq !== reqSeq.current) return // a newer search superseded this one
-      setRows(mapped)
-      setTotal(count ?? 0)
-    } catch (e) {
-      if (seq !== reqSeq.current) return
-      setErr(e.message || String(e))
-      setRows([])
-    } finally {
-      if (seq === reqSeq.current) setLoading(false)
+      const mtags = {}
+      for (const m of mtRes.data || []) (mtags[m.person_id] ||= []).push(m.tag)
+      const sks = {}
+      for (const s of skRes.data || []) { const l = s.skill?.label; if (l) (sks[s.person_id] ||= []).push(l) }
+      for (const m of mapped) {
+        const b = att[m.id]
+        if (b) { m.attended = b.count; m.derivedTags = [...b.types] }
+        m.manualTags = mtags[m.id] || []
+        m.skills = sks[m.id] || []
+      }
     }
-  }, [applyFilters, page, pageSize, fil.tag, fil.event, fil.atype, fil.sub, fil.skill, fil.nurt, tagIds, eventIds, atypeIds, subIds, skillIds, coveredIds])
+    return mapped
+  }, [])
 
+  const { rows, total, page, pageSize, loading, err, setPage, setPageSize, setRows, pageCount, reload: loadPage } =
+    usePagedQuery(buildPage, { ready: filtersReady, mapRows: enrichPage })
+
+  // A new filter is a new list: back to page 1, selection dropped. (Rows-per-page
+  // resets the page inside usePagedQuery, so it is not repeated here.)
   useEffect(() => {
-    loadPage()
-  }, [loadPage])
+    setPage(0)
+    sel.clear()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debounced, fil, setPage])
 
   async function openCampaign() {
     if (sel.count(total) === 0) { setFormIds([]); setShowForm(true); return }
@@ -448,7 +417,6 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     setSearch('')
   }
   const filterActive = !!(debounced || Object.values(fil).some(Boolean))
-  const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const selCount = sel.count(total)
   const isFullySelected = sel.headerState(total) === 'all'
 
