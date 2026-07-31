@@ -216,7 +216,7 @@ function Portal({ profile, email, sections }) {
       case 'advance':
         return <Advance me={profile} onToast={showToast} />
       case 'nurturing':
-        return <Nurturing me={profile} isCoordinator={isCoordinator} onToast={showToast} />
+        return <Nurturing me={profile} isCoordinator={isCoordinator} onToast={showToast} onOpenList={openList} />
       case 'events':
         return <Events me={profile} isCoordinator={isCoordinator} onToast={showToast} openEventId={pendingEventId} onEventConsumed={() => setPendingEventId(null)} />
       case 'planning':
