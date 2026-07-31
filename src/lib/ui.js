@@ -32,23 +32,25 @@ export const pill = (bg, color) => ({
   whiteSpace: 'nowrap',
 })
 
+// All colours are tokens (var(--…)); values are identical to the prior hex, so
+// pixels don't change — the raw palette just lives in :root now.
 export const STAGE_PILL = {
-  New: pill('#E9F0EF', '#2F6E5E'),
-  'Reached out': pill('#FBEAD9', '#C28A2A'),
-  Oriented: pill('#F6E8D8', '#C2691F'),
-  Active: pill('#EAF2E5', '#4E7C3F'),
-  'Core Group': pill('#F3E3D2', '#9C4A14'),
+  New: pill('var(--info-bg)', 'var(--info-fg)'),
+  'Reached out': pill('var(--pill-warm-bg)', 'var(--pill-warm-fg)'),
+  Oriented: pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)'),
+  Active: pill('var(--success-bg)', 'var(--success-fg)'),
+  'Core Group': pill('var(--pill-rust-bg)', 'var(--pill-rust-fg)'),
 }
 
 export const relPill = (r) =>
-  r >= 85 ? pill('#EAF2E5', '#4E7C3F') : r >= 70 ? pill('#F6E8D8', '#C2691F') : pill('#FBE6E0', '#B5532F')
+  r >= 85 ? pill('var(--success-bg)', 'var(--success-fg)') : r >= 70 ? pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)') : pill('var(--danger-bg)', 'var(--danger-fg)')
 
 export const healthPill = (h) =>
   h === 'Strong'
-    ? pill('#EAF2E5', '#4E7C3F')
+    ? pill('var(--success-bg)', 'var(--success-fg)')
     : h === 'Steady'
-      ? pill('#F6E8D8', '#C2691F')
-      : pill('#FBE6E0', '#B5532F')
+      ? pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)')
+      : pill('var(--danger-bg)', 'var(--danger-fg)')
 
 export const staffPill = (s) =>
-  s === 'Fully staffed' ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C28A2A')
+  s === 'Fully staffed' ? pill('var(--success-bg)', 'var(--success-fg)') : pill('var(--pill-warm-bg)', 'var(--pill-warm-fg)')
