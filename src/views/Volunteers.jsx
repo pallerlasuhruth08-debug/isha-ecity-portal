@@ -14,6 +14,7 @@ import { fetchActivityTypes } from '../lib/activityTypes'
 import { PROGRAMS, PROGRAM_BY_KEY, programsWithData } from '../lib/programs'
 import { COHORT_PROGRAMMES, eligibilityCohort } from '../lib/cohorts'
 import { usePagedQuery, useDebounced, fetchAllMatchingIds } from '../lib/usePagedQuery'
+import { excludeTooLarge, EXCLUDE_TOO_LARGE_MESSAGE } from '../lib/coveredFilter'
 
 // "samyama" -> "Ready now · Samyama"; "samyama:soon" -> "Ready soon · Samyama"
 function readyLabel(v) {
@@ -249,7 +250,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (Array.isArray(atypeIds)) q = q.in('person_id', atypeIds.length ? atypeIds : [NIL])
       if (Array.isArray(subIds)) q = q.in('person_id', subIds.length ? subIds : [NIL])
       if (Array.isArray(skillIds)) q = q.in('person_id', skillIds.length ? skillIds : [NIL])
-      if (fil.nurt === 'needs' && Array.isArray(coveredIds) && coveredIds.length) q = q.not('person_id', 'in', `(${coveredIds.join(',')})`)
+      if (fil.nurt === 'needs' && Array.isArray(coveredIds) && coveredIds.length && !excludeTooLarge(coveredIds)) q = q.not('person_id', 'in', `(${coveredIds.join(',')})`)
       if (Array.isArray(readyIds)) q = q.in('person_id', readyIds.length ? readyIds : [NIL])
       if (fil.centre) q = q.eq('center_id', fil.centre)
       if (fil.ie) q = q.gte('ie_date', `${fil.ie}-01-01`).lte('ie_date', `${fil.ie}-12-31`)
@@ -483,6 +484,14 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
       {err && <ErrorCard>Couldn't load volunteers: {err}</ErrorCard>}
 
+      {/* The exclude-by-id-list filter refuses past a safe size rather than
+          erroring into an EMPTY list, which on this filter would read as
+          "nobody needs a nurturer" — wrong in the most dangerous direction. */}
+      {fil.nurt === 'needs' && excludeTooLarge(coveredIds) && (
+        <div className="card" style={{ padding: '11px 14px', marginBottom: 12, background: 'var(--pill-yellow-bg)', borderColor: '#E4D9A8' }}>
+          <span style={{ fontSize: 13, color: 'var(--pill-yellow-fg)' }}>{EXCLUDE_TOO_LARGE_MESSAGE}</span>
+        </div>
+      )}
       {/* A cohort past the cap is refused, not truncated: showing the first 2,000
           would look like a finished list. Say the number and say why. */}
       {readyIds && readyIds.tooBroad && (

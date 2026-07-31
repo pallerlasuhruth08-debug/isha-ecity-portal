@@ -14,6 +14,7 @@ import { addRecipientsToCampaign } from '../lib/campaignRecipients'
 import { PROGRAMS, PROGRAM_BY_KEY, programsWithData } from '../lib/programs'
 import { COHORT_PROGRAMMES, eligibilityCohort } from '../lib/cohorts'
 import { usePagedQuery, useDebounced, fetchAllMatchingIds } from '../lib/usePagedQuery'
+import { excludeTooLarge, EXCLUDE_TOO_LARGE_MESSAGE } from '../lib/coveredFilter'
 
 // "samyama" -> "Ready now · Samyama"; "samyama:soon" -> "Ready soon · Samyama"
 function readyLabel(v) {
@@ -97,6 +98,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     if (preset.ieWindow) setIeWindow(preset.ieWindow)
     if (preset.recency) setRecency(preset.recency)
     if (preset.ready) setReady(preset.ready)
+    if (preset.needsNurt) setNeedsNurt(true)
     onPresetConsumed && onPresetConsumed()
   }, [preset, onPresetConsumed])
   useEffect(() => {
@@ -126,7 +128,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       // The single most time-sensitive cohort in the whole product: someone who has
       // just finished Inner Engineering is at their most open, and that window shuts.
       if (ieWindow === '60') q = q.gte('ie_date', daysAgoISO(60))
-      if (needsNurt && Array.isArray(coveredIds) && coveredIds.length) q = q.not('id', 'in', `(${coveredIds.join(',')})`)
+      if (needsNurt && Array.isArray(coveredIds) && coveredIds.length && !excludeTooLarge(coveredIds)) q = q.not('id', 'in', `(${coveredIds.join(',')})`)
       if (Array.isArray(readyIds)) q = readyIds.length ? q.in('id', readyIds) : q.eq('id', '00000000-0000-0000-0000-000000000000')
       const searchOr = multiFieldOr(debounced, PEOPLE_SEARCH_FIELDS) // name|phone|email|pincode, sanitized
       if (searchOr) q = q.or(searchOr)
@@ -273,6 +275,14 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
 
       {err && <ErrorCard>Couldn't load meditators: {err}</ErrorCard>}
 
+      {/* The exclude-by-id-list filter refuses past a safe size rather than
+          erroring into an EMPTY list, which on this filter would read as
+          "nobody needs a nurturer" — wrong in the most dangerous direction. */}
+      {needsNurt && excludeTooLarge(coveredIds) && (
+        <div className="card" style={{ padding: '11px 14px', marginBottom: 12, background: 'var(--pill-yellow-bg)', borderColor: '#E4D9A8' }}>
+          <span style={{ fontSize: 13, color: 'var(--pill-yellow-fg)' }}>{EXCLUDE_TOO_LARGE_MESSAGE}</span>
+        </div>
+      )}
       {/* A cohort past the cap is refused, not truncated: showing the first 2,000
           would look like a finished list. Say the number and say why. */}
       {readyIds && readyIds.tooBroad && (

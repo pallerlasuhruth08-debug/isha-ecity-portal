@@ -36,8 +36,9 @@ const reach = (phone, isPhone) => {
   )
 }
 
-export default function Nurturing({ me, isCoordinator = false, onToast }) {
+export default function Nurturing({ me, isCoordinator = false, onToast, onOpenList }) {
   const [teams, setTeams] = useState(null)
+  const [coverage, setCoverage] = useState(null) // { covered, volunteers, meditators, byNurturer: [] }
   const [teamId, setTeamId] = useState(null)     // null = teams list
   const [nurturerId, setNurturerId] = useState(null) // null = team roster
   const [profileId, setProfileId] = useState(null)
@@ -55,6 +56,42 @@ export default function Nurturing({ me, isCoordinator = false, onToast }) {
     } catch (e) { setErr(e.message || String(e)) }
   }, [])
   useEffect(() => { loadTeams() }, [loadTeams])
+
+  // How much of the centre is actually covered, and by whom. This screen used to
+  // open with the sentence "Assignment happens on the Volunteers & Meditators
+  // screens — this view is for oversight", which meant the screen named after the
+  // job sent you elsewhere to do it, and showed no number telling you the job had
+  // barely started. Coverage was 1 person out of 7,381.
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const head = { count: 'exact', head: true }
+      const [assigned, vols, meds, roster] = await Promise.all([
+        supabase.from('nurturing_assignments').select('nurturer_person_id, cared_person_id').eq('active', true).not('nurturer_person_id', 'is', null).limit(20000),
+        supabase.from('people').select('*', head).eq('is_volunteer', true),
+        supabase.from('people').select('*', head).eq('is_meditator', true),
+        supabase.from('team_members').select('person:people!team_members_person_id_fkey(id, full_name, pincode)').is('left_at', null),
+      ])
+      if (!alive) return
+      const load = {}
+      const cared = new Set()
+      for (const r of assigned.data || []) {
+        load[r.nurturer_person_id] = (load[r.nurturer_person_id] || 0) + 1
+        cared.add(r.cared_person_id)
+      }
+      const seen = new Set()
+      const byNurturer = []
+      for (const m of roster.data || []) {
+        const p = m.person
+        if (!p || seen.has(p.id)) continue
+        seen.add(p.id)
+        byNurturer.push({ id: p.id, name: p.full_name, pincode: p.pincode, load: load[p.id] || 0 })
+      }
+      byNurturer.sort((a, b) => b.load - a.load || String(a.name).localeCompare(String(b.name)))
+      setCoverage({ covered: cared.size, volunteers: vols.count ?? 0, meditators: meds.count ?? 0, byNurturer })
+    })()
+    return () => { alive = false }
+  }, [])
 
   if (err) return <Pad><ErrorCard>{err}</ErrorCard></Pad>
   if (!teams) return <Pad><Loading label="Loading care groups…" /></Pad>
@@ -80,9 +117,7 @@ export default function Nurturing({ me, isCoordinator = false, onToast }) {
   // Level 1 — teams
   return (
     <Pad>
-      <div className="mobile-hide" style={{ marginBottom: 18 }}>
-        <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)' }}>Nurturing teams. Assignment happens on the Volunteers &amp; Meditators screens — this view is for oversight.</p>
-      </div>
+      {coverage && <CoveragePanel c={coverage} onOpenList={onOpenList} />}
       {teams.length === 0 && <Empty label="No care groups yet." />}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 16 }}>
         {teams.map((t, i) => (
@@ -94,6 +129,51 @@ export default function Nurturing({ me, isCoordinator = false, onToast }) {
         ))}
       </div>
     </Pad>
+  )
+}
+
+// The number this screen exists to move, and the two doors to moving it.
+//
+// Stated as "X of Y" rather than a percentage: 1 out of 7,381 and 0% are the same
+// fact, but the first one names the people.
+function CoveragePanel({ c, onOpenList }) {
+  const people = c.volunteers + c.meditators
+  const pct = people ? Math.round((c.covered / people) * 100) : 0
+  const roster = c.byNurturer
+  const idle = roster.filter((n) => n.load === 0).length
+
+  return (
+    <div className="card" style={{ padding: 18, marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
+        <div style={{ fontFamily: "'Newsreader',serif", fontSize: 26, fontWeight: 600 }}>
+          {c.covered.toLocaleString()} <span style={{ fontSize: 15, color: 'var(--muted)', fontWeight: 400 }}>of {people.toLocaleString()} people have a nurturer</span>
+        </div>
+        <span className="pill" style={pill(pct >= 25 ? 'var(--success-bg)' : 'var(--danger-bg)', pct >= 25 ? 'var(--success-fg)' : 'var(--danger-fg)')}>{pct}%</span>
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+        {roster.length} nurturer{roster.length === 1 ? '' : 's'} in the care groups
+        {idle > 0 && ` · ${idle} holding nobody yet`}
+      </div>
+
+      {roster.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+          {roster.map((n) => (
+            <span key={n.id} className="pill" style={{ ...pill(n.load ? 'var(--pill-orange-bg)' : 'var(--neutral-bg)', n.load ? 'var(--pill-orange-fg)' : 'var(--muted)'), fontSize: 11.5 }}>
+              {n.name} · {n.load}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Both doors land on a list already filtered to people with no nurturer,
+          where "Share across nurturers" splits them by pincode in one step. */}
+      {onOpenList && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-primary" onClick={() => onOpenList('volunteers', { nurt: 'needs' })}>Assign volunteers</button>
+          <button className="btn btn-ghost" onClick={() => onOpenList('meditators', { needsNurt: true })}>Assign meditators</button>
+        </div>
+      )}
+    </div>
   )
 }
 
