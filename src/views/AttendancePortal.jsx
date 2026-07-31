@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { initials, avatarFor } from '../lib/ui'
+import { initials, avatarFor, BRAND } from '../lib/ui'
 
 // Public per-day attendance capture — ONE link per attendance session
 // (attendance_sessions.public_token), reached via #attend/<token>. Verification
@@ -230,7 +230,7 @@ export default function AttendancePortal({ token }) {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', padding: '24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{ ...box, textAlign: 'center', marginBottom: 18 }}>
-        <div style={{ fontFamily: "'Newsreader',serif", fontSize: 15, fontWeight: 600, color: 'var(--orange)' }}>Electronic City · Volunteer Care</div>
+        <div style={{ fontFamily: "'Newsreader',serif", fontSize: 15, fontWeight: 600, color: 'var(--orange)' }}>{BRAND}</div>
       </div>
 
       {info === undefined && <div style={{ ...box, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>Loading…</div>}

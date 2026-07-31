@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { waHref, smsHref, hasDialable, fillTemplate } from '../lib/phone'
-import { initials, avatarFor } from '../lib/ui'
+import { initials, avatarFor, BRAND } from '../lib/ui'
 import { MESSAGE_STATUS, pillForMessage, labelForMessage } from '../lib/messageStatus'
 import KebabMenu from '../components/KebabMenu'
 
@@ -222,7 +222,7 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', padding: '24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{ ...box, textAlign: 'center', marginBottom: 20 }}>
-        <div style={{ fontFamily: "'Newsreader',serif", fontSize: 15, fontWeight: 600, color: 'var(--orange)' }}>Electronic City · Volunteer Care</div>
+        <div style={{ fontFamily: "'Newsreader',serif", fontSize: 15, fontWeight: 600, color: 'var(--orange)' }}>{BRAND}</div>
       </div>
 
       {info === undefined && <div style={{ ...box, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>Loading…</div>}

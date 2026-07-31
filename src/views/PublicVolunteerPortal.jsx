@@ -1,3 +1,4 @@
+import { BRAND } from '../lib/ui'
 // RETIRED — the legacy no-login calling portal (#volunteer=<token>).
 //
 // It granted the full call list, including every recipient's phone number, to
@@ -17,7 +18,7 @@ export default function PublicVolunteerPortal() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', padding: '24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={{ ...box, textAlign: 'center', marginBottom: 20 }}>
-        <div style={{ fontFamily: "'Newsreader',serif", fontSize: 15, fontWeight: 600, color: 'var(--orange)' }}>Electronic City · Volunteer Care</div>
+        <div style={{ fontFamily: "'Newsreader',serif", fontSize: 15, fontWeight: 600, color: 'var(--orange)' }}>{BRAND}</div>
       </div>
       <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
         <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>This calling link has been retired</div>
