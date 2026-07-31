@@ -8,7 +8,7 @@ import { pushBlockedReason, currentSubscription, enablePush, disablePush } from 
 // The user button shows the REAL signed-in profile (name + role) — never the
 // cosmetic persona. The persona role-switcher and the placeholder search box
 // have been removed; the menu is just identity + sign out.
-export default function Topbar({ title, subtitle, actions, me, email, onSignOut, onMenu }) {
+export default function Topbar({ title, subtitle, actions, me, email, onSignOut, onMenu, onOpenTools }) {
   const [menu, setMenu] = useState(false)
   const { isPhone } = useBreakpoint()
   const name = me?.full_name?.trim() || me?.email || email || 'You'
@@ -31,6 +31,23 @@ export default function Topbar({ title, subtitle, actions, me, email, onSignOut,
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto', flexShrink: 0 }}>
         {actions}
+        {/* Calendar & notes. This used to be a vertical "✦ TOOLS" tab floating over
+            the right edge of every screen — an affordance that named itself after
+            the developer's word for the panel rather than its contents, overlapped
+            page content on a phone, and was the only way in besides an
+            undiscoverable edge swipe. It is now a labelled button where every other
+            global control already lives. The edge swipe still works as a shortcut. */}
+        {onOpenTools && (
+          <button
+            onClick={onOpenTools}
+            aria-label="Open calendar and notes"
+            title="Calendar & notes"
+            style={{ display: 'flex', alignItems: 'center', gap: 7, background: '#fff', border: '1px solid var(--border)', borderRadius: 11, padding: isPhone ? '0 10px' : '0 12px', height: isPhone ? 44 : 42, cursor: 'pointer', color: 'var(--ink-soft)', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0 }}
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
+            {!isPhone && <span>Calendar &amp; notes</span>}
+          </button>
+        )}
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <button
             onClick={() => setMenu((m) => !m)}

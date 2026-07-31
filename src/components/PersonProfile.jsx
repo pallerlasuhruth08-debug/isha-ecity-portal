@@ -9,12 +9,12 @@ import SidePanel, { PanelHeader } from './SidePanel'
 import { ensureSkill } from '../lib/skills'
 import { PROGRAMS, programmeCoverage } from '../lib/programs'
 import { eligibility } from '../lib/eligibility'
+import { NURTURE_OUTCOMES, DEFAULT_NURTURE_OUTCOME, labelForOutcome, pillForAnyOutcome } from '../lib/calllog'
 
-const REACH = [
-  { key: 'answered', label: 'Answered' },
-  { key: 'will_call_back', label: 'Will call back' },
-  { key: 'not_reachable', label: 'Not reachable' },
-]
+// Outcomes come from lib/calllog now. This file used to declare its own three in
+// snake_case ('answered', 'will_call_back', 'not_reachable') while every other
+// screen wrote Title Case into the SAME column — so this history table rendered a
+// raw lowercase "answered" next to "Interested" and "Doing well".
 const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : null)
 const waNum = (p) => (p || '').replace(/\D/g, '').replace(/^0+/, '').slice(-10)
 const ageOf = (dob) => (dob ? Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 86400000)) : null)
@@ -41,7 +41,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
   const [showCampaign, setShowCampaign] = useState(false)
   const [showAssignNurt, setShowAssignNurt] = useState(false)
   const [logOpen, setLogOpen] = useState(false)
-  const [outcome, setOutcome] = useState('answered')
+  const [outcome, setOutcome] = useState(DEFAULT_NURTURE_OUTCOME)
   const [remarks, setRemarks] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -341,7 +341,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
                 <div className="card" style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                     <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Call Status</th><th style={th}>Response</th><th style={th}>Remarks</th><th style={th}>Date</th></tr></thead>
-                    <tbody>{calls.map((c) => (<tr key={c.key} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{c.when ? 'Completed' : 'Scheduled'}{c.outcome ? ` · ${String(c.outcome).replace('_', ' ')}` : ''}</td><td style={td}>{c.sadhana || '—'}</td><td style={td}>{c.remarks || '—'}</td><td style={td}>{fmt(c.when) || '—'}</td></tr>))}</tbody>
+                    <tbody>{calls.map((c) => (<tr key={c.key} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{c.when ? 'Completed' : 'Scheduled'}{c.outcome ? <> · <span className="pill" style={pillForAnyOutcome(c.outcome)}>{labelForOutcome(c.outcome)}</span></> : ''}</td><td style={td}>{c.sadhana || '—'}</td><td style={td}>{c.remarks || '—'}</td><td style={td}>{fmt(c.when) || '—'}</td></tr>))}</tbody>
                   </table>
                 </div>
               )}
@@ -353,7 +353,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: 20 }} onClick={() => setLogOpen(false)}>
           <div className="card" style={{ width: 400, maxWidth: '100%', padding: 22 }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 12px' }}>Log contact — {p?.full_name}</h3>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>{REACH.map((o) => (<button key={o.key} onClick={() => setOutcome(o.key)} className="btn" style={{ padding: '7px 12px', fontSize: 12.5, background: outcome === o.key ? '#241B14' : '#fff', color: outcome === o.key ? '#F6ECDC' : 'var(--ink-soft)', border: outcome === o.key ? 'none' : '1px solid var(--border)' }}>{o.label}</button>))}</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>{NURTURE_OUTCOMES.map((o) => (<button key={o} onClick={() => setOutcome(o)} className="btn" style={{ padding: '7px 12px', fontSize: 12.5, background: outcome === o ? '#241B14' : '#fff', color: outcome === o ? '#F6ECDC' : 'var(--ink-soft)', border: outcome === o ? 'none' : '1px solid var(--border)' }}>{o}</button>))}</div>
             <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} placeholder="Remarks…" style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', fontSize: 13, fontFamily: 'inherit', outline: 'none', resize: 'vertical', marginBottom: 14 }} />
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}><button className="btn btn-ghost" onClick={() => setLogOpen(false)}>Cancel</button><button className="btn btn-primary" disabled={busy} onClick={saveLog}>{busy ? 'Saving…' : 'Save'}</button></div>
           </div>
