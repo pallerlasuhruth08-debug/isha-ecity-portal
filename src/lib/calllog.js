@@ -42,3 +42,57 @@ export const fmtWhen = (iso) => {
     return iso
   }
 }
+
+// ── The other two vocabularies that write to this same column ────────────────
+//
+// `call_logs.reachability` is written from four places, and until now each one
+// declared its own words inline:
+//
+//   campaign calling   Enrolled · Interested · Call back later · No answer · Not now
+//   nurturing          Reached · No answer · Call back · Doing well · Needs support
+//   person profile     answered · will_call_back · not_reachable   (snake_case!)
+//   interest inbox     always "answered", with no way to say otherwise
+//
+// The first two are genuinely different conversations — a campaign call asks
+// "did they enrol?", a nurturing call asks "how are they?" — so they stay
+// separate. What was wrong is that they were separate *and undeclared*, so a
+// person's profile rendered a mix of "Interested", "Doing well" and a raw
+// lowercase "answered" in the same history list, and any outcome outside
+// STATUS_PILL fell through to unstyled text.
+//
+// Now: both lists live here, and `labelForOutcome` / `pillForAnyOutcome`
+// humanise ANY value ever written to the column, including the legacy
+// snake_case rows that already exist in the database.
+
+export const NURTURE_OUTCOMES = ['Reached', 'No answer', 'Call back', 'Doing well', 'Needs support']
+export const DEFAULT_NURTURE_OUTCOME = 'Reached'
+
+// Historical values still present in call_logs, mapped to the words used today.
+const LEGACY_OUTCOME = {
+  answered: 'Reached',
+  will_call_back: 'Call back',
+  not_reachable: 'No answer',
+}
+
+const OUTCOME_PILL = {
+  Enrolled: STATUS_PILL.Enrolled,
+  Interested: STATUS_PILL.Replied,
+  'Call back later': STATUS_PILL['Call back'],
+  'Call back': STATUS_PILL['Call back'],
+  'No answer': STATUS_PILL.Attempted,
+  'Not now': STATUS_PILL['Not now'],
+  Reached: STATUS_PILL.Replied,
+  'Doing well': STATUS_PILL.Enrolled,
+  'Needs support': STATUS_PILL['Call back'],
+}
+
+/** Any value ever written to reachability → the words a coordinator should read. */
+export function labelForOutcome(v) {
+  if (!v) return '—'
+  return LEGACY_OUTCOME[v] || v
+}
+
+/** Any value ever written to reachability → a styled pill, never bare text. */
+export function pillForAnyOutcome(v) {
+  return OUTCOME_PILL[labelForOutcome(v)] || STATUS_PILL['To call']
+}
