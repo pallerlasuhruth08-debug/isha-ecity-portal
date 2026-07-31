@@ -118,6 +118,10 @@ function Portal({ profile, email, sections }) {
   const [createReq, setCreateReq] = useState(null) // { presetDate, dest } | null
   const [pendingInterestEventId, setPendingInterestEventId] = useState(null)
   const [pendingCampaignId, setPendingCampaignId] = useState(null)
+  // A worklist row on the Dashboard navigates WITH its filter, so the number you
+  // clicked is the list you land on. Same shape as the other pending* handoffs:
+  // set on navigate, consumed once by the destination.
+  const [pendingPreset, setPendingPreset] = useState(null) // { view, preset } | null
   const [pendingHubEventId, setPendingHubEventId] = useState(null) // open this event IN the hub
   const [campaignDraft, setCampaignDraft] = useState(null) // { eventId, eventName } — call-list build in progress
   const [recipientDraft, setRecipientDraft] = useState(null) // { campaignId, campaignName } — adding to an existing campaign
@@ -166,6 +170,9 @@ function Portal({ profile, email, sections }) {
   // Open an event inside the hub (calendar click, new event, returning sub-flow).
   const openEventHub = useCallback((eventId) => { setPendingHubEventId(eventId); setView('hub') }, [])
   const openCampaign = useCallback((campaignId) => { setPendingCampaignId(campaignId); setView('campaigns') }, [])
+  const openList = useCallback((v, preset) => { setPendingPreset(preset ? { view: v, preset } : null); setView(v) }, [])
+  const presetFor = useCallback((v) => (pendingPreset && pendingPreset.view === v ? pendingPreset.preset : null), [pendingPreset])
+  const clearPreset = useCallback(() => setPendingPreset(null), [])
 
   // Call-list build: from the hub, pick an audience, go select recipients on that
   // list (event context held), then Create Campaign attaches them + the event_id.
@@ -196,13 +203,13 @@ function Portal({ profile, email, sections }) {
   const content = useMemo(() => {
     switch (activeView) {
       case 'dashboard':
-        return <Dashboard me={profile} onNavigate={setView} />
+        return <Dashboard me={profile} onNavigate={setView} onOpenList={openList} />
       case 'volunteers':
-        return <Volunteers me={profile} onToast={showToast} onNavigate={setView} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
+        return <Volunteers me={profile} onToast={showToast} onNavigate={setView} preset={presetFor('volunteers')} onPresetConsumed={clearPreset} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
       case 'campaigns':
         return <Campaigns me={profile} isCoordinator={isCoordinator} onToast={showToast} onNavigate={setView} openCampaignId={pendingCampaignId} onCampaignConsumed={() => setPendingCampaignId(null)} onAddRecipients={startAddRecipients} />
       case 'meditators':
-        return <Meditators me={profile} onToast={showToast} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
+        return <Meditators me={profile} onToast={showToast} preset={presetFor('meditators')} onPresetConsumed={clearPreset} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
       case 'interest':
         return <Interest onToast={showToast} eventScopeId={pendingInterestEventId} onScopeConsumed={() => setPendingInterestEventId(null)} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
       case 'advance':
@@ -224,7 +231,7 @@ function Portal({ profile, email, sections }) {
       default:
         return <Placeholder view={activeView} title={TAB_LABELS[activeView]} />
     }
-  }, [activeView, showToast, isCoordinator, isAdmin, profile, pendingEventId, requestCreate, openEventHub, openCampaign, startCampaignForEvent, endCampaignDraft, campaignDraft, recipientDraft, startAddRecipients, endRecipientDraft, pendingInterestEventId, pendingCampaignId, pendingHubEventId])
+  }, [activeView, showToast, isCoordinator, isAdmin, profile, pendingEventId, requestCreate, openEventHub, openCampaign, startCampaignForEvent, endCampaignDraft, campaignDraft, recipientDraft, startAddRecipients, endRecipientDraft, pendingInterestEventId, pendingCampaignId, pendingHubEventId, openList, presetFor, clearPreset])
 
   // Event Hub's "+ Create event" lives in the Topbar on desktop (right side, same
   // row as the title) — only shown while Hub is showing the event LIST (not a
