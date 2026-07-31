@@ -53,6 +53,17 @@ function ago(d) {
 }
 const waNum = (p) => (p || '').replace(/\D/g, '').replace(/^0+/, '').slice(-10)
 
+// A labelled filter dimension. The label is what turns three pill strips from
+// "which of these fifteen buttons am I on?" into three independent questions.
+function FilterRow({ label, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+      <span style={{ fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, width: 46, flexShrink: 0 }}>{label}</span>
+      <div className="scroll-tabs" style={{ display: 'flex', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', alignItems: 'center', minWidth: 0 }}>{children}</div>
+    </div>
+  )
+}
+
 function actionsForEvent(status, contactedAt) {
   const s = status || 'interested'
   if (s === 'interested') return [{ label: 'Mark Contacted', to: 'contacted' }, { label: 'Approve', to: 'approved', primary: true }]
@@ -107,6 +118,11 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
   const [showForm, setShowForm] = useState(false)
   const [formIds, setFormIds] = useState([])
   const [resolving, setResolving] = useState(false)
+  // Triage with no feedback is demoralising, and this queue is 1,311 long. Counts
+  // dispositions made in THIS sitting — deliberately not "today", because that
+  // would need timestamps across four different tables and would be a claim the
+  // screen cannot actually back up.
+  const [handled, setHandled] = useState(0)
   const [addOpen, setAddOpen] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
 
@@ -301,6 +317,61 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       onToast(`${row.full_name} → ${EI_STATUS_MAP[to]?.label || to}.`)
     } catch (e) { onToast('Could not update status: ' + (e.message || e)) } finally { setBusy(false) }
   }
+  // ── What happens to this person next ───────────────────────────────────────
+  //
+  // A coordinator looking at 1,311 raised hands does not care that volunteering
+  // interest lives in `volunteer_profiles`, advanced interest in
+  // `advanced_interest` and event interest in `event_interest`. They see a person
+  // who offered to help. The decision is the same everywhere: have we reached out,
+  // and did it come to anything?
+  //
+  // The screen already normalises those three tables into ONE display vocabulary
+  // (`status_bucket`). It never normalised the ACTIONS, so disposing of one person
+  // meant: click the row, wait for a side panel, find the button among ten others,
+  // click, close the panel, find your place again. Roughly five interactions per
+  // person — about 6,500 for this queue, which is why the queue has never moved.
+  //
+  // This returns the one or two things worth doing to a row, for any source, so
+  // they can sit IN the row. One tap, one person, no panel.
+  function nextActions(row) {
+    const b = row.status_bucket
+    if (row.source === 'event') {
+      return actionsForEvent(row.status_raw, row.contacted_at)
+        .map((a) => ({ label: a.label, primary: a.primary, run: () => changeEventStatus(row, a.to) }))
+    }
+    const step = row.source === 'advanced' ? setAdvStep : setVolStep
+    const done = row.source === 'advanced' ? 'Registered' : 'Signed up'
+    if (b === 'contacted') {
+      return [
+        { label: done, primary: true, run: () => step(row, 2) },
+        { label: 'No answer', run: () => step(row, 0) },
+      ]
+    }
+    if (b === 'approved') return [{ label: 'Undo', run: () => step(row, 1) }]
+    return [
+      { label: 'Reached out', primary: true, run: () => step(row, 1) },
+      { label: done, run: () => step(row, 2) },
+    ]
+  }
+
+  // Inline row actions. Kept compact so they never crowd the person's name, and
+  // stopPropagation so acting on a row does not also open the panel behind it.
+  const RowActions = ({ row }) => (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+      {nextActions(row).map((a) => (
+        <button key={a.label} disabled={busy} onClick={() => { a.run(); setHandled((h) => h + 1) }}
+          style={{
+            padding: '6px 11px', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', borderRadius: 7, cursor: busy ? 'default' : 'pointer',
+            whiteSpace: 'nowrap', minHeight: isPhone ? 40 : 32,
+            border: a.primary ? 'none' : '1px solid var(--border)',
+            background: a.primary ? 'var(--orange)' : '#fff',
+            color: a.primary ? '#fff' : 'var(--ink-soft)',
+            opacity: busy ? 0.6 : 1,
+          }}>{a.label}</button>
+      ))}
+    </div>
+  )
+
   async function saveEventAvailability(row, dates) {
     try {
       const { error } = await supabase.from('event_interest').update({ availability_dates: dates }).eq('id', row.source_id)
@@ -401,8 +472,9 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
 
   const btn = { padding: '9px 13px', fontSize: 12 }
   const filterChip = (on) => ({ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 20, cursor: 'pointer', border: on ? 'none' : '1px solid var(--border)', background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', whiteSpace: 'nowrap', flexShrink: 0 })
-  const divider = { width: 1, alignSelf: 'stretch', background: 'var(--border)', flexShrink: 0, margin: '2px 2px' }
-  const grid = '34px 2.2fr 1fr 1.4fr 1.2fr'
+  // Actions get a column of their own — the disposition is the point of the screen,
+  // not a detail hidden behind a row click.
+  const grid = '34px 2fr 0.9fr 1.1fr 1fr 1.5fr'
 
   return (
     <Pad>
@@ -433,28 +505,41 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       </div>
       {err && <ErrorCard>Couldn't load interest inbox: {err}</ErrorCard>}
 
-      <div style={{ marginBottom: 10, fontSize: 14, color: 'var(--muted)' }}>
-        {loading ? 'Loading…' : `${total} volunteer interest${total === 1 ? '' : 's'}`}
+      <div style={{ marginBottom: 10, fontSize: 14, color: 'var(--muted)', display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <span>{loading ? 'Loading…' : `${total.toLocaleString('en-IN')} volunteer interest${total === 1 ? '' : 's'}`}</span>
+        {handled > 0 && (
+          <span className="pill" style={pill('var(--success-bg)', 'var(--success-fg)')}>
+            {handled} handled in this sitting
+          </span>
+        )}
       </div>
 
-      {/* One combined, never-wrapping scroll row: interest type · status · event. */}
-      <div className="scroll-tabs" style={{ display: 'flex', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', marginBottom: 12, alignItems: 'center' }}>
-        <button className="tap44" onClick={() => setTypeFilter('all')} style={filterChip(typeFilter === 'all')}>All</button>
-        {TYPE_PILLS.map((t) => (
-          <button key={t.v} className="tap44" onClick={() => setTypeFilter(t.v)} style={filterChip(typeFilter === t.v)}>{t.label}</button>
-        ))}
-        <div style={divider} />
-        {EI_STATUS.map((s) => (
-          <button key={s.v} className="tap44" onClick={() => setStatusFilter((cur) => (cur === s.v ? 'all' : s.v))} style={filterChip(statusFilter === s.v)}>{s.label}</button>
-        ))}
+      {/* Three filter DIMENSIONS, each labelled and on its own line.
+          They used to share one horizontally-scrolling strip with only a thin
+          divider between them, so "All" (interest type) and "All Events" were
+          active simultaneously with nothing saying they controlled different
+          things — and the status pills sat in the middle looking like more
+          types. You could not tell what you were filtered to without clicking. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+        <FilterRow label="Kind">
+          <button className="tap44" onClick={() => setTypeFilter('all')} style={filterChip(typeFilter === 'all')}>All kinds</button>
+          {TYPE_PILLS.map((t) => (
+            <button key={t.v} className="tap44" onClick={() => setTypeFilter(t.v)} style={filterChip(typeFilter === t.v)}>{t.label}</button>
+          ))}
+        </FilterRow>
+        <FilterRow label="Stage">
+          <button className="tap44" onClick={() => setStatusFilter('all')} style={filterChip(statusFilter === 'all')}>Any stage</button>
+          {EI_STATUS.map((s) => (
+            <button key={s.v} className="tap44" onClick={() => setStatusFilter((cur) => (cur === s.v ? 'all' : s.v))} style={filterChip(statusFilter === s.v)}>{s.label}</button>
+          ))}
+        </FilterRow>
         {evList.length > 0 && (
-          <>
-            <div style={divider} />
-            <button className="tap44" onClick={() => setEventFilter('all')} style={filterChip(eventFilter === 'all')}>All Events</button>
+          <FilterRow label="Event">
+            <button className="tap44" onClick={() => setEventFilter('all')} style={filterChip(eventFilter === 'all')}>Any event</button>
             {evList.map((e) => (
               <button key={e.id} className="tap44" onClick={() => setEventFilter((cur) => (cur === e.id ? 'all' : e.id))} style={filterChip(eventFilter === e.id)}>{e.name}</button>
             ))}
-          </>
+          </FilterRow>
         )}
       </div>
 
@@ -471,6 +556,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
             <span>Status</span>
             <span>Interest type</span>
             <span>Event</span>
+            <span>What next</span>
           </div>
         )}
 
@@ -494,6 +580,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
                 <span className="pill" style={pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)')}>{TYPE_PILLS.find((t) => t.v === r.interest_type)?.label || r.interest_type}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{r.event_name || '—'}</span>
               </div>
+              <div style={{ marginTop: 10 }}><RowActions row={r} /></div>
             </div>
           </div>
         ))}
@@ -512,6 +599,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
             <div><span className="pill" style={EI_STATUS_MAP[r.status_bucket]?.pill}>{EI_STATUS_MAP[r.status_bucket]?.label || r.status_bucket}</span></div>
             <div><span className="pill" style={pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)')}>{TYPE_PILLS.find((t) => t.v === r.interest_type)?.label || r.interest_type}</span></div>
             <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.event_name || '—'}</div>
+            <RowActions row={r} />
           </div>
         ))}
       </div>
