@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { STAGE_PILL, initials, avatarFor, pill } from '../lib/ui'
-import { Pad, ErrorCard, Loading, Empty, Checkbox, Pager, SelectionBar, ActiveFilters } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Checkbox, Pager, ActiveFilters } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import { multiFieldOr, PEOPLE_SEARCH_FIELDS } from '../lib/searchFilter'
@@ -599,15 +599,16 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
 
       </div>
 
-      {!loading && total > 0 && selCount === 0 && (
-        <Pager page={page} pageCount={pageCount} total={total} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} noun="volunteers" />
+      {!loading && total > 0 && (
+        <Pager page={page} pageCount={pageCount} total={total} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} noun="volunteers"
+          selection={selCount > 0 ? {
+            count: selCount, total, isFullySelected, onSelectAll: sel.selectAllMatching, onClear: sel.clear,
+            actions: [
+              ...(recipientDraft ? [] : [{ label: 'Assign to nurturer', onClick: openAssign, disabled: resolving }]),
+              { label: recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : (resolving ? 'Preparing…' : 'Create campaign'), onClick: recipientDraft ? addSelectedToCampaign : openCampaign, disabled: resolving, primary: true },
+            ],
+          } : null} />
       )}
-
-      <SelectionBar count={selCount} total={total} isFullySelected={isFullySelected} onSelectAll={sel.selectAllMatching} onClear={sel.clear}
-        actions={[
-          ...(recipientDraft ? [] : [{ label: 'Assign to nurturer', onClick: openAssign, disabled: resolving }]),
-          { label: recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : (resolving ? 'Preparing…' : 'Create campaign'), onClick: recipientDraft ? addSelectedToCampaign : openCampaign, disabled: resolving, primary: true },
-        ]} />
 
       {showForm && (
         <CampaignForm audience="volunteer" personIds={formIds} eventId={campaignDraft?.eventId || null}
