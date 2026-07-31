@@ -11,26 +11,31 @@ export function Pad({ children }) {
 
 export function ErrorCard({ children }) {
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 16, borderColor: '#E7C9B8', background: '#FBEEE6', color: 'var(--rust)', fontSize: 14 }}>
+    <div className="card" style={{ padding: 'var(--space-3)', marginBottom: 'var(--space-4)', borderColor: 'var(--danger-border)', background: 'var(--danger-bg)', color: 'var(--danger-fg)', fontSize: 'var(--fs-body)' }}>
       {children}
     </div>
   )
 }
 
 export function Loading({ label = 'Loading…' }) {
-  return <div style={{ padding: 28, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>{label}</div>
+  return <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>{label}</div>
 }
 
-export function Empty({ label = 'Nothing here yet.' }) {
-  return <div style={{ padding: 28, textAlign: 'center', color: 'var(--muted-2)', fontSize: 14 }}>{label}</div>
+export function Empty({ label = 'Nothing here yet.', action = null }) {
+  return (
+    <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>
+      <div>{label}</div>
+      {action && <div style={{ marginTop: 'var(--space-3)' }}>{action}</div>}
+    </div>
+  )
 }
 
 export function SectionTitle({ title, subtitle, right }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
       <div>
-        <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 3px' }}>{title}</h3>
-        {subtitle && <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)' }}>{subtitle}</p>}
+        <h3 style={{ fontSize: 'var(--fs-h2)', fontWeight: 600, margin: '0 0 3px' }}>{title}</h3>
+        {subtitle && <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--muted)' }}>{subtitle}</p>}
       </div>
       {right}
     </div>
@@ -41,13 +46,14 @@ export function Chip({ on, label, count, onClick }) {
   return (
     <button
       onClick={onClick}
+      aria-pressed={!!on}
       className="btn"
       style={{
         padding: '7px 13px',
-        fontSize: 12,
-        borderRadius: 20,
-        background: on ? '#241B14' : '#fff',
-        color: on ? '#F6ECDC' : 'var(--ink-soft)',
+        fontSize: 'var(--fs-caption)',
+        borderRadius: 'var(--radius-pill)',
+        background: on ? 'var(--sb-bg)' : '#fff',
+        color: on ? 'var(--sb-ink)' : 'var(--ink-soft)',
         border: on ? 'none' : '1px solid var(--border)',
       }}
     >
