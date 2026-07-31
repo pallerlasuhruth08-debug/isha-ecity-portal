@@ -8,7 +8,7 @@ import AssignNurturerDialog from './AssignNurturerDialog'
 import SidePanel, { PanelHeader } from './SidePanel'
 import { ensureSkill } from '../lib/skills'
 import { PROGRAMS, programmeCoverage } from '../lib/programs'
-import { eligibility } from '../lib/eligibility'
+import { eligibility, labelOf } from '../lib/eligibility'
 import { NURTURE_OUTCOMES, DEFAULT_NURTURE_OUTCOME, labelForOutcome, pillForAnyOutcome } from '../lib/calllog'
 
 // Outcomes come from lib/calllog now. This file used to declare its own three in
@@ -398,11 +398,21 @@ function PathPanel({ person, coverage }) {
   ]
   const noIE = e.states.find((s) => s.key === 'ie' && s.status === 'eligible')
   const bspDone = e.completed.some((s) => s.key === 'bsp')
+  // Completed, but the date never arrived from the sync. Shown rather than
+  // silently smoothed over: the verdict is now right, and the missing date is
+  // still a real data gap somebody should close.
+  const inferred = e.completed.filter((s) => s.impliedBy)
 
   if (noIE) return <Empty label="No Inner Engineering date on record — that is the gate for every advanced programme." />
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {inferred.length > 0 && (
+        <div style={{ fontSize: 12, color: 'var(--info-fg)', background: 'var(--info-bg)', borderRadius: 8, padding: '8px 10px', marginBottom: 2 }}>
+          {inferred.map((s) => `${s.label} has no date on record, but ${labelOf(s.impliedBy)} cannot be taken without it — counted as completed.`).join(' ')}
+          {' '}Worth fixing at the source so the date is right everywhere.
+        </div>
+      )}
       {rows.length === 0 && <Empty label="Every programme with a published prerequisite is already completed." />}
       {rows.map((r) => (
         <div key={r.key} style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: 12, alignItems: 'start', padding: '9px 0', borderBottom: '1px solid #F4EEE2' }}>
