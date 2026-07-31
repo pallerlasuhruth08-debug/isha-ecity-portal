@@ -153,6 +153,24 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
       to: 'volunteers', preset: { contact: 'no_phone' },
       tint: 'var(--neutral-bg)', ink: 'var(--neutral-fg)',
     },
+    // The reason this card exists: with the KPI labels fixed, "People with a
+    // nurturer" turned out to be 1 — in a database of 6,096 meditators and 1,285
+    // volunteers. The old label counted `journeys` rows and read 6,954, which hid
+    // the single most important fact about the product: its core loop is unused.
+    //
+    // Stated as a ratio rather than a scary absolute, and it links straight to the
+    // list filtered to people who need one, where bulk assign already lives.
+    ...(k.activeVols > 0 && k.inNurturing / k.activeVols < 0.25 ? [{
+      key: 'nurturerGap',
+      n: k.activeVols - k.inNurturing,
+      tag: 'NURTURING',
+      title: `Only ${k.inNurturing} of ${k.activeVols} volunteers has a nurturer`,
+      body: 'Nurturing is what this centre runs on, and almost nobody is covered. Filter to the people who need one and assign in bulk.',
+      cta: 'Open volunteers who need a nurturer',
+      to: 'volunteers', preset: { nurt: 'needs' },
+      tint: 'var(--pill-rust-bg)', ink: 'var(--pill-rust-fg)',
+      unit: 'uncovered',
+    }] : []),
   ].filter((r) => r.n > 0)
 
   return (
@@ -198,6 +216,12 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
                   {r.overdue ? `${r.overdue} overdue` : `${r.atRisk} at risk`}
                 </span>
                 <span style={{ fontSize: 13.5, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.event.name}</span>
+                {/* A recurring series puts two "Monthly Satsang" rows side by side.
+                    Without its own date they are the same row twice and neither can
+                    be acted on with any confidence. */}
+                {(r.event.start_date || r.event.activity_date) && (
+                  <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>· {fmtDay(r.event.start_date || r.event.activity_date)}</span>
+                )}
                 {r.overdue > 0 && r.atRisk > 0 && (
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>· {r.atRisk} more at risk</span>
                 )}
@@ -222,7 +246,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span className="pill" style={pill(r.tint, r.ink)}>{r.tag}</span>
               <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--muted)', fontWeight: 600 }}>
-                {r.n} {r.n === 1 ? 'person' : 'people'}
+                {r.n} {r.unit || (r.n === 1 ? 'person' : 'people')}
               </span>
             </div>
             <div style={{ fontSize: 16, fontWeight: 600, fontFamily: "'Newsreader',serif", color: 'var(--ink)' }}>
