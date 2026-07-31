@@ -167,3 +167,49 @@ export function PagerPill({ page, pageCount, onPage, pageSize, onPageSize, selec
     </div>
   )
 }
+
+
+export function Pager({ page, pageCount, total, onPage, pageSize, onPageSize, noun = 'rows' }) {
+  const from = total === 0 ? 0 : page * pageSize + 1
+  const to = Math.min(total, (page + 1) * pageSize)
+  const selStyle = { padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--panel-2)', color: 'var(--ink-soft)', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }
+  const win = (() => { const c = page + 1, keep = new Set([1, pageCount, c, c - 1, c + 1]); const a = [...keep].filter((p) => p >= 1 && p <= pageCount).sort((x, y) => x - y); const out = []; let prev = 0; for (const p of a) { if (p - prev > 1) out.push('…'); out.push(p); prev = p } return out })()
+  const pbtn = (label, opt = {}) => (
+    <button key={opt.key || label} onClick={opt.onClick} disabled={opt.disabled} aria-label={opt.ariaLabel} aria-current={opt.current ? 'page' : undefined}
+      style={{ minWidth: 30, height: 30, padding: '0 8px', borderRadius: 8, fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: opt.disabled ? 'default' : 'pointer', border: opt.current ? 'none' : '1px solid var(--border)', background: opt.current ? 'var(--sb-bg)' : 'var(--panel-2)', color: opt.current ? '#f6ecdc' : 'var(--ink-soft)', opacity: opt.disabled ? 0.4 : 1 }}>{label}</button>
+  )
+  return (
+    <nav aria-label="Pagination" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '11px 14px', background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 12, margin: '4px 0 12px' }}>
+      <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 600 }}>Showing {from}–{to} of <b style={{ color: 'var(--ink)' }}>{total}</b> {noun}</span>
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} aria-label="Rows per page" style={selStyle}>
+          {[25, 50, 100].map((sz) => <option key={sz} value={sz}>{sz} / page</option>)}
+        </select>
+        {pageCount > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {pbtn('‹', { ariaLabel: 'Previous page', disabled: page === 0, onClick: () => onPage(page - 1) })}
+            <span className="desktop-only" style={{ gap: 4 }}>
+              {win.map((p, i) => p === '…' ? <span key={'e' + i} style={{ color: 'var(--muted-2)', padding: '0 2px' }}>…</span> : pbtn(String(p), { key: p, current: p === page + 1, onClick: () => onPage(p - 1) }))}
+            </span>
+            <select className="mobile-only" value={page} onChange={(e) => onPage(Number(e.target.value))} aria-label="Go to page" style={selStyle}>
+              {Array.from({ length: pageCount }, (_, i) => <option key={i} value={i}>Page {i + 1}</option>)}
+            </select>
+            {pbtn('›', { ariaLabel: 'Next page', disabled: page + 1 >= pageCount, onClick: () => onPage(page + 1) })}
+          </div>
+        )}
+      </div>
+    </nav>
+  )
+}
+export function SelectionBar({ count = 0, total, isFullySelected, onSelectAll, onClear, actions = [] }) {
+  if (!count) return null
+  return (
+    <div className="pager-pill pager-pill-select pager-pill-visible">
+      <div className="pager-pill-select-top">
+        <span className="pager-pill-label">{isFullySelected ? `All ${count} selected` : `${count} selected`}{!isFullySelected && onSelectAll && total > count && (<button className="pager-pill-link" onClick={onSelectAll}>· Select all {total}</button>)}</span>
+        <button className="pager-pill-clear" onClick={onClear} aria-label="Clear selection">✕</button>
+      </div>
+      {actions.length > 0 && (<div className="pager-pill-actions">{actions.map((a) => (<button key={a.label} className={'pager-pill-btn' + (a.primary ? ' pager-pill-btn-primary' : '')} disabled={a.disabled} onClick={a.onClick}>{a.label}</button>))}</div>)}
+    </div>
+  )
+}
