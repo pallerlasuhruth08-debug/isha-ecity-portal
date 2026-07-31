@@ -49,3 +49,19 @@ export function fillTemplate(tpl, { name, myName } = {}) {
     .replace(/\{name\}/gi, name || '')
     .replace(/\{my_name\}/gi, myName || '')
 }
+
+// ── Validation, shared by every form that asks for a number ─────────────────
+// One definition, so the public pages, the coordinator dialogs and the walk-in
+// flow all accept and reject exactly the same things — and say the same words
+// when they reject. Indian mobiles are 10 digits starting 6-9; people paste them
+// with +91, 0, spaces and dashes, so all of that is accepted and stripped.
+export function checkMobile(input, { required = true } = {}) {
+  const raw = String(input || '').trim()
+  if (!raw) return required ? { ok: false, digits: '', reason: 'Please enter a phone number.' } : { ok: true, digits: '' }
+  let d = onlyDigits(raw)
+  if (d.length === 12 && d.startsWith('91')) d = d.slice(2)
+  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1)
+  if (d.length !== 10) return { ok: false, digits: d, reason: 'A mobile number is 10 digits.' }
+  if (!/^[6-9]/.test(d)) return { ok: false, digits: d, reason: 'Indian mobile numbers start with 6, 7, 8 or 9.' }
+  return { ok: true, digits: d }
+}

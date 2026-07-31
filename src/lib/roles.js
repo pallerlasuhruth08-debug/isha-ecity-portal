@@ -7,11 +7,27 @@ export const ALL_TABS = [
   'hub',
   'volunteers',
   'meditators',
-  'campaigns',
-  'interest',
-  'nurturing',
   'advance',
+  'campaigns',
+  'nurturing',
+  'interest',
   'unresolved',
+]
+
+// Navigation grouped the way a coordinator's day is shaped, not as one flat list
+// of ten. A flat list makes every destination look equally likely and forces the
+// reader to scan all ten every time; grouping lets them jump to a region first.
+//
+// The groups are deliberately verbs-and-nouns from their world — "who am I
+// looking after", "how am I reaching them" — rather than system categories.
+// A group with no visible tabs (because the role doesn't grant them) disappears
+// entirely, so a nurturer never sees an empty "Housekeeping" heading.
+export const NAV_GROUPS = [
+  { label: 'Today', tabs: ['dashboard'] },
+  { label: 'People', tabs: ['volunteers', 'meditators', 'advance'] },
+  { label: 'Reaching out', tabs: ['campaigns', 'nurturing', 'interest'] },
+  { label: 'Events', tabs: ['hub'] },
+  { label: 'Housekeeping', tabs: ['unresolved', 'admin'] },
 ]
 
 // Display labels for the SEEDED profiles.role values. Roles are DATA — an admin
