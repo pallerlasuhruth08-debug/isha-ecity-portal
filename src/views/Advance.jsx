@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { Pad, ErrorCard, Loading, Empty, Chip, Checkbox, PagerPill } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Chip, Checkbox, Pager } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import CampaignForm from '../components/CampaignForm'
@@ -21,11 +21,11 @@ const FUNNEL = [
   { key: 'done', label: 'Done' },
 ]
 const STATUS_PILL = {
-  new: pill('#E9F0EF', '#2F6E5E'),
-  contacted: pill('#FBEAD9', '#C28A2A'),
-  registered: pill('#EAF2E5', '#4E7C3F'),
-  done: pill('#F1EADD', '#8C7E6B'),
-  dropped: pill('#FBE6E0', '#B5532F'),
+  new: pill('var(--info-bg)', 'var(--info-fg)'),
+  contacted: pill('var(--pill-warm-bg)', 'var(--pill-warm-fg)'),
+  registered: pill('var(--success-bg)', 'var(--success-fg)'),
+  done: pill('var(--neutral-bg)', 'var(--neutral-fg)'),
+  dropped: pill('var(--danger-bg)', 'var(--danger-fg)'),
 }
 function ago(d) {
   if (!d) return '—'
@@ -251,11 +251,12 @@ export default function Advance({ me, onToast }) {
           ))}
       </div>
       {!loading && total > 0 && (
-        <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize}
-          selection={{
+        <Pager page={page} pageCount={pageCount} total={total} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} noun="candidates"
+          bottomOffset={isPhone && selCount === 0 ? 84 : 12}
+          selection={selCount > 0 ? {
             count: selCount, total, isFullySelected: sel.isAllMode, onClear: sel.clear,
             actions: [{ label: resolving ? 'Preparing…' : 'Create campaign', onClick: openCampaign, disabled: resolving, primary: true }],
-          }} />
+          } : null} />
       )}
 
       {showForm && (

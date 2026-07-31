@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerPill } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Checkbox, Pager } from '../components/View'
 import CampaignForm from '../components/CampaignForm'
 import SidePanel, { PanelHeader } from '../components/SidePanel'
 import { EI_STATUS, EI_STATUS_MAP } from '../components/EventInterestPanel'
@@ -511,7 +511,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
               </div>
               <div style={{ fontSize: 12, color: r.phone ? 'var(--muted)' : 'var(--red)', marginTop: 2 }}>{r.phone || 'No phone on record'}</div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
-                <span className="pill" style={pill('#F6E8D8', '#C2691F')}>{TYPE_PILLS.find((t) => t.v === r.interest_type)?.label || r.interest_type}</span>
+                <span className="pill" style={pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)')}>{TYPE_PILLS.find((t) => t.v === r.interest_type)?.label || r.interest_type}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{r.event_name || '—'}</span>
               </div>
             </div>
@@ -530,21 +530,21 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
               </div>
             </div>
             <div><span className="pill" style={EI_STATUS_MAP[r.status_bucket]?.pill}>{EI_STATUS_MAP[r.status_bucket]?.label || r.status_bucket}</span></div>
-            <div><span className="pill" style={pill('#F6E8D8', '#C2691F')}>{TYPE_PILLS.find((t) => t.v === r.interest_type)?.label || r.interest_type}</span></div>
+            <div><span className="pill" style={pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)')}>{TYPE_PILLS.find((t) => t.v === r.interest_type)?.label || r.interest_type}</span></div>
             <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.event_name || '—'}</div>
           </div>
         ))}
       </div>
 
       {!loading && total > 0 && (
-        <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize}
-          selection={{
+        <Pager page={page} pageCount={pageCount} total={total} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} noun="interests"
+          selection={selCount > 0 ? {
             count: selCount, total, isFullySelected, onSelectAll: sel.selectAllMatching, onClear: sel.clear,
             actions: [{
               label: recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : (resolving ? 'Preparing…' : 'Create Campaign'),
               onClick: recipientDraft ? addSelectedToCampaign : openCampaign, disabled: resolving, primary: true,
             }],
-          }} />
+          } : null} />
       )}
 
       {selRow && (
@@ -556,7 +556,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
                 <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 3px' }}>{selRow.full_name}</h2>
                 <div style={{ fontSize: 14, color: 'var(--muted)' }}>{selRow.event_name || (selRow.program ? selRow.program.toUpperCase() : TYPE_PILLS.find((t) => t.v === selRow.interest_type)?.label)} · via {selRow.src || 'unknown'}</div>
               </div>
-              <span className="pill" style={pill('#F6E8D8', '#C2691F')}>{TYPE_PILLS.find((t) => t.v === selRow.interest_type)?.label || selRow.interest_type}</span>
+              <span className="pill" style={pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)')}>{TYPE_PILLS.find((t) => t.v === selRow.interest_type)?.label || selRow.interest_type}</span>
               <span className="pill" style={EI_STATUS_MAP[selRow.status_bucket]?.pill}>{EI_STATUS_MAP[selRow.status_bucket]?.label || selRow.status_bucket}</span>
             </div>
           </PanelHeader>

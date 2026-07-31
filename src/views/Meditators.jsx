@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { Pad, ErrorCard, Loading, Empty, Checkbox, PagerPill } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Checkbox, Pager, ActiveFilters } from '../components/View'
 import { useTableSelection } from '../lib/useTableSelection'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import { multiFieldOr, PEOPLE_SEARCH_FIELDS } from '../lib/searchFilter'
@@ -225,6 +225,17 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const selStyle = { padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 5px)' : undefined }
   const grid = '34px 2fr 1.6fr 1.2fr 1.1fr'
 
+  // Removable chips for every active filter (+ search term).
+  const activeFilterItems = [
+    ...(debounced ? [{ key: 'q', label: 'Search', value: `"${debounced}"`, onRemove: () => setSearch('') }] : []),
+    ...(prog !== 'all' ? [{ key: 'prog', label: 'Programme', value: PROGRAMS.find((p) => p.key === prog)?.label || prog, onRemove: () => setProg('all') }] : []),
+    ...(eventId !== 'all' ? [{ key: 'event', label: 'Event', value: eventOpts.find((e) => String(e.id) === String(eventId))?.name || 'Event', onRemove: () => { setEventId('all'); setAttStatus('all') } }] : []),
+    ...(eventId !== 'all' && attStatus !== 'all' ? [{ key: 'status', label: 'Status', value: attStatus === 'attended' ? 'Attended' : 'Registered', onRemove: () => setAttStatus('all') }] : []),
+    ...(recency !== 'any' ? [{ key: 'recency', label: 'Activity', value: RECENCY.find((r) => r.key === recency)?.label || recency, onRemove: () => setRecency('any') }] : []),
+    ...(needsNurt ? [{ key: 'nurt', label: 'Nurturer', value: 'Needs a nurturer', onRemove: () => setNeedsNurt(false) }] : []),
+  ]
+  const clearAllFilters = () => { setSearch(''); setProg('all'); setEventId('all'); setAttStatus('all'); setRecency('any'); setNeedsNurt(false) }
+
   return (
     <Pad>
       {campaignDraft && (
@@ -290,6 +301,8 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
         </MobileFilterSheet>
       </div>
 
+      <ActiveFilters items={activeFilterItems} onClear={clearAllFilters} />
+
       <div className="card" style={{ overflow: 'hidden' }}>
         {isPhone ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
@@ -320,7 +333,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
                 <div style={{ fontSize: 12, color: p.phone ? 'var(--muted)' : 'var(--red)', marginTop: 2 }}>{p.phone || 'No phone on record'}</div>
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
                   {progList(p).length === 0 && <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>No programmes</span>}
-                  {progList(p).map((t) => (<span key={t} className="pill" style={pill('#F3E3D2', 'var(--rust)')}>{t}</span>))}
+                  {progList(p).map((t) => (<span key={t} className="pill" style={pill('var(--pill-rust-bg)', 'var(--pill-rust-fg)')}>{t}</span>))}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 6 }}>{[p.area, p.pincode].filter(Boolean).join(' · ') || p.center_id || '—'}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{lastActive(p.last_active_date)}</div>
@@ -341,7 +354,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
               </div>
               <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                 {progList(p).length === 0 && <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>—</span>}
-                {progList(p).map((t) => (<span key={t} className="pill" style={pill('#F3E3D2', 'var(--rust)')}>{t}</span>))}
+                {progList(p).map((t) => (<span key={t} className="pill" style={pill('var(--pill-rust-bg)', 'var(--pill-rust-fg)')}>{t}</span>))}
               </div>
               <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[p.area, p.pincode].filter(Boolean).join(' · ') || p.center_id || '—'}</div>
               <div style={{ fontSize: 14, color: 'var(--muted)' }}>{lastActive(p.last_active_date)}</div>
@@ -349,14 +362,15 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
           ))}
       </div>
       {!loading && total > 0 && (
-        <PagerPill page={page} pageCount={pageCount} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize}
-          selection={{
+        <Pager page={page} pageCount={pageCount} total={total} onPage={setPage} pageSize={pageSize} onPageSize={setPageSize} noun="meditators"
+          bottomOffset={isPhone && !recipientDraft && selCount === 0 ? 84 : 12}
+          selection={selCount > 0 ? {
             count: selCount, total, isFullySelected, onSelectAll: sel.selectAllMatching, onClear: sel.clear,
             actions: [
               ...(recipientDraft ? [] : [{ label: 'Assign to nurturer', onClick: openAssign, disabled: resolving }]),
               { label: recipientDraft ? (resolving ? 'Adding…' : 'Add to campaign') : (resolving ? 'Preparing…' : 'Create campaign'), onClick: recipientDraft ? addSelectedToCampaign : openCampaign, disabled: resolving, primary: true },
             ],
-          }} />
+          } : null} />
       )}
 
       {showForm && (
