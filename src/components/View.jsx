@@ -179,7 +179,7 @@ export function Pager({ page, pageCount, total, onPage, pageSize, onPageSize, no
       style={{ minWidth: 30, height: 30, padding: '0 8px', borderRadius: 8, fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: opt.disabled ? 'default' : 'pointer', border: opt.current ? 'none' : '1px solid var(--border)', background: opt.current ? 'var(--sb-bg)' : 'var(--panel-2)', color: opt.current ? '#f6ecdc' : 'var(--ink-soft)', opacity: opt.disabled ? 0.4 : 1 }}>{label}</button>
   )
   return (
-    <nav aria-label="Pagination" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '11px 14px', background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 12, margin: '4px 0 12px' }}>
+    <nav aria-label="Pagination" style={{ position: 'sticky', bottom: 12, zIndex: 20, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '11px 14px', background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 12, margin: '12px 0 0', boxShadow: '0 6px 20px rgba(0,0,0,.12)' }}>
       <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 600 }}>Showing {from}–{to} of <b style={{ color: 'var(--ink)' }}>{total}</b> {noun}</span>
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} aria-label="Rows per page" style={selStyle}>
@@ -199,6 +199,27 @@ export function Pager({ page, pageCount, total, onPage, pageSize, onPageSize, no
         )}
       </div>
     </nav>
+  )
+}
+// Active-filter chips: each active filter shown as a removable pill above the list.
+// Not sticky — the live count in the sticky Pager is the mid-scroll filter feedback,
+// so the chips stay in flow and the bottom bar stays a single calm row.
+export function ActiveFilters({ items = [], onClear }) {
+  if (!items.length) return null
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10, alignItems: 'center' }}>
+      {items.map((it) => (
+        <button key={it.key} onClick={it.onRemove} aria-label={`Remove filter ${it.label} ${it.value}`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--ink-soft)', background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 999, padding: '5px 10px', cursor: 'pointer', fontFamily: 'inherit', maxWidth: 260 }}>
+          <span style={{ color: 'var(--muted)' }}>{it.label}:</span>
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.value}</span>
+          <span aria-hidden style={{ color: 'var(--muted-2)', fontWeight: 700, marginLeft: 1 }}>✕</span>
+        </button>
+      ))}
+      {items.length > 1 && onClear && (
+        <button onClick={onClear} style={{ background: 'none', border: 'none', color: 'var(--orange)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', padding: '5px 6px' }}>Clear all</button>
+      )}
+    </div>
   )
 }
 export function SelectionBar({ count = 0, total, isFullySelected, onSelectAll, onClear, actions = [] }) {
