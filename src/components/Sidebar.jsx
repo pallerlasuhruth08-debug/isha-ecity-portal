@@ -116,11 +116,16 @@ export default function Sidebar({ me, view, tabs, onNavigate, variant = 'rail', 
         Coordinate
       </div>
 
+      {/* aria-label + title carry the name when the tablet rail hides .sidebar-label,
+          so the nav is never a row of unlabelled icons; aria-current marks the page. */}
       {NAV.filter((n) => tabs.includes(n.key)).map((n) => (
         <button
           key={n.key}
           className={'navitem' + (view === n.key ? ' active' : '')}
           onClick={() => go(n.key)}
+          aria-label={TAB_LABELS[n.key]}
+          title={TAB_LABELS[n.key]}
+          aria-current={view === n.key ? 'page' : undefined}
         >
           {Icon[n.icon](18)}
           <span className="sidebar-label">{TAB_LABELS[n.key]}</span>

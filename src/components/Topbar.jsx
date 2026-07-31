@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../lib/icons'
-import { REAL_ROLE_LABEL } from '../lib/roles'
+import { roleLabel } from '../lib/roles'
 import { initials } from '../lib/ui'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import { pushBlockedReason, currentSubscription, enablePush, disablePush } from '../lib/push'
@@ -12,7 +12,7 @@ export default function Topbar({ title, subtitle, actions, me, email, onSignOut,
   const [menu, setMenu] = useState(false)
   const { isPhone } = useBreakpoint()
   const name = me?.full_name?.trim() || me?.email || email || 'You'
-  const roleLabel = REAL_ROLE_LABEL[me?.role] || me?.role || ''
+  const roleText = roleLabel(me?.role)
 
   return (
     <header
@@ -40,7 +40,7 @@ export default function Topbar({ title, subtitle, actions, me, email, onSignOut,
             {!isPhone && (
               <div style={{ textAlign: 'left', lineHeight: 1.15 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap' }}>{name}</div>
-                {roleLabel && <div style={{ fontSize: 10.5, color: '#9A8568', whiteSpace: 'nowrap' }}>{roleLabel}</div>}
+                {roleText && <div style={{ fontSize: 10.5, color: '#9A8568', whiteSpace: 'nowrap' }}>{roleText}</div>}
               </div>
             )}
             {Icon.chevron(14)}
@@ -52,7 +52,7 @@ export default function Topbar({ title, subtitle, actions, me, email, onSignOut,
               <div style={{ position: 'absolute', top: 50, right: 0, width: 250, background: '#fff', border: '1px solid var(--border)', borderRadius: 15, boxShadow: 'var(--shadow-lg)', padding: 8, zIndex: 60 }}>
                 <div style={{ padding: '8px 11px 10px' }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{name}</div>
-                  {roleLabel && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{roleLabel}</div>}
+                  {roleText && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{roleText}</div>}
                 </div>
                 <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6 }}>
                   <NotifyMenuItem />
