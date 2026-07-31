@@ -1,5 +1,5 @@
-// Role model ported from the Volunteer Care Portal design (ROLES + tabs).
-// Each role controls which nav tabs are visible and the header scope label.
+// Role model. Roles are DATA (roles + role_sections tables); a role grants a set
+// of SECTIONS and each section maps to one nav tab.
 // Exact sidebar order. Standalone 'events' (Attendance) is intentionally not here —
 // attendance now lives per-event inside the Event Hub. Admin is appended for admins.
 export const ALL_TABS = [
@@ -14,69 +14,26 @@ export const ALL_TABS = [
   'unresolved',
 ]
 
-export const ROLES = {
-  centre: {
-    key: 'centre',
-    label: 'Centre Coordinator',
-    who: 'Meera M.',
-    scope: 'All sectors',
-    tabs: ALL_TABS,
-    full: true,
-  },
-  sector: {
-    key: 'sector',
-    label: 'Sector Coordinator',
-    who: 'Arvind R.',
-    scope: 'Sector 4 only',
-    tabs: ALL_TABS,
-    full: true,
-  },
-  nurturing: {
-    key: 'nurturing',
-    label: 'Nurturing Coordinator',
-    who: 'Ananya Rao',
-    scope: 'All sectors',
-    tabs: ALL_TABS,
-    full: true,
-  },
-  volunteer: {
-    key: 'volunteer',
-    label: 'Volunteer Coordinator',
-    who: 'Divya Menon',
-    scope: 'Sector 4',
-    tabs: ['dashboard', 'volunteers', 'planning', 'events', 'nurturing', 'interest', 'campaigns', 'unresolved'],
-  },
-  meditator: {
-    key: 'meditator',
-    label: 'Meditator Coordinator',
-    who: 'Karthik V.',
-    scope: 'All meditators',
-    tabs: ['dashboard', 'meditators', 'interest', 'campaigns'],
-  },
-  advance: {
-    key: 'advance',
-    label: 'Advance Program Coordinator',
-    who: 'Shankar P.',
-    scope: 'Advance cohorts',
-    tabs: ['dashboard', 'advance', 'nurturing', 'interest', 'campaigns'],
-  },
-  caller: {
-    key: 'caller',
-    label: 'Caller',
-    who: 'Meena K',
-    scope: 'Assigned call lists',
-    tabs: ['campaigns'],
-  },
-}
-
-// Human labels for the REAL profiles.role values (distinct from the cosmetic
-// persona ROLES above). Used to show the actual signed-in user's role.
+// Display labels for the SEEDED profiles.role values. Roles are DATA — an admin
+// can create new ones in Administration — so this map is only a nicety for the
+// built-ins; any other role is humanised by roleLabel() rather than shown raw.
 export const REAL_ROLE_LABEL = {
   admin: 'RCO / Admin',
   sector_nurturer: 'Sector Nurturer',
   center_coordinator: 'Centre Coordinator',
   nurturer: 'Nurturer',
   volunteer: 'Volunteer',
+}
+
+// Never render a raw role key. An admin-created role like `communication_team`
+// shows as "Communication Team" instead of leaking the database key into the UI.
+export function roleLabel(key) {
+  if (!key) return ''
+  if (REAL_ROLE_LABEL[key]) return REAL_ROLE_LABEL[key]
+  return String(key)
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 // Roles are DATA (roles + role_sections tables). A role grants a set of SECTIONS;
@@ -102,16 +59,6 @@ export function tabsForSections(sections, isAdmin) {
   const allowed = new Set((sections || []).map((s) => SECTION_TO_TAB[s]).filter(Boolean))
   return ALL_TABS.filter((t) => allowed.has(t))
 }
-
-export const ROLE_ORDER = [
-  'centre',
-  'sector',
-  'nurturing',
-  'volunteer',
-  'meditator',
-  'advance',
-  'caller',
-]
 
 export const TAB_TITLES = {
   dashboard: ['Dashboard', 'Volunteer & meditator care at a glance'],
