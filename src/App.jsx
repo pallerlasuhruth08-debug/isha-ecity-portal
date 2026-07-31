@@ -66,19 +66,35 @@ function readAttendRoute() {
   return m ? m[1] : null
 }
 
-export default function App() {
-  // Checked BEFORE any hook so the public pages bypass the auth gate entirely.
+// Resolves the public (no-login) hash routes. A plain function, NOT a component:
+// App must reach its own return without calling a hook conditionally, so the
+// route decision has to happen outside any hook's scope.
+function publicRoute() {
   const acceptId = readHashId('accept')
-  if (acceptId) return <Suspense fallback={<ViewFallback />}><PublicAccept blockId={acceptId} /><PwaUpdatePrompt /></Suspense>
+  if (acceptId) return <PublicAccept blockId={acceptId} />
   const interestId = readHashId('interest')
-  if (interestId) return <Suspense fallback={<ViewFallback />}><PublicInterest eventId={interestId} /><PwaUpdatePrompt /></Suspense>
+  if (interestId) return <PublicInterest eventId={interestId} />
   const volunteerToken = readHashToken('volunteer')
-  if (volunteerToken) return <Suspense fallback={<ViewFallback />}><PublicVolunteerPortal token={volunteerToken} /><PwaUpdatePrompt /></Suspense>
+  if (volunteerToken) return <PublicVolunteerPortal token={volunteerToken} />
   const vpRoute = readVolunteerPortalRoute()
-  if (vpRoute) return <Suspense fallback={<ViewFallback />}><VolunteerPortalClaim token={vpRoute.token} splitId={vpRoute.splitId} /><PwaUpdatePrompt /></Suspense>
+  if (vpRoute) return <VolunteerPortalClaim token={vpRoute.token} splitId={vpRoute.splitId} />
   const attendToken = readAttendRoute()
-  if (attendToken) return <Suspense fallback={<ViewFallback />}><AttendancePortal token={attendToken} /><PwaUpdatePrompt /></Suspense>
+  if (attendToken) return <AttendancePortal token={attendToken} />
+  return null
+}
 
+export default function App() {
+  // No hooks here at all. Public pages bypass the auth gate entirely; the authed
+  // half lives in its own component so useSession() is always the first hook of
+  // the first render, in every branch. Previously useSession() sat *below* these
+  // early returns, so arriving at a public link and then clearing the hash changed
+  // the hook count between renders — a crash waiting on a route change.
+  const pub = publicRoute()
+  if (pub) return <Suspense fallback={<ViewFallback />}>{pub}<PwaUpdatePrompt /></Suspense>
+  return <AuthedApp />
+}
+
+function AuthedApp() {
   const { session, profile, sections } = useSession()
 
   if (session === undefined) {
