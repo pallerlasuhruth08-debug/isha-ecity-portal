@@ -417,7 +417,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
       for (const c of cm.data || []) (commentsByPerson[c.subject_person_id] ||= []).push(c.body)
 
       const teams = buildTeamRoster({ ev, blocks, assigns, people, blockPhases, eventPhases: ep.data || [], commentsByPerson })
-      teamsToPDF(ev.name, teams).save(`${safeName} - teams.pdf`)
+      ;(await teamsToPDF(ev.name, teams)).save(`${safeName} - teams.pdf`)
     } catch (e) { onToast('Could not export: ' + (e.message || e)) } finally { setExporting(false) }
   }
 
