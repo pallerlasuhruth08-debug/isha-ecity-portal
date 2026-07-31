@@ -13,9 +13,9 @@ export const PROGRAMS = [
   { key: 'yogasanas', label: 'Yogasanas', col: 'yogasanas_date', chip: 'Yogasanas' },
   { key: 'surya_kriya', label: 'Surya Kriya', col: 'surya_kriya_date', chip: 'Surya Kriya' },
   { key: 'guru_pooja', label: 'Guru Pooja', col: 'guru_puja_date', chip: 'Guru Pooja' },
-  { key: 'eoe', label: 'EOE', col: 'eoe_date', chip: 'EOE' },
+  { key: 'eoe', label: 'Ecstasy of Enlightenment', col: 'eoe_date', chip: 'EOE' },
   { key: 'angamardhana', label: 'Angamardhana', col: 'angamardhana_date', chip: 'Angamardhana' },
-  { key: 'lom', label: 'LOM', col: 'lom_date', chip: 'LOM' },
+  { key: 'lom', label: 'Lap of the Master', col: 'lom_date', chip: 'LOM' },
   { key: 'bhutha_shuddhi', label: 'Bhutha Shuddhi', col: 'bhutha_shuddhi_date', chip: 'Bhutha Shuddhi' },
 ]
 
