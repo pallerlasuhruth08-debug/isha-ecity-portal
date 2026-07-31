@@ -63,7 +63,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
       try {
         const [
           activeVols, newThisMonth, inNurturing, activitiesWeek, meditators,
-          quietVols, newIe, advanceNew, noPhone,
+          quietVols, newIe, advanceNew, noPhone, untriaged,
         ] = await Promise.all([
           countRows('people', (q) => q.eq('is_volunteer', true)),
           countRows('volunteer_profiles', (q) => q.gte('interest_date', monthStartISO())),
@@ -82,9 +82,11 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
           countRows('people', (q) => q.eq('is_meditator', true).gte('ie_date', daysAgoISO(60))),
           countRows('advanced_interest', (q) => q.eq('status', 'new')),
           countRows('people', (q) => q.eq('is_volunteer', true).is('phone', null)),
+          // The largest untouched queue in the app, and it was nowhere on this screen.
+          countRows('interest_inbox_list', (q) => q.eq('status_bucket', 'interested')),
         ])
         if (!alive) return
-        setKpis({ activeVols, newThisMonth, inNurturing, activitiesWeek, meditators, quietVols, newIe, advanceNew, noPhone })
+        setKpis({ activeVols, newThisMonth, inNurturing, activitiesWeek, meditators, quietVols, newIe, advanceNew, noPhone, untriaged })
       } catch (e) {
         if (alive) setErr(e.message || String(e))
       }
@@ -98,7 +100,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
     let alive = true
     ;(async () => {
       const [a, ph] = await Promise.all([
-        supabase.from('activities').select('id, name, activity_date, start_date, end_date').is('archived_at', null),
+        supabase.from('activities').select('id, name, center_id, activity_date, start_date, end_date').is('archived_at', null),
         supabase.from('event_phases').select('activity_id, kind, sort_order, start_by, finish_by, started_at, completed_at'),
       ])
       if (!alive || a.error || ph.error) return
@@ -113,6 +115,19 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
   // Every row is a live count with a real destination. Nothing here is hardcoded —
   // a row only appears when its query actually returns people.
   const attention = [
+    {
+      // 1,311 people raised their hand and are still sitting at "Interested". This
+      // was the biggest backlog in the product and the landing screen said nothing
+      // about it. It goes first: someone waiting for a reply outranks a report.
+      key: 'untriaged',
+      n: k.untriaged,
+      tag: 'INTEREST INBOX',
+      title: `${(k.untriaged || 0).toLocaleString('en-IN')} people offered to help and haven't been answered`,
+      body: 'Every one of these is someone who volunteered and is still waiting. Triaging a row takes one tap.',
+      cta: 'Open the interest inbox',
+      to: 'interest',
+      tint: 'var(--info-bg)', ink: 'var(--info-fg)',
+    },
     {
       key: 'quiet',
       n: k.quietVols,
@@ -219,9 +234,13 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
                 {/* A recurring series puts two "Monthly Satsang" rows side by side.
                     Without its own date they are the same row twice and neither can
                     be acted on with any confidence. */}
-                {(r.event.start_date || r.event.activity_date) && (
-                  <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>· {fmtDay(r.event.start_date || r.event.activity_date)}</span>
-                )}
+                {/* Date AND centre. Four "Monthly Satsang" rows on 2 Aug are four
+                    DIFFERENT centres, not duplicates — the Event Hub shows the centre
+                    and is legible; this row hid it and looked like a data error. */}
+                <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                  {(r.event.start_date || r.event.activity_date) ? `· ${fmtDay(r.event.start_date || r.event.activity_date)}` : ''}
+                  {r.event.center_id ? ` · ${r.event.center_id}` : ''}
+                </span>
                 {r.overdue > 0 && r.atRisk > 0 && (
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>· {r.atRisk} more at risk</span>
                 )}

@@ -186,7 +186,7 @@ export default function Advance({ me, onToast }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ fontSize: 14.5, fontWeight: 600, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person?.full_name || 'Unknown'}</div>
-                  <span className="pill" style={STATUS_PILL[r.status] || STATUS_PILL.new}>{r.status}</span>
+                  <span className="pill" style={STATUS_PILL[r.status] || STATUS_PILL.new}>{FUNNEL.find((f) => f.key === r.status)?.label || r.status}</span>
                 </div>
                 <div style={{ fontSize: 12.5, color: r.person?.phone ? 'var(--muted)' : '#B5532F', marginTop: 2 }}>{r.person?.phone || 'No phone'}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Added {ago(r.interest_date)}</div>

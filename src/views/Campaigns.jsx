@@ -358,12 +358,12 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
               <div style={{ display: 'flex', gap: 22, padding: '13px 0', borderTop: '1px solid #F2EBDD', borderBottom: '1px solid #F2EBDD', marginBottom: 13 }}>
                 {typeOf(c) === 'messaging' ? (
                   <>
-                    <Metric v={e.reach} label="reached" />
+                    <Metric v={e.reach} label="recipients" />
                     <Metric v={e.msgSent + e.msgResponded} label="sent" color="#8A6D1B" />
                   </>
                 ) : (
                   <>
-                    <Metric v={e.reach} label="reached" />
+                    <Metric v={e.reach} label="recipients" />
                     <Metric v={e.responsePct} label="responded" color="#4E7C3F" />
                     <Metric v={e.enrolled} label="enrolled" />
                   </>
@@ -897,7 +897,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             </>
           ) : (
             <>
-              <Metric v={c.reach} label="reached" />
+              <Metric v={c.reach} label="recipients" />
               <Metric v={c.responsePct} label="responded" color="#4E7C3F" />
               <Metric v={c.enrolled} label="enrolled" />
               <Metric v={c.callerList.length} label="callers" />

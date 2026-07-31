@@ -260,7 +260,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
           <div style={{ fontSize: 14, color: 'var(--muted)' }}>
             {loading ? 'Loading…' : (
               <>
-                {total} in care
+                {total} on record
                 <span className="mobile-hide"> · filter by programme and recent activity.</span>
               </>
             )}
