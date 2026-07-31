@@ -12,6 +12,14 @@ import PersonProfile from '../components/PersonProfile'
 import AssignNurturerDialog from '../components/AssignNurturerDialog'
 import { fetchActivityTypes } from '../lib/activityTypes'
 import { PROGRAMS, PROGRAM_BY_KEY, programsWithData } from '../lib/programs'
+import { COHORT_PROGRAMMES, eligibilityCohort } from '../lib/cohorts'
+
+// "samyama" -> "Ready now · Samyama"; "samyama:soon" -> "Ready soon · Samyama"
+function readyLabel(v) {
+  const [key, mode] = v.split(':')
+  const c = COHORT_PROGRAMMES.find((x) => x.key === key)
+  return `${mode === 'soon' ? 'Ready soon' : 'Ready now'} · ${c ? c.label : key}`
+}
 import { addRecipientsToCampaign } from '../lib/campaignRecipients'
 
 const STAGE_TO_STATUS = { New: 'new', 'Reached out': 'contacted', Oriented: 'matched', Active: 'active' }
@@ -34,7 +42,7 @@ const NIL = '00000000-0000-0000-0000-000000000000'
 // both use it, so the two can never drift out of sync (they previously did:
 // clearing wrote a stray `bsp` key and dropped `program`, leaving that select
 // uncontrolled).
-const INITIAL_FILTERS = { stage: '', centre: '', ie: '', program: '', last: '', tag: '', event: '', atype: '', sub: '', skill: '', nurt: '' }
+const INITIAL_FILTERS = { stage: '', centre: '', ie: '', program: '', last: '', tag: '', event: '', atype: '', sub: '', skill: '', nurt: '', ready: '' }
 
 export default function Volunteers({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone }) {
   const { isPhone } = useBreakpoint()
@@ -53,7 +61,8 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const [atypeIds, setAtypeIds] = useState(null) // activity-type filter -> person ids who attended that type
   const [subIds, setSubIds] = useState(null) // sub-activity filter -> person ids captured under that sub-activity
   const [skillIds, setSkillIds] = useState(null) // skill filter -> person ids who have that skill
-  const [coveredIds, setCoveredIds] = useState(null) // 'needs nurturer' -> person ids WITH an active nurturer (to exclude)
+  const [coveredIds, setCoveredIds] = useState(null)
+  const [readyIds, setReadyIds] = useState(null) // null = off, 'loading', array, or { tooBroad } 
 
   const sel = useTableSelection()
   const reqSeq = useRef(0)
@@ -231,6 +240,21 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     return () => { alive = false }
   }, [fil.nurt])
 
+  // Smart list: "ready for <programme>", resolved to person ids from the
+  // generated person_eligibility view so the cohort and the profile verdict
+  // come from the same rules.
+  useEffect(() => {
+    if (!fil.ready) { setReadyIds(null); return }
+    let alive = true
+    setReadyIds('loading')
+    const [key, mode] = fil.ready.split(':')
+    eligibilityCohort(key, mode === 'soon' ? 'ripening' : 'eligible').then((r) => {
+      if (!alive) return
+      setReadyIds(r.tooBroad ? { tooBroad: r.tooBroad } : r.ids || [])
+    })
+    return () => { alive = false }
+  }, [fil.ready])
+
   const applyFilters = useCallback(
     (q) => {
       if (Array.isArray(tagIds)) q = q.in('person_id', tagIds.length ? tagIds : [NIL])
@@ -239,6 +263,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (Array.isArray(subIds)) q = q.in('person_id', subIds.length ? subIds : [NIL])
       if (Array.isArray(skillIds)) q = q.in('person_id', skillIds.length ? skillIds : [NIL])
       if (fil.nurt === 'needs' && Array.isArray(coveredIds) && coveredIds.length) q = q.not('person_id', 'in', `(${coveredIds.join(',')})`)
+      if (Array.isArray(readyIds)) q = q.in('person_id', readyIds.length ? readyIds : [NIL])
       if (fil.centre) q = q.eq('center_id', fil.centre)
       if (fil.ie) q = q.gte('ie_date', `${fil.ie}-01-01`).lte('ie_date', `${fil.ie}-12-31`)
       if (PROGRAM_BY_KEY[fil.program]) q = q.not(PROGRAM_BY_KEY[fil.program].col, 'is', null)
@@ -249,7 +274,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (searchOr) q = q.or(searchOr)
       return q
     },
-    [fil, debounced, tagIds, eventIds, atypeIds, subIds, skillIds, coveredIds],
+    [fil, debounced, tagIds, eventIds, atypeIds, subIds, skillIds, coveredIds, readyIds],
   )
 
   const fetchAllIds = useCallback(async () => {
@@ -433,6 +458,10 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     { k: 'ie', all: 'Any IE year', chip: 'IE year', opts: opts.ieYears },
     { k: 'last', all: 'Active · any time', chip: 'Activity', opts: [{ v: '30', label: 'Active · 30 days' }, { v: '90', label: 'Active · 90 days' }, { v: 'quiet', label: 'Quiet · 90+ days' }] },
     { k: 'nurt', all: 'Nurturer · any', chip: 'Nurturer', opts: [{ v: 'needs', label: 'Needs a nurturer' }] },
+    { k: 'ready', all: 'Ready for · any', chip: 'Ready for', opts: COHORT_PROGRAMMES.flatMap((c) => [
+      { v: c.key, label: `Ready now · ${c.label}` },
+      ...(c.hasRipening ? [{ v: `${c.key}:soon`, label: `Ready soon · ${c.label}` }] : []),
+    ]) },
   ]
   // Removable chips for every active filter (+ the search term). Value is the human
   // label, resolved from each select's options.
@@ -471,6 +500,16 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       </div>
 
       {err && <ErrorCard>Couldn't load volunteers: {err}</ErrorCard>}
+
+      {/* A cohort past the cap is refused, not truncated: showing the first 2,000
+          would look like a finished list. Say the number and say why. */}
+      {readyIds && readyIds.tooBroad && (
+        <div className="card" style={{ padding: '11px 14px', marginBottom: 12, background: 'var(--pill-yellow-bg)', borderColor: '#E4D9A8' }}>
+          <span style={{ fontSize: 13, color: 'var(--pill-yellow-fg)' }}>
+            <strong>{readyIds.tooBroad.toLocaleString('en-IN')} people</strong> match “{readyLabel(fil.ready)}” — too broad to be a call list, so the filter is not applied. Narrow it with another filter first.
+          </span>
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10, alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: isPhone ? '11px 12px' : '8px 12px', minWidth: 190, flexBasis: isPhone ? '100%' : undefined }}>

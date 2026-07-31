@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Icon } from '../lib/icons'
 import { pill, initials, avatarFor } from '../lib/ui'
@@ -12,6 +12,14 @@ import PersonProfile from '../components/PersonProfile'
 import AssignNurturerDialog from '../components/AssignNurturerDialog'
 import { addRecipientsToCampaign } from '../lib/campaignRecipients'
 import { PROGRAMS, PROGRAM_BY_KEY, programsWithData } from '../lib/programs'
+import { COHORT_PROGRAMMES, eligibilityCohort } from '../lib/cohorts'
+
+// "samyama" -> "Ready now · Samyama"; "samyama:soon" -> "Ready soon · Samyama"
+function readyLabel(v) {
+  const [key, mode] = v.split(':')
+  const c = COHORT_PROGRAMMES.find((x) => x.key === key)
+  return `${mode === 'soon' ? 'Ready soon' : 'Ready now'} · ${c ? c.label : key}`
+}
 
 const RECENCY = [
   { key: 'any', label: 'Any time' },
@@ -48,6 +56,11 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const [progKeys, setProgKeys] = useState(() => new Set(['ie', 'bsp', 'shoonya', 'samyama'])) // programmes with data (dynamic)
   useEffect(() => { programsWithData().then(setProgKeys) }, [])
   const [recency, setRecency] = useState('any')
+  // Smart list: "ready for <programme>". Resolved to person ids from the
+  // generated person_eligibility view, so the cohort and the verdict on each
+  // profile come from the same rules.
+  const [ready, setReady] = useState('all')           // '' | '<key>' | '<key>:soon'
+  const [readyIds, setReadyIds] = useState(null)      // null = off, 'loading', array, or { tooBroad }
   const [needsNurt, setNeedsNurt] = useState(false)
   const [coveredIds, setCoveredIds] = useState(null) // person ids WITH an active nurturer (to exclude)
   const sel = useTableSelection()
@@ -98,6 +111,17 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   useEffect(() => {
     setPage(0)
   }, [pageSize])
+  useEffect(() => {
+    if (ready === 'all') { setReadyIds(null); return }
+    let alive = true
+    setReadyIds('loading')
+    const [key, mode] = ready.split(':')
+    eligibilityCohort(key, mode === 'soon' ? 'ripening' : 'eligible').then((r) => {
+      if (!alive) return
+      setReadyIds(r.tooBroad ? { tooBroad: r.tooBroad } : r.ids || [])
+    })
+    return () => { alive = false }
+  }, [ready])
 
   const applyFilters = useCallback(
     (q) => {
@@ -112,11 +136,12 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       if (recency === '90') q = q.gte('last_active_date', daysAgoISO(90))
       if (recency === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
       if (needsNurt && Array.isArray(coveredIds) && coveredIds.length) q = q.not('id', 'in', `(${coveredIds.join(',')})`)
+      if (Array.isArray(readyIds)) q = readyIds.length ? q.in('id', readyIds) : q.eq('id', '00000000-0000-0000-0000-000000000000')
       const searchOr = multiFieldOr(debounced, PEOPLE_SEARCH_FIELDS) // name|phone|email|pincode, sanitized
       if (searchOr) q = q.or(searchOr)
       return q
     },
-    [prog, recency, debounced, needsNurt, coveredIds, eventPersonIds],
+    [prog, recency, debounced, needsNurt, coveredIds, eventPersonIds, readyIds],
   )
 
   const fetchAllIds = useCallback(async () => {
@@ -233,8 +258,9 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     ...(eventId !== 'all' && attStatus !== 'all' ? [{ key: 'status', label: 'Status', value: attStatus === 'attended' ? 'Attended' : 'Registered', onRemove: () => setAttStatus('all') }] : []),
     ...(recency !== 'any' ? [{ key: 'recency', label: 'Activity', value: RECENCY.find((r) => r.key === recency)?.label || recency, onRemove: () => setRecency('any') }] : []),
     ...(needsNurt ? [{ key: 'nurt', label: 'Nurturer', value: 'Needs a nurturer', onRemove: () => setNeedsNurt(false) }] : []),
+    ...(ready !== 'all' ? [{ key: 'ready', label: 'Ready for', value: readyLabel(ready), onRemove: () => setReady('all') }] : []),
   ]
-  const clearAllFilters = () => { setSearch(''); setProg('all'); setEventId('all'); setAttStatus('all'); setRecency('any'); setNeedsNurt(false) }
+  const clearAllFilters = () => { setSearch(''); setProg('all'); setEventId('all'); setAttStatus('all'); setRecency('any'); setNeedsNurt(false); setReady('all') }
 
   return (
     <Pad>
@@ -270,12 +296,22 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
 
       {err && <ErrorCard>Couldn't load meditators: {err}</ErrorCard>}
 
+      {/* A cohort past the cap is refused, not truncated: showing the first 2,000
+          would look like a finished list. Say the number and say why. */}
+      {readyIds && readyIds.tooBroad && (
+        <div className="card" style={{ padding: '11px 14px', marginBottom: 12, background: 'var(--pill-yellow-bg)', borderColor: '#E4D9A8' }}>
+          <span style={{ fontSize: 13, color: 'var(--pill-yellow-fg)' }}>
+            <strong>{readyIds.tooBroad.toLocaleString('en-IN')} people</strong> match “{readyLabel(ready)}” — too broad to be a call list, so the filter is not applied. Narrow it with another filter first.
+          </span>
+        </div>
+      )}
+
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: isPhone ? '11px 12px' : '8px 12px', minWidth: 200, flexBasis: isPhone ? '100%' : undefined }}>
           {Icon.search(15)}
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email or pincode…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
-        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0) + (eventId !== 'all' ? 1 : 0)}>
+        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0) + (eventId !== 'all' ? 1 : 0) + (ready !== 'all' ? 1 : 0)}>
           <select value={prog} onChange={(e) => setProg(e.target.value)} style={selStyle}>
             <option value="all">All programmes</option>
             {PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => (<option key={p.key} value={p.key}>{p.label}</option>))}
@@ -297,6 +333,15 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
           <select value={needsNurt ? 'needs' : ''} onChange={(e) => setNeedsNurt(e.target.value === 'needs')} style={selStyle}>
             <option value="">Nurturer · any</option>
             <option value="needs">Needs a nurturer</option>
+          </select>
+          <select value={ready} onChange={(e) => setReady(e.target.value)} style={selStyle}>
+            <option value="all">Ready for · any</option>
+            {COHORT_PROGRAMMES.map((c) => (
+              <Fragment key={c.key}>
+                <option value={c.key}>Ready now · {c.label}</option>
+                {c.hasRipening && <option value={`${c.key}:soon`}>Ready soon · {c.label}</option>}
+              </Fragment>
+            ))}
           </select>
         </MobileFilterSheet>
       </div>
