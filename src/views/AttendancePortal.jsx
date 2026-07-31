@@ -135,26 +135,44 @@ export default function AttendancePortal({ token }) {
     } catch (e) { showToast('Could not add: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
-  // Scan a photo of a written attendance sheet via the ocr-attendance edge function
-  // (Google Gemini vision; key stays server-side). Returns { rows: [{name, phone}] }.
+  // Scan a photo of an attendance sheet with Tesseract.js — an open-source OCR
+  // engine that runs entirely in the browser (WASM). No API key, no server cost.
+  // Loaded on demand from a CDN; the recognized text is parsed into name/phone rows.
+  function parseRows(text) {
+    const out = []
+    for (const raw of String(text || '').split('\n')) {
+      const line = raw.trim()
+      if (line.length < 3) continue
+      const compact = line.replace(/[\s\-()]/g, '')
+      const pm = compact.match(/\d{10,}/)
+      const phone = pm ? pm[0].slice(-10) : ''
+      const name = line
+        .replace(/\+?\d[\d\s\-()]{6,}\d/g, ' ')
+        .replace(/^\s*\d+[.)]\s*/, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+      if ((name && name.length >= 2) || phone) out.push({ name, phone })
+    }
+    return out
+  }
+
   async function onScanFile(e) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
     setScan({ busy: true, rows: [], err: null })
     try {
-      const b64 = await new Promise((res, rej) => {
-        const r = new FileReader()
-        r.onload = () => res(String(r.result).split(',')[1])
-        r.onerror = rej
-        r.readAsDataURL(file)
-      })
-      const { data, error } = await supabase.functions.invoke('ocr-attendance', { body: { image: b64 } })
-      if (error) throw new Error(error.message || 'Scan failed')
-      if (data?.error) throw new Error(data.error)
-      const rows = (data?.rows || [])
-        .map((r) => ({ name: (r.name || '').trim(), phone: (r.phone || '').trim() }))
-        .filter((r) => r.name || r.phone)
+      if (!window.Tesseract) {
+        await new Promise((res, rej) => {
+          const sc = document.createElement('script')
+          sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
+          sc.onload = res
+          sc.onerror = () => rej(new Error('Could not load the OCR engine — check your connection.'))
+          document.head.appendChild(sc)
+        })
+      }
+      const { data: { text } } = await window.Tesseract.recognize(file, 'eng')
+      const rows = parseRows(text)
       if (rows.length === 0) { setScan({ busy: false, rows: [], err: 'No names read — try a clearer, straight-on photo.' }); return }
       setScan({ busy: false, rows, err: null })
     } catch (err) {
@@ -313,7 +331,7 @@ export default function AttendancePortal({ token }) {
                 <button onClick={() => scanInput.current?.click()} disabled={busy} style={{ width: '100%', minHeight: 44, marginBottom: 12, background: 'none', border: '1px dashed var(--border)', borderRadius: 10, fontSize: 14, fontWeight: 600, color: 'var(--rust)', cursor: 'pointer' }}>📷 Scan attendance sheet</button>
               )}
               {scan?.busy && (
-                <div className="card" style={{ padding: 14, marginBottom: 12, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>Reading the sheet… (5–15s)</div>
+                <div className="card" style={{ padding: 14, marginBottom: 12, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>Reading the sheet… (first scan downloads the OCR engine — up to a minute)</div>
               )}
               {scan && !scan.busy && scan.err && (
                 <div className="card" style={{ padding: 14, marginBottom: 12 }}>
