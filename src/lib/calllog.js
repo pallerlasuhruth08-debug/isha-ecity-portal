@@ -15,12 +15,12 @@ export const OUTCOME_TO_STATUS = {
 }
 
 export const STATUS_PILL = {
-  'To call': pill('#F1EADD', '#8C7E6B'),
-  Attempted: pill('#EFE6D6', '#8A7B63'),
-  'Call back': pill('#F6E8D8', '#C2691F'),
-  Replied: pill('#E9F0EF', '#2F6E5E'),
-  Enrolled: pill('#EAF2E5', '#4E7C3F'),
-  'Not now': pill('#FBE6E0', '#B5532F'),
+  'To call': pill('var(--neutral-bg)', 'var(--neutral-fg)'),
+  Attempted: pill('var(--neutral-bg)', 'var(--neutral-fg)'),
+  'Call back': pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)'),
+  Replied: pill('var(--info-bg)', 'var(--info-fg)'),
+  Enrolled: pill('var(--success-bg)', 'var(--success-fg)'),
+  'Not now': pill('var(--danger-bg)', 'var(--danger-fg)'),
 }
 
 export const STATUS_ORDER = { 'To call': 0, 'Call back': 1, Attempted: 2, Replied: 3, Enrolled: 4, 'Not now': 5 }
