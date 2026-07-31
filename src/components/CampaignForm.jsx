@@ -198,7 +198,7 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
           <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name || 'Unnamed'}</div>
           {sub && <div style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>{sub}</div>}
         </div>
-        <span style={srcBadge(c.source)}>{c.source === 'nurturing_team' ? 'Team' : 'Volunteer'}</span>
+        <span style={srcBadge(c.source)}>{c.source === 'nurturing_team' ? 'Care group' : 'Volunteer'}</span>
       </div>
     )
   }
@@ -277,7 +277,7 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
                 {selCallers.map((c) => (
                   <span key={ckey(c)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 600, background: '#FBF1E6', border: '1px solid #EBD9C2', borderRadius: 7, padding: '3px 8px' }}>
                     {c.name}
-                    <span style={srcBadge(c.source)}>{c.source === 'nurturing_team' ? 'Team' : 'Vol'}</span>
+                    <span style={srcBadge(c.source)}>{c.source === 'nurturing_team' ? 'Care' : 'Vol'}</span>
                     <span onClick={() => toggleCaller(c)} style={{ cursor: 'pointer', color: 'var(--muted)' }}>✕</span>
                   </span>
                 ))}
@@ -330,7 +330,7 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
               <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
                 <select value={bulkCaller} onChange={(e) => setBulkCaller(e.target.value)} style={{ ...field, flex: 1 }}>
                   <option value="">Bulk: assign all to…</option>
-                  {selCallers.map((c) => (<option key={ckey(c)} value={ckey(c)}>{c.name} ({c.source === 'nurturing_team' ? 'Team' : 'Vol'})</option>))}
+                  {selCallers.map((c) => (<option key={ckey(c)} value={ckey(c)}>{c.name} ({c.source === 'nurturing_team' ? 'Care' : 'Vol'})</option>))}
                 </select>
                 <button type="button" className="btn btn-ghost" disabled={!bulkCaller} onClick={() => setManualMap(Object.fromEntries(personIds.map((p) => [p, bulkCaller])))}>Apply to all</button>
               </div>

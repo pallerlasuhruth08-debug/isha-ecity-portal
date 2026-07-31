@@ -35,7 +35,7 @@ export default function AssignToTeamModal({ eventId, busy, onClose, onPick }) {
           <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Assign to team</h3>
           <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={onClose}>✕ Close</button>
         </div>
-        {!teams ? <Loading label="Loading teams…" /> : teams.length === 0 ? <Empty label="No teams yet — create one in the Teams tab first." /> : (
+        {!teams ? <Loading label="Loading event teams…" /> : teams.length === 0 ? <Empty label="No event teams yet — create one in the Event teams tab first." /> : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {teams.map((t) => {
               const full = t.filled >= (t.volunteers_needed || 0)

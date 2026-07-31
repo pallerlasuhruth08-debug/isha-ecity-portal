@@ -1,21 +1,14 @@
 import { Icon } from '../lib/icons'
-import { TAB_LABELS } from '../lib/roles'
+import { TAB_LABELS, NAV_GROUPS } from '../lib/roles'
 
-// Exact sidebar order. This array drives the visible order (tabs only filters
-// visibility). 'events' (standalone Attendance) is gone — attendance lives per-event
-// in the Event Hub now.
-const NAV = [
-  { key: 'dashboard', icon: 'dashboard' },
-  { key: 'hub', icon: 'hub' },
-  { key: 'volunteers', icon: 'volunteers' },
-  { key: 'meditators', icon: 'meditators' },
-  { key: 'campaigns', icon: 'campaigns' },
-  { key: 'interest', icon: 'interest' },
-  { key: 'nurturing', icon: 'nurturing' },
-  { key: 'advance', icon: 'advance' },
-  { key: 'unresolved', icon: 'unresolved' },
-  { key: 'admin', icon: 'admin' },
-]
+// Icon per tab. Order and grouping come from NAV_GROUPS in lib/roles.js so the
+// nav's shape lives with the role model rather than in a component.
+// 'events' (standalone Attendance) is gone — attendance lives per-event in the Hub.
+const ICON = {
+  dashboard: 'dashboard', hub: 'hub', volunteers: 'volunteers', meditators: 'meditators',
+  campaigns: 'campaigns', interest: 'interest', nurturing: 'nurturing',
+  advance: 'advance', unresolved: 'unresolved', admin: 'admin',
+}
 
 // variant 'rail' (default): the pinned in-flow sidebar (desktop full width,
 // tablet icon rail via the .app-sidebar media rule).
@@ -102,36 +95,32 @@ export default function Sidebar({ me, view, tabs, onNavigate, variant = 'rail', 
         </div>
       </div>
 
-      <div
-        className="sidebar-section-h"
-        style={{
-          fontSize: 10.5,
-          letterSpacing: '.12em',
-          textTransform: 'uppercase',
-          color: '#7C6A52',
-          padding: '4px 8px 8px',
-          fontWeight: 600,
-        }}
-      >
-        Coordinate
-      </div>
-
-      {/* aria-label + title carry the name when the tablet rail hides .sidebar-label,
-          so the nav is never a row of unlabelled icons; aria-current marks the page. */}
-      {NAV.filter((n) => tabs.includes(n.key)).map((n) => (
-        <button
-          key={n.key}
-          className={'navitem' + (view === n.key ? ' active' : '')}
-          onClick={() => go(n.key)}
-          aria-label={TAB_LABELS[n.key]}
-          title={TAB_LABELS[n.key]}
-          aria-current={view === n.key ? 'page' : undefined}
-        >
-          {Icon[n.icon](18)}
-          <span className="sidebar-label">{TAB_LABELS[n.key]}</span>
-        </button>
-      ))}
-
+      {/* One <nav> with a labelled group per region. Groups the role can't see
+          collapse away rather than showing an empty heading. On the tablet icon
+          rail the headings hide (CSS) but the <nav aria-label> keeps the grouping
+          announced, and aria-label/title on each button keep the icons named. */}
+      {NAV_GROUPS.map((group) => {
+        const items = group.tabs.filter((t) => tabs.includes(t))
+        if (!items.length) return null
+        return (
+          <nav key={group.label} aria-label={group.label} className="sidebar-group">
+            <div className="sidebar-section-h">{group.label}</div>
+            {items.map((key) => (
+              <button
+                key={key}
+                className={'navitem' + (view === key ? ' active' : '')}
+                onClick={() => go(key)}
+                aria-label={TAB_LABELS[key]}
+                title={TAB_LABELS[key]}
+                aria-current={view === key ? 'page' : undefined}
+              >
+                {Icon[ICON[key]](18)}
+                <span className="sidebar-label">{TAB_LABELS[key]}</span>
+              </button>
+            ))}
+          </nav>
+        )
+      })}
     </aside>
   )
 
