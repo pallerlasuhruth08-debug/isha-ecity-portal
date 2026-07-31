@@ -21,8 +21,36 @@ export const PROGRAMS = [
 
 export const PROGRAM_BY_KEY = Object.fromEntries(PROGRAMS.map((p) => [p.key, p]))
 
-// Returns the set of programme keys that currently have at least one person.
-export async function programsWithData() {
-  const { data } = await supabase.rpc('programs_with_data')
-  return new Set(data || ['ie', 'bsp', 'shoonya', 'samyama'])
+// How many people must have a programme recorded before a BLANK cell may be
+// read as "they haven't done it" rather than "we don't record this".
+//
+// Absolute, not a percentage — and that distinction is the whole point. Samyama
+// is a real, synced programme held by 245 of 6,515 people (3.8%); Shoonya 8%,
+// BSP 10%. A percentage floor of any useful size would mark genuinely small
+// programmes as untracked forever. 25 sits an order of magnitude below the
+// smallest real programme and an order of magnitude above a stray test record,
+// so it survives the first minutes of an Ishangam backfill instead of being
+// tripped by them.
+export const MIN_ROWS_TO_TRUST = 25
+
+// { programme key -> how many people have that date }. Aggregate counts only.
+export async function programmeCoverage() {
+  const { data, error } = await supabase.rpc('programme_coverage')
+  if (error || !data) return null // null = "unknown", callers fall back to trusting nothing
+  return new Map(data.map((r) => [r.programme_key, Number(r.n) || 0]))
+}
+
+// Two different questions, deliberately two different thresholds:
+//
+//   here, n > 0                    — should this appear in a filter dropdown?
+//                                    One person is reason enough to be able to
+//                                    filter for them.
+//   eligibility.js, n >= MIN_ROWS_TO_TRUST
+//                                  — may a blank cell be read as a real "no"?
+//                                    Much stricter, because being wrong here
+//                                    states a falsehood about everyone.
+export async function programsWithData(coverage) {
+  const cov = coverage || (await programmeCoverage())
+  if (!cov) return new Set(['ie', 'bsp', 'shoonya', 'samyama'])
+  return new Set([...cov].filter(([, n]) => n > 0).map(([k]) => k))
 }

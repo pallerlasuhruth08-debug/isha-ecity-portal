@@ -1,4 +1,4 @@
-import { PROGRAM_BY_KEY } from './programs'
+import { PROGRAM_BY_KEY, MIN_ROWS_TO_TRUST } from './programs'
 
 // ── What this is ────────────────────────────────────────────────────────────
 // Isha's advanced-programme prerequisites are a PUBLISHED chain over programme
@@ -131,15 +131,21 @@ export function labelOf(key) {
  * readyOn:  Date | null — set only when every blocker is 'too_recent', i.e. the
  *           person needs nothing more than time.
  *
- * `tracked` is the set of programme keys that hold data ANYWHERE in the dataset
- * (from programsWithData()). It exists because a blank column is not the same
- * fact as a blank cell: `yogasanas_date` is empty for all 6,515 people, so
- * "needs Yogasanas" would be asserted about everyone on evidence that does not
- * exist. When a prerequisite is untracked we report 'indeterminate' — we cannot
- * tell — instead of quietly claiming the person is not ready.
+ * `coverage` is Map(programme key -> how many people have that date), from
+ * programmeCoverage(). It exists because a blank column is not the same fact as
+ * a blank cell: `yogasanas_date` is empty for all 6,515 people, so "needs
+ * Yogasanas" would be asserted about everyone on evidence that does not exist.
+ *
+ * It is a COUNT rather than a boolean on purpose. "Does any row have this?" is
+ * true after the Ishangam backfill writes its first row, which would flip all
+ * 6,514 remaining people from "can't tell" to "not ready" — fixing the data
+ * would be what breaks the verdict. Requiring MIN_ROWS_TO_TRUST removes that
+ * cliff, and the count travels with the blocker so the screen can show it and
+ * be argued with.
+ *
  * Pass null to assume everything is tracked.
  */
-export function programmeState(person, key, today = new Date(), tracked = null) {
+export function programmeState(person, key, today = new Date(), coverage = null) {
   const done = completedOn(person, key)
   const rule = ELIGIBILITY_RULES[key]
   if (!rule) return { key, label: labelOf(key), status: 'no_rule', on: null, blockers: [], readyOn: null, rule: null }
@@ -148,7 +154,8 @@ export function programmeState(person, key, today = new Date(), tracked = null) 
   if (done && !rule.repeatable) return { key, label: labelOf(key), status: 'done', on: done, blockers: [], readyOn: null, rule }
   const lastOn = rule.repeatable ? done : null
 
-  const isTracked = (k) => !tracked || k === 'ie' || tracked.has(k)
+  const rowsFor = (k) => (coverage ? coverage.get(k) ?? 0 : Infinity)
+  const isTracked = (k) => k === 'ie' || rowsFor(k) >= MIN_ROWS_TO_TRUST
   const blockers = []
   for (const req of rule.requires) {
     const keys = req.anyOf || [req.key]
@@ -156,8 +163,9 @@ export function programmeState(person, key, today = new Date(), tracked = null) 
     const dates = keys.map((k) => completedOn(person, k)).filter(Boolean)
     if (dates.length === 0) {
       // Absent because they haven't done it, or absent because nobody records it?
-      const reason = keys.some(isTracked) ? 'missing' : 'untracked'
-      blockers.push({ key: keys[0], label, reason, readyOn: null })
+      const known = keys.some(isTracked)
+      const recordedFor = coverage ? Math.max(...keys.map(rowsFor)) : null
+      blockers.push({ key: keys[0], label, reason: known ? 'missing' : 'untracked', readyOn: null, recordedFor })
       continue
     }
     if (req.minDaysBefore) {
@@ -177,8 +185,8 @@ export function programmeState(person, key, today = new Date(), tracked = null) 
 }
 
 /** Every programme that has a rule, evaluated for one person. */
-export function eligibility(person, today = new Date(), tracked = null) {
-  const states = Object.keys(ELIGIBILITY_RULES).map((k) => programmeState(person, k, today, tracked))
+export function eligibility(person, today = new Date(), coverage = null) {
+  const states = Object.keys(ELIGIBILITY_RULES).map((k) => programmeState(person, k, today, coverage))
   // The ladder is the sadhana progression — only things whose answer DIFFERS
   // between people. Rare events (EOE, Lap of the Master) and open-to-everyone
   // hatha modules are excluded: their verdict is the same for everyone, so it is
