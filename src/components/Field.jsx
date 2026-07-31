@@ -1,4 +1,5 @@
 import { useId } from 'react'
+import { BRAND } from '../lib/ui'
 
 // A labelled form field. Every input the public ever sees goes through this.
 //
@@ -54,7 +55,7 @@ export default function Field({
 export function PublicShell({ children }) {
   return (
     <div className="public-shell">
-      <div className="public-brand">Isha Electronic City · Volunteer Care</div>
+      <div className="public-brand">{BRAND}</div>
       {children}
     </div>
   )
