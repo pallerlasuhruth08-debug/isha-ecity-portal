@@ -129,7 +129,8 @@ function Portal({ profile, email, sections }) {
   const toastTimer = useRef(null)
   const { isPhone } = useBreakpoint()
 
-  // Edge-swipe (mobile): a swipe starting at the right screen edge opens the tools drawer.
+  // Edge-swipe (mobile): a swipe starting at the right screen edge opens the drawer.
+  // An ACCELERATOR, not the way in — the Topbar button is the discoverable path.
   useEffect(() => {
     let startX = null
     const onStart = (e) => { const x = e.touches?.[0]?.clientX; startX = x != null && x > window.innerWidth - 26 ? x : null }
@@ -260,23 +261,16 @@ function Portal({ profile, email, sections }) {
           email={email}
           onSignOut={() => supabase.auth.signOut()}
           onMenu={isPhone ? () => setDrawerOpen(true) : undefined}
+          onOpenTools={() => setToolsOpen(true)}
         />
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <Suspense fallback={<ViewFallback />}>{content}</Suspense>
         </div>
       </main>
 
-      {/* Utility drawer (calendar + notes), separate from the left nav — a fixed
-          edge tab opens it (swipe from the right edge also works on mobile). */}
-      {!toolsOpen && (
-        <button
-          onClick={() => setToolsOpen(true)}
-          aria-label="Open tools"
-          style={{ position: 'fixed', right: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 130, background: '#241B14', color: '#F6ECDC', border: 'none', borderRadius: '10px 0 0 10px', padding: '14px 7px', cursor: 'pointer', writingMode: 'vertical-rl', fontSize: 11.5, fontWeight: 700, letterSpacing: '.08em', boxShadow: '-2px 2px 10px rgba(0,0,0,0.18)' }}
-        >
-          ✦ TOOLS
-        </button>
-      )}
+      {/* Utility drawer (calendar + notes), separate from the left nav. Opened from
+          the labelled Topbar button; the right-edge swipe below stays as a shortcut
+          for people who already know it. */}
       <UtilityDrawer
         open={toolsOpen}
         onClose={() => setToolsOpen(false)}
