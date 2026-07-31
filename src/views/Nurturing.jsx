@@ -176,7 +176,7 @@ function TeamDetail({ team, isCoordinator, onBack, onOpenNurturer, onToast, onOp
                 <div onClick={() => onOpenNurturer(m.person?.id)} style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0, cursor: 'pointer' }}>
                   <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--green-2)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(m.person?.full_name || '?')}</div>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 16, fontWeight: 600 }}>{m.person?.full_name || 'Unknown'}{m.is_poc && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), marginLeft: 8 }}>POC</span>}</div>
+                    <div style={{ fontSize: 16, fontWeight: 600 }}>{m.person?.full_name || 'Unknown'}{m.is_poc && <span className="pill" style={{ ...pill('var(--success-bg)', 'var(--success-fg)'), marginLeft: 8 }}>POC</span>}</div>
                     <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>{genderOf(m.person?.gender)} · {m.person?.phone || 'no phone'}{m.person?.pincode ? ` · ${m.person.pincode}` : ''}</div>
                     <div style={{ fontSize: 12, color: 'var(--orange)', marginTop: 2 }}>view held people →</div>
                   </div>
@@ -193,7 +193,7 @@ function TeamDetail({ team, isCoordinator, onBack, onOpenNurturer, onToast, onOp
                 <div onClick={() => onOpenNurturer(m.person?.id)} style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0, cursor: 'pointer' }}>
                   <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--green-2)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(m.person?.full_name || '?')}</div>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 16, fontWeight: 600 }}>{m.person?.full_name || 'Unknown'}{m.is_poc && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), marginLeft: 8 }}>POC</span>}</div>
+                    <div style={{ fontSize: 16, fontWeight: 600 }}>{m.person?.full_name || 'Unknown'}{m.is_poc && <span className="pill" style={{ ...pill('var(--success-bg)', 'var(--success-fg)'), marginLeft: 8 }}>POC</span>}</div>
                     <div style={{ fontSize: 12, color: 'var(--orange)' }}>view held people →</div>
                   </div>
                 </div>

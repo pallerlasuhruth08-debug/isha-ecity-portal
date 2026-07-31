@@ -131,7 +131,7 @@ export default function Dashboard({ me, onToast, onNavigate }) {
           value={k.activeVols}
           label="Active volunteers"
           badge="+12"
-          badgeStyle={pill('#EAF2E5', '#4E7C3F')}
+          badgeStyle={pill('var(--success-bg)', 'var(--success-fg)')}
         />
         <KpiCard
           loading={loading}
@@ -141,7 +141,7 @@ export default function Dashboard({ me, onToast, onNavigate }) {
           value={k.newThisMonth}
           label="New this month"
           badge="new"
-          badgeStyle={pill('#FBEAD9', '#C28A2A')}
+          badgeStyle={pill('var(--pill-warm-bg)', 'var(--pill-warm-fg)')}
         />
         <KpiCard
           loading={loading}
@@ -172,7 +172,7 @@ export default function Dashboard({ me, onToast, onNavigate }) {
           value={k.meditators}
           label="Meditators in care"
           badge="+24"
-          badgeStyle={pill('#EAF2E5', '#4E7C3F')}
+          badgeStyle={pill('var(--success-bg)', 'var(--success-fg)')}
         />
         <KpiCard
           loading={loading}
@@ -182,14 +182,14 @@ export default function Dashboard({ me, onToast, onNavigate }) {
           value={k.ivr}
           label="IVR callbacks"
           badge="pending"
-          badgeStyle={pill('#FBEAD9', '#C28A2A')}
+          badgeStyle={pill('var(--pill-warm-bg)', 'var(--pill-warm-fg)')}
         />
       </div>
 
       {/* Recommended actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
         <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Recommended actions</h3>
-        <span className="pill" style={pill('#F1EADD', '#8C7E6B')}>
+        <span className="pill" style={pill('var(--neutral-bg)', 'var(--neutral-fg)')}>
           AUTO-INSIGHT
         </span>
       </div>

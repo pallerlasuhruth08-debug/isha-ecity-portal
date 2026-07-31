@@ -246,7 +246,7 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
     <div className="card" style={{ padding: 18 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>To-do</h3>
-        <span className="pill" style={{ ...pill('#F1EADD', '#8C7E6B'), fontSize: 11 }}>{done}/{rows.length} done</span>
+        <span className="pill" style={{ ...pill('var(--neutral-bg)', 'var(--neutral-fg)'), fontSize: 11 }}>{done}/{rows.length} done</span>
       </div>
       {rows.length === 0 && <Empty label="No to-dos yet — add the first below." />}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -302,7 +302,7 @@ function TodoRow({ r, isCoordinator, onToggle, onStar, onText, onDate, onDelete,
           ) : (
             <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: r.done ? 'var(--muted-2)' : 'var(--ink)', textDecoration: r.done ? 'line-through' : 'none' }}>{r.text}</span>
           )}
-          {(r.linked_id || r.linked_type) && <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), fontSize: 9.5, flexShrink: 0 }}>{r.action_kind || 'linked'} ✓</span>}
+          {(r.linked_id || r.linked_type) && <span className="pill" style={{ ...pill('var(--success-bg)', 'var(--success-fg)'), fontSize: 9.5, flexShrink: 0 }}>{r.action_kind || 'linked'} ✓</span>}
         </div>
         {/* Priority star: a primary, always-visible action — never hidden behind the menu. */}
         <button className="tap44" title={r.is_priority ? 'Unstar' : 'Mark as priority'} disabled={!isCoordinator} onClick={onStar}

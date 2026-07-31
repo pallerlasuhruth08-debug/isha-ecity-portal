@@ -155,7 +155,7 @@ export function Detail({ activity, onBack, me, isCoordinator, types = [], onActi
         <div className="card" style={{ padding: 24, marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ minWidth: 0 }}>
-              <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>{activity.name}{activity.archived_at && <span className="pill" style={{ ...pill('#F1EADD', '#8C7E6B'), marginLeft: 10, verticalAlign: 'middle' }}>archived</span>}</h2>
+              <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>{activity.name}{activity.archived_at && <span className="pill" style={{ ...pill('var(--neutral-bg)', 'var(--neutral-fg)'), marginLeft: 10, verticalAlign: 'middle' }}>archived</span>}</h2>
               <div style={{ fontSize: 13, color: 'var(--muted)' }}>{fmtDate(activity.activity_date)} · {activity.center_id}</div>
             </div>
           </div>
@@ -345,8 +345,8 @@ function AttendanceSessions({ activity, types = [], me, isCoordinator = false, o
                 <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title || typeLabel(s.activity_type_id) || 'Attendance'}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fmtDay(s.session_date)} · {s.center_id || '—'}{s.activity_type_id ? ` · ${typeLabel(s.activity_type_id)}` : ''}</div>
               </div>
-              <span className="pill" style={{ ...(s.type === 'meditator' ? pill('#E9F0EF', '#2F6E5E') : pill('#F6E8D8', '#C2691F')), flexShrink: 0 }}>{s.type === 'meditator' ? 'participant' : 'volunteer'}</span>
-              <span className="pill" style={{ ...pill('#EAF2E5', '#4E7C3F'), flexShrink: 0 }}>{counts[s.id] || 0} present</span>
+              <span className="pill" style={{ ...(s.type === 'meditator' ? pill('var(--info-bg)', 'var(--info-fg)') : pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)')), flexShrink: 0 }}>{s.type === 'meditator' ? 'participant' : 'volunteer'}</span>
+              <span className="pill" style={{ ...pill('var(--success-bg)', 'var(--success-fg)'), flexShrink: 0 }}>{counts[s.id] || 0} present</span>
 
               {/* Desktop: inline actions when space allows. */}
               <div className="desktop-only" style={{ gap: 8, flexShrink: 0 }}>

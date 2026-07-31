@@ -6,7 +6,7 @@ import { STATUS_ORDER, OUTCOME_TO_STATUS, pillFor } from '../lib/calllog'
 import { MESSAGE_STATUS, pillForMessage, labelForMessage } from '../lib/messageStatus'
 import { fillTemplate } from '../lib/phone'
 import { useBreakpoint } from '../lib/useBreakpoint'
-import { Pad, ErrorCard } from '../components/View'
+import { Pad, ErrorCard, Empty, Pager } from '../components/View'
 import ReachButtons from '../components/ReachButtons'
 import CallLogDialog from '../components/CallLogDialog'
 import CampaignScriptPanel from '../components/CampaignScriptPanel'
@@ -678,6 +678,9 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
   const [lastChannel, setLastChannel] = useState({}) // journeyId -> 'sms'|'whatsapp', last Message/WhatsApp link tapped
   const [assigneeFilter, setAssigneeFilter] = useState('all') // messaging only: 'all' | claimed_by_name | '__unassigned__'
   useEffect(() => { setAssigneeFilter('all') }, [c.id])
+  const [callPage, setCallPage] = useState(0)
+  const [callPageSize, setCallPageSize] = useState(25)
+  useEffect(() => { setCallPage(0) }, [callFilter, assigneeFilter, c.id])
   const myId = me?.id
   const myName = me?.full_name || ''
   const messaging = c.campaign_type === 'messaging' // WhatsApp/SMS only — no call button, script or log
@@ -764,6 +767,10 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
     .sort((a, b) => messaging
       ? (MESSAGE_ORDER[a.messageStatus] ?? 9) - (MESSAGE_ORDER[b.messageStatus] ?? 9)
       : (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9))
+  const callTotal = shown.length
+  const callPageCount = Math.max(1, Math.ceil(callTotal / callPageSize))
+  const safeCallPage = Math.min(callPage, callPageCount - 1)
+  const pageShown = shown.slice(safeCallPage * callPageSize, safeCallPage * callPageSize + callPageSize)
 
   // ---- coordinator mutations (RLS is the real backstop) ----
   async function removeRecipient(row) {
@@ -927,7 +934,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           </div>
         )}
         {isCoordinator && unassignedCount > 0 && (
-          <span className="pill" style={{ background: '#FBE6E0', color: 'var(--red)', fontWeight: 600 }}>{unassignedCount} unassigned ⚠</span>
+          <span className="pill" style={{ background: 'var(--danger-bg)', color: 'var(--danger-fg)', fontWeight: 600 }}>{unassignedCount} unassigned ⚠</span>
         )}
       </div>
       <div className="scroll-tabs" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', gap: 8, marginBottom: 14 }}>
@@ -935,7 +942,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           const on = callFilter === f.key
           const n = f.key === 'all' ? c.contacts.length : counts[f.key] || 0
           return (
-            <button key={f.key} onClick={() => setCallFilter(f.key)} className="btn" style={{ padding: '7px 13px', fontSize: 12, borderRadius: 20, background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', border: on ? 'none' : '1px solid var(--border)', flexShrink: 0 }}>
+            <button key={f.key} onClick={() => setCallFilter(f.key)} aria-pressed={on} className="btn" style={{ padding: '7px 13px', fontSize: 'var(--fs-caption)', borderRadius: 'var(--radius-pill)', background: on ? 'var(--sb-bg)' : '#fff', color: on ? 'var(--sb-ink)' : 'var(--ink-soft)', border: on ? 'none' : '1px solid var(--border)', flexShrink: 0 }}>
               {f.label}{n > 0 && <span style={{ opacity: 0.6 }}> {n}</span>}
             </button>
           )
@@ -960,9 +967,9 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             {isCoordinator && <span>Actions</span>}
           </div>
         )}
-        {shown.length === 0 && <div style={{ padding: 26, textAlign: 'center', fontSize: 14, color: 'var(--muted-2)' }}>No contacts in this status.</div>}
+        {shown.length === 0 && <Empty label="No contacts in this status." />}
 
-        {isPhone && shown.map((p, i) => (
+        {isPhone && pageShown.map((p, i) => (
           <div key={p.journeyId} className="rowhover" onClick={() => setDetailFor(p)} style={{ padding: '8px 14px', borderBottom: '1px solid var(--border-soft)', cursor: 'pointer' }}>
             {/* Row 1: avatar, name + phone, status */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -991,7 +998,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           </div>
         ))}
 
-        {!isPhone && shown.map((p, i) => (
+        {!isPhone && pageShown.map((p, i) => (
           <div key={p.journeyId} className="rowhover" style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12, padding: '13px 22px', borderBottom: '1px solid var(--border-soft)', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
               <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarFor(i), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(p.name)}</div>
@@ -1035,6 +1042,10 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           </div>
         ))}
       </div>
+
+      {callTotal > 0 && (
+        <Pager page={safeCallPage} pageCount={callPageCount} total={callTotal} onPage={setCallPage} pageSize={callPageSize} onPageSize={setCallPageSize} noun="contacts" />
+      )}
 
       {/* removed (soft-deleted) recipients — history preserved */}
       {isCoordinator && c.removed.length > 0 && (

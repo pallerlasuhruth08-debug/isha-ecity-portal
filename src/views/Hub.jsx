@@ -205,7 +205,7 @@ function EventCampaignsTab({ ev, isCoordinator, onOpenCampaign, onStartCampaign 
         <div className="card" style={{ padding: 16 }}>
           {camps.map((c) => (
             <Row key={c.id} onClick={() => onOpenCampaign && onOpenCampaign(c.id)}
-              main={<>{c.name}{c.is_test && <span className="pill" style={{ ...pill('#F6E0CE', 'var(--red)'), marginLeft: 6, fontSize: 12 }}>test</span>}</>}
+              main={<>{c.name}{c.is_test && <span className="pill" style={{ ...pill('var(--pill-red-bg)', 'var(--red)'), marginLeft: 6, fontSize: 12 }}>test</span>}</>}
               side={<span className="pill" style={statusPill(c.status)}>{c.status}</span>} />
           ))}
         </div>
@@ -462,7 +462,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: unassigned.length ? 10 : 0, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 14, fontWeight: 600 }}>Unassigned Volunteers</span>
-            <span className="pill" style={unassigned.length ? pill('#FBEAD9', '#C2691F') : pill('#EAF2E5', '#4E7C3F')}>{unassigned.length}</span>
+            <span className="pill" style={unassigned.length ? pill('var(--pill-warm-bg)', 'var(--pill-orange-fg)') : pill('var(--success-bg)', 'var(--success-fg)')}>{unassigned.length}</span>
             <button className="btn btn-ghost tap44" disabled={exporting} onClick={exportUnassigned} title="CSV of unassigned volunteers — same columns as the team roster CSV, minus email."
               style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 11px', opacity: exporting ? 0.6 : 1 }}>⬇ CSV</button>
           </div>
@@ -755,8 +755,8 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
             {requiredDaysLabel}
           </div>
         </div>
-        {locked && <span className="pill" style={{ ...pill('#E7E0F0', '#5B4B8A'), flexShrink: 0 }} title={block.locked_by ? undefined : 'Roster finalised'}>🔒 Locked</span>}
-        <span className="pill" style={{ ...(full ? pill('#EAF2E5', '#4E7C3F') : pill('#FBEAD9', '#C2691F')), flexShrink: 0 }}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
+        {locked && <span className="pill" style={{ ...pill('var(--pill-purple-bg)', 'var(--pill-purple-fg)'), flexShrink: 0 }} title={block.locked_by ? undefined : 'Roster finalised'}>🔒 Locked</span>}
+        <span className="pill" style={{ ...(full ? pill('var(--success-bg)', 'var(--success-fg)') : pill('var(--pill-warm-bg)', 'var(--pill-orange-fg)')), flexShrink: 0 }}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
 
         {/* All team actions live behind one 3-dot menu (desktop + mobile). */}
         <div style={{ flexShrink: 0 }}>
