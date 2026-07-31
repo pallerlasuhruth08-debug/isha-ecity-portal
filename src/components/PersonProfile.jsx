@@ -7,7 +7,7 @@ import CampaignForm from './CampaignForm'
 import AssignNurturerDialog from './AssignNurturerDialog'
 import SidePanel, { PanelHeader } from './SidePanel'
 import { ensureSkill } from '../lib/skills'
-import { PROGRAMS, programsWithData } from '../lib/programs'
+import { PROGRAMS, programmeCoverage } from '../lib/programs'
 import { eligibility } from '../lib/eligibility'
 
 const REACH = [
@@ -35,7 +35,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
   const [newSkill, setNewSkill] = useState('')
   const [events, setEvents] = useState([])
   const [calls, setCalls] = useState([])
-  const [tracked, setTracked] = useState(null) // programme keys with data anywhere; null until known
+  const [coverage, setCoverage] = useState(null) // Map(programme -> people recorded); null until known
   const [err, setErr] = useState(null)
   const [newTag, setNewTag] = useState('')
   const [showCampaign, setShowCampaign] = useState(false)
@@ -115,10 +115,10 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
 
   useEffect(() => { load() }, [load])
 
-  // Which programmes are recorded at all. Independent of the person, so it loads
-  // once and is never re-fetched per profile. Programme Path needs it to tell
-  // "they haven't done this" apart from "nobody records this".
-  useEffect(() => { let live = true; programsWithData().then((s) => { if (live) setTracked(s) }).catch(() => {}); return () => { live = false } }, [])
+  // How widely each programme is recorded. Independent of the person, so it
+  // loads once and is never re-fetched per profile. Programme Path needs it to
+  // tell "they haven't done this" apart from "nobody records this".
+  useEffect(() => { let live = true; programmeCoverage().then((c) => { if (live) setCoverage(c) }).catch(() => {}); return () => { live = false } }, [])
 
   async function addTag() {
     const tag = newTag.trim(); if (!tag) return
@@ -261,7 +261,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
               so what a person is ready for is a computation, not a coordinator's
               guess. Programmes without a published rule are omitted on purpose. */}
           <Section title="Programme Path">
-            <PathPanel person={p} tracked={tracked} />
+            <PathPanel person={p} coverage={coverage} />
           </Section>
 
           <Section title="Other Information">
@@ -389,8 +389,8 @@ function Section({ title, count, children }) {
 // can act on: ready now, ready on a date (needs only time), and blocked on a
 // named prerequisite. Completed programmes already appear under Key Information,
 // so only the once-in-a-lifetime warning is repeated here.
-function PathPanel({ person, tracked }) {
-  const e = eligibility(person, new Date(), tracked)
+function PathPanel({ person, coverage }) {
+  const e = eligibility(person, new Date(), coverage)
   const rows = [
     ...e.eligible.filter((s) => !s.rule.entry).map((s) => ({ ...s, tone: 'ready' })),
     ...e.blocked.map((s) => ({ ...s, tone: s.readyOn ? 'ripening' : 'blocked' })),
@@ -429,13 +429,14 @@ function explainBlockers(r) {
   if (!r.blockers.length) return ''
   const missing = r.blockers.filter((b) => b.reason === 'missing').map((b) => b.label)
   const recent = r.blockers.filter((b) => b.reason === 'too_recent')
-  const untracked = r.blockers.filter((b) => b.reason === 'untracked').map((b) => b.label)
   const parts = []
   if (missing.length) parts.push(`needs ${missing.join(', ')}`)
   for (const b of recent) parts.push(`${b.label} must be ${b.minDaysBefore} days prior`)
   // Say what we know AND why the verdict still isn't safe — an untracked column
   // is a gap in the sync, and naming it is the only way it ever gets fixed.
-  if (untracked.length) parts.push(`${untracked.join(', ')} ${untracked.length > 1 ? 'are' : 'is'} not recorded for anyone yet`)
+  for (const b of r.blockers.filter((x) => x.reason === 'untracked')) {
+    parts.push(b.recordedFor ? `${b.label} is recorded for only ${b.recordedFor} people — too few to judge` : `${b.label} is not recorded for anyone yet`)
+  }
   return parts.join(' · ')
 }
 
