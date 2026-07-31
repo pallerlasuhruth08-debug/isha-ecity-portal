@@ -127,6 +127,41 @@ export function flaggedPhases(events, phasesByEvent, t = todayISO()) {
   return out.sort((a, b) => (a.flag === 'overdue' ? 0 : 1) - (b.flag === 'overdue' ? 0 : 1))
 }
 
+// Has the event itself already finished? A phase on a finished event is not work
+// that is late — it is work that will never be done, and it does not belong on
+// anyone's worklist. Without this, "IE - 2 day (Dec 2025)" was still shouting
+// "Overdue · start by 29 Nov" in July.
+export function eventIsOver(e, t = todayISO()) {
+  const last = e?.end_date || e?.start_date || e?.activity_date
+  return !!last && String(last).slice(0, 10) < t
+}
+
+/**
+ * Flagged phases rolled up to ONE ROW PER EVENT, which is how a coordinator
+ * thinks about it: "Guru Purnima prep is behind", not four separate rows for
+ * Pre-far, Pre-near, Day-of and Post. Finished events are dropped entirely.
+ *
+ * Sorted by the soonest date anyone is late against, so the top of the list is
+ * the thing to deal with first. → [{ event, count, overdue, atRisk, earliest }]
+ */
+export function eventsNeedingAttention(events, phasesByEvent, t = todayISO()) {
+  const byEvent = new Map()
+  for (const { event, phase, flag } of flaggedPhases(events, phasesByEvent, t)) {
+    if (eventIsOver(event, t)) continue
+    const due = (flag === 'overdue' ? phase.start_by : phase.finish_by) || null
+    const row = byEvent.get(event.id) || { event, count: 0, overdue: 0, atRisk: 0, earliest: null }
+    row.count += 1
+    if (flag === 'overdue') row.overdue += 1
+    else row.atRisk += 1
+    if (due && (!row.earliest || due < row.earliest)) row.earliest = due
+    byEvent.set(event.id, row)
+  }
+  return [...byEvent.values()].sort((a, b) => {
+    if (!!b.overdue !== !!a.overdue) return b.overdue - a.overdue   // anything overdue first
+    return String(a.earliest || '9999').localeCompare(String(b.earliest || '9999'))
+  })
+}
+
 // The event's headline phase for the coarse pill: the window we're inside, else
 // "Upcoming" (before the first) / "Done" (after the last). Falls back to the
 // date-derived stage when the event has no phases at all.
