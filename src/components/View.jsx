@@ -169,9 +169,34 @@ export function PagerPill({ page, pageCount, onPage, pageSize, onPageSize, selec
 }
 
 
-export function Pager({ page, pageCount, total, onPage, pageSize, onPageSize, noun = 'rows' }) {
+export function Pager({ page, pageCount, total, onPage, pageSize, onPageSize, noun = 'rows', selection = null }) {
   const from = total === 0 ? 0 : page * pageSize + 1
   const to = Math.min(total, (page + 1) * pageSize)
+  // Shared sticky-bottom bar geometry — pagination and selection are two modes of
+  // the SAME bar, so a selection never spawns a separate floating popover.
+  const barBase = { position: 'sticky', bottom: 12, zIndex: 20, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '11px 14px', borderRadius: 12, margin: '12px 0 0', boxShadow: '0 6px 20px rgba(0,0,0,.12)' }
+  // Selection mode: same bar, accent fill, page nav hidden ("select all N matching"
+  // removes the need to paginate mid-selection).
+  if (selection && selection.count > 0) {
+    const { count, total: selTotal, isFullySelected, onSelectAll, onClear, actions = [] } = selection
+    return (
+      <nav aria-label="Selection actions" style={{ ...barBase, background: 'linear-gradient(150deg, var(--orange-2), var(--orange-3))', border: '1px solid var(--orange-3)', color: '#fff' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>
+          {isFullySelected ? `All ${count} selected` : `${count} selected`}
+          {!isFullySelected && onSelectAll && selTotal > count && (
+            <button onClick={onSelectAll} style={{ background: 'none', border: 'none', color: '#fff', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer', fontSize: 13, fontFamily: 'inherit', marginLeft: 8 }}>Select all {selTotal}</button>
+          )}
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {actions.map((a) => (
+            <button key={a.label} onClick={a.onClick} disabled={a.disabled}
+              style={{ border: a.primary ? '1px solid #fff' : '1px solid rgba(255,255,255,.55)', background: a.primary ? '#fff' : 'transparent', color: a.primary ? 'var(--orange-3)' : '#fff', fontSize: 12.5, fontWeight: 600, padding: '7px 13px', borderRadius: 999, cursor: a.disabled ? 'default' : 'pointer', fontFamily: 'inherit', opacity: a.disabled ? 0.6 : 1, whiteSpace: 'nowrap' }}>{a.label}</button>
+          ))}
+          <button onClick={onClear} aria-label="Clear selection" style={{ width: 28, height: 28, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.25)', color: '#fff', cursor: 'pointer', flexShrink: 0, fontSize: 13 }}>✕</button>
+        </div>
+      </nav>
+    )
+  }
   const selStyle = { padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--panel-2)', color: 'var(--ink-soft)', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer' }
   const win = (() => { const c = page + 1, keep = new Set([1, pageCount, c, c - 1, c + 1]); const a = [...keep].filter((p) => p >= 1 && p <= pageCount).sort((x, y) => x - y); const out = []; let prev = 0; for (const p of a) { if (p - prev > 1) out.push('…'); out.push(p); prev = p } return out })()
   const pbtn = (label, opt = {}) => (
@@ -179,7 +204,7 @@ export function Pager({ page, pageCount, total, onPage, pageSize, onPageSize, no
       style={{ minWidth: 30, height: 30, padding: '0 8px', borderRadius: 8, fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: opt.disabled ? 'default' : 'pointer', border: opt.current ? 'none' : '1px solid var(--border)', background: opt.current ? 'var(--sb-bg)' : 'var(--panel-2)', color: opt.current ? '#f6ecdc' : 'var(--ink-soft)', opacity: opt.disabled ? 0.4 : 1 }}>{label}</button>
   )
   return (
-    <nav aria-label="Pagination" style={{ position: 'sticky', bottom: 12, zIndex: 20, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '11px 14px', background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 12, margin: '12px 0 0', boxShadow: '0 6px 20px rgba(0,0,0,.12)' }}>
+    <nav aria-label="Pagination" style={{ ...barBase, background: 'var(--panel-2)', border: '1px solid var(--border)' }}>
       <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 600 }}>Showing {from}–{to} of <b style={{ color: 'var(--ink)' }}>{total}</b> {noun}</span>
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} aria-label="Rows per page" style={selStyle}>
@@ -222,15 +247,5 @@ export function ActiveFilters({ items = [], onClear }) {
     </div>
   )
 }
-export function SelectionBar({ count = 0, total, isFullySelected, onSelectAll, onClear, actions = [] }) {
-  if (!count) return null
-  return (
-    <div className="pager-pill pager-pill-select pager-pill-visible">
-      <div className="pager-pill-select-top">
-        <span className="pager-pill-label">{isFullySelected ? `All ${count} selected` : `${count} selected`}{!isFullySelected && onSelectAll && total > count && (<button className="pager-pill-link" onClick={onSelectAll}>· Select all {total}</button>)}</span>
-        <button className="pager-pill-clear" onClick={onClear} aria-label="Clear selection">✕</button>
-      </div>
-      {actions.length > 0 && (<div className="pager-pill-actions">{actions.map((a) => (<button key={a.label} className={'pager-pill-btn' + (a.primary ? ' pager-pill-btn-primary' : '')} disabled={a.disabled} onClick={a.onClick}>{a.label}</button>))}</div>)}
-    </div>
-  )
-}
+// SelectionBar was folded into <Pager selection={…} /> — selection is now a mode of
+// the sticky pager bar, not a separate floating popover.
