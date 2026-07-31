@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { usePagedQuery, useDebounced, fetchAllMatchingIds } from '../lib/usePagedQuery'
+import AssignNurturerDialog from '../components/AssignNurturerDialog'
+import CallLogDialog from '../components/CallLogDialog'
 import { supabase } from '../lib/supabase'
 import { pill, initials, avatarFor } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty, Checkbox, Pager } from '../components/View'
@@ -94,8 +96,8 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
   const [selRow, setSelRow] = useState(null)
   const [busy, setBusy] = useState(false)
   const [uid, setUid] = useState(null)
-  const [nurturers, setNurturers] = useState([])
-  const [nurSel, setNurSel] = useState('')
+  const [assignFor, setAssignFor] = useState(null)   // person id -> shared AssignNurturerDialog
+  const [logFor, setLogFor] = useState(null)         // {personId, name} -> shared CallLogDialog
   const [newTag, setNewTag] = useState('')
   const [skills, setSkills] = useState([])
   const [skillVocab, setSkillVocab] = useState([])
@@ -110,7 +112,6 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUid(data.user?.id || null))
-    supabase.from('nurturers').select('id, full_name').order('full_name').then(({ data }) => setNurturers(data || []))
     fetchSkills().then(setSkillVocab).catch(() => setSkillVocab([]))
   }, [])
 
@@ -319,18 +320,26 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
     } catch (e) { onToast('Could not save comment: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
+  // Opens the SAME dialog the profile, Nurturing and Campaigns use. It used to be a
+  // one-tap button that inserted `reachability: 'answered'` with the remark "Logged
+  // from Interest inbox" — every call recorded as answered whether or not it was, and
+  // no way to write down what the person actually said. A record that cannot be wrong
+  // is a record that cannot be right either.
   async function logContact() {
     setBusy(true)
     try {
       const pid = await ensurePersonFor(selRow)
-      let jid
+      // CallLogDialog is journey-scoped, so reuse this person's newest journey or
+      // open one — the same resolution the old one-tap button did.
       const { data: ex } = await supabase.from('journeys').select('id').eq('person_id', pid).order('created_at', { ascending: false }).limit(1)
-      if (ex && ex.length) jid = ex[0].id
-      else { const { data: nj, error } = await supabase.from('journeys').insert({ person_id: pid, type: 'volunteer_nurture', status: 'active' }).select('id').single(); if (error) throw error; jid = nj.id }
-      const { error } = await supabase.from('call_logs').insert({ journey_id: jid, person_id: pid, reachability: 'answered', remarks: 'Logged from Interest inbox', logged_by: uid })
-      if (error) throw error
-      onToast(`Contact with ${selRow.full_name} logged.`)
-    } catch (e) { onToast('Could not log: ' + (e.message || e)) } finally { setBusy(false) }
+      let jid = ex?.[0]?.id
+      if (!jid) {
+        const { data: nj, error } = await supabase.from('journeys').insert({ person_id: pid, type: 'volunteer_nurture', status: 'active' }).select('id').single()
+        if (error) throw error
+        jid = nj.id
+      }
+      setLogFor({ journeyId: jid, personId: pid, name: selRow.full_name, phone: selRow.phone })
+    } catch (e) { onToast('Could not open: ' + (e.message || e)) } finally { setBusy(false) }
   }
   async function convertVolunteer() {
     setBusy(true)
@@ -350,11 +359,18 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
     try { const pid = await ensurePersonFor(selRow); const { error } = await supabase.from('people').update({ is_meditator: true }).eq('id', pid); if (error) throw error; onToast(`${selRow.full_name} marked as a meditator.`) }
     catch (e) { onToast('Could not mark: ' + (e.message || e)) } finally { setBusy(false) }
   }
+  // Opens the SAME dialog the profile and the population screens use.
+  //
+  // This previously inserted into `nurturer_assignments` (meditator_id / nurturer_id),
+  // while every other screen in the app reads and writes `nurturing_assignments`
+  // (cared_person_id / nurturer_person_id). Assigning from here therefore wrote a row
+  // nothing else has ever read: the person stayed in "needs a nurturer" on Volunteers
+  // and Meditators, never appeared on the nurturer's roster in Nurturing, and showed
+  // no nurturer on their own profile — while the coordinator was told it worked.
   async function assignNurturer() {
-    if (!nurSel) return onToast('Pick a nurturer first.')
     setBusy(true)
-    try { const pid = await ensurePersonFor(selRow); const { error } = await supabase.from('nurturer_assignments').insert({ meditator_id: pid, nurturer_id: nurSel, assigned_by: uid }); if (error) throw error; onToast(`${selRow.full_name} assigned to ${nurturers.find((n) => n.id === nurSel)?.full_name}.`); setNurSel('') }
-    catch (e) { onToast('Could not assign: ' + (e.message || e)) } finally { setBusy(false) }
+    try { setAssignFor(await ensurePersonFor(selRow)) }
+    catch (e) { onToast('Could not open: ' + (e.message || e)) } finally { setBusy(false) }
   }
   async function addToCallList() {
     setBusy(true)
@@ -607,13 +623,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
                 )}
               </div>
               {selRow.source !== 'event' && (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <select value={nurSel} onChange={(e) => setNurSel(e.target.value)} style={{ flex: 1, padding: '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff' }}>
-                    <option value="">Assign nurturer…</option>
-                    {nurturers.map((n) => (<option key={n.id} value={n.id}>{n.full_name}</option>))}
-                  </select>
-                  <button className="btn btn-ghost" style={btn} disabled={busy || !nurSel} onClick={assignNurturer}>Assign</button>
-                </div>
+                <button className="btn btn-ghost" style={{ ...btn, width: '100%', justifyContent: 'center' }} disabled={busy} onClick={assignNurturer}>Assign nurturer…</button>
               )}
               {selRow.source !== 'event' && (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
@@ -661,6 +671,19 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
           onClose={() => setShowForm(false)} onToast={onToast} onCreated={() => sel.clear()} />
       )}
       {campaignPid && <CampaignForm audience={selRow?.source === 'advanced' ? 'meditator' : 'volunteer'} personIds={[campaignPid]} defaultType="messaging" segmentLabel={selRow?.full_name || ''} onClose={() => setCampaignPid(null)} onToast={onToast} />}
+      {assignFor && (
+        <AssignNurturerDialog personIds={[assignFor]} label={selRow?.full_name || 'person'} me={{ id: uid }}
+          onClose={() => setAssignFor(null)} onToast={onToast} onDone={() => { setAssignFor(null); reload() }} />
+      )}
+      {logFor && (
+        <CallLogDialog
+          journey={{ id: logFor.journeyId, person_id: logFor.personId, person: { full_name: logFor.name, phone: logFor.phone } }}
+          myId={uid}
+          onClose={() => setLogFor(null)}
+          onSaved={reload}
+          onToast={onToast}
+        />
+      )}
       {addOpen && <AddImport onClose={() => setAddOpen(false)} onToast={onToast} onDone={() => { setAddOpen(false); reload() }} />}
       {scanOpen && <ScanMatch onClose={() => setScanOpen(false)} onToast={onToast} onDone={() => { setScanOpen(false); reload() }} />}
     </Pad>

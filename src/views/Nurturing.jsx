@@ -5,6 +5,7 @@ import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import PersonProfile from '../components/PersonProfile'
 import { telHref, waHref } from '../lib/phone'
 import { useBreakpoint } from '../lib/useBreakpoint'
+import { NURTURE_OUTCOMES, DEFAULT_NURTURE_OUTCOME } from '../lib/calllog'
 
 // DISPLAY-ONLY drill-down over three separate tables (teams + team_members +
 // nurturing_assignments over one people table): Teams → team roster → nurturer's held
@@ -371,7 +372,7 @@ function NurturerDetail({ nurturerPersonId, me, onBack, onToast, onOpenProfile }
 }
 
 function NurturingLog({ assignment, loggedBy, onClose, onSaved, onToast }) {
-  const [outcome, setOutcome] = useState('Reached')
+  const [outcome, setOutcome] = useState(DEFAULT_NURTURE_OUTCOME)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   async function save() {
@@ -392,7 +393,7 @@ function NurturingLog({ assignment, loggedBy, onClose, onSaved, onToast }) {
         <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 16 }}>{assignment.cared?.full_name} · {assignment.cared?.phone || 'no phone'}</div>
         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', marginBottom: 14 }}>Outcome
           <select value={outcome} onChange={(e) => setOutcome(e.target.value)} style={{ ...inputStyle, marginTop: 6 }}>
-            {['Reached', 'No answer', 'Call back', 'Doing well', 'Needs support'].map((o) => <option key={o}>{o}</option>)}
+            {NURTURE_OUTCOMES.map((o) => <option key={o}>{o}</option>)}
           </select>
         </label>
         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', marginBottom: 16 }}>Note (optional)

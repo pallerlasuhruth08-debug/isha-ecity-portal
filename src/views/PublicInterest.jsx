@@ -3,6 +3,7 @@ import { SUPABASE_URL, SUPABASE_KEY } from '../lib/supabase'
 import { fmtDay } from '../lib/planning'
 import { checkMobile } from '../lib/phone'
 import Field, { PublicShell, PublicDone } from '../components/Field'
+import { allDayIcs, downloadIcs, safeFilename } from '../lib/calendarFile'
 
 // Standalone, no-login page reached from an event's interest link (#interest=<eventId>).
 // Registers interest in that specific occurrence (event_interest), person resolved by phone.
@@ -54,7 +55,27 @@ export default function PublicInterest({ eventId }) {
       )}
       {done && (
         <PublicDone title={`Namaskaram${done.name ? `, ${done.name.split(' ')[0]}` : ''}!`} next="A coordinator from Isha Electronic City will call you on this number before the event with the timing and venue. If you don't hear from us in a few days, call the centre on 8095963111.">
-          Your interest in <strong>{info.eventName}</strong> is noted.
+          <div>Your interest in <strong>{info.eventName}</strong> is noted.</div>
+          {/* Save the date — the date is all we hold. `activities` has no start time
+              and no venue column, so this is an all-day entry and says so, rather
+              than putting a made-up 9am in someone's calendar. */}
+          {info.date && (
+            <button
+              className="btn btn-ghost"
+              style={{ marginTop: 14 }}
+              onClick={() => downloadIcs(
+                allDayIcs({
+                  title: info.eventName,
+                  dateISO: info.date,
+                  uid: `interest-${eventId}@isha-ecity`,
+                  description: 'Isha Electronic City. A coordinator will call you before the event with the timing and venue.',
+                }),
+                `${safeFilename(info.eventName)}.ics`,
+              )}
+            >
+              Save the date to my calendar
+            </button>
+          )}
         </PublicDone>
       )}
       {info && !done && (
