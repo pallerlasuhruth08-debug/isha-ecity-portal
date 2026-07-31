@@ -170,7 +170,7 @@ function Portal({ profile, email, sections }) {
   const content = useMemo(() => {
     switch (activeView) {
       case 'dashboard':
-        return <Dashboard me={profile} onToast={showToast} onNavigate={setView} />
+        return <Dashboard me={profile} onNavigate={setView} />
       case 'volunteers':
         return <Volunteers me={profile} onToast={showToast} onNavigate={setView} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
       case 'campaigns':
