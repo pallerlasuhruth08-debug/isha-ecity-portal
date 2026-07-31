@@ -92,6 +92,8 @@ input[type="date"] { cursor: pointer; }
   --pill-orange-bg:#f6e8d8; --pill-orange-fg:#c2691f;
   --pill-rust-bg:#f3e3d2;   --pill-rust-fg:#9c4a14;
   --pill-yellow-bg:#fcf4cb; --pill-yellow-fg:#8a6d1b;
+  --pill-red-bg:#f6e0ce;
+  --pill-purple-bg:#e7e0f0; --pill-purple-fg:#5b4b8a;
 
   /* type scale */
   --fs-display:28px; --fs-h1:22px; --fs-h2:18px; --fs-title:15px;
