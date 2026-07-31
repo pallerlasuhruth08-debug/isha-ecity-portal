@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { eligibility, programmeState, initiatedOn, ELIGIBILITY_RULES } from '../src/lib/eligibility.js'
+import { eligibility, programmeState, initiatedOn, impliedComplete, provingProgrammes, proves, ELIGIBILITY_RULES } from '../src/lib/eligibility.js'
 
 const TODAY = new Date('2026-07-31')
 let pass = 0
@@ -178,4 +178,100 @@ t('eligibility does not mutate the person', () => {
   assert.equal(JSON.stringify(p), before)
 })
 
-console.log(`\n${pass}/19 passed`)
+
+// ── Backward inference ──────────────────────────────────────────────────────
+// 195 real people hold an advanced programme with no ie_date because the sync
+// drops INNER_ENGINEERING. Their profiles said "needs Inner Engineering".
+
+t('holding Bhava Spandana proves Inner Engineering, even with no ie_date', () => {
+  const p = { bsp_date: '2021-03-01' }
+  const ie = programmeState(p, 'ie', TODAY)
+  assert.equal(ie.status, 'done')
+  assert.equal(ie.impliedBy, 'bsp')
+  assert.equal(ie.on, null, 'must not invent a date it does not have')
+})
+
+t('an inferred IE unblocks everything gated only on IE', () => {
+  const e = eligibility({ bsp_date: '2021-03-01' }, TODAY)
+  const keys = e.eligible.map((s) => s.key)
+  assert.ok(keys.includes('shoonya'), 'Shoonya is gated on IE alone')
+  assert.ok(keys.includes('guru_pooja'))
+  assert.ok(!e.blocked.some((s) => s.blockers.some((b) => b.key === 'ie')), 'nothing may still be blocked on IE')
+})
+
+t('inference is transitive — Samyama proves BSP and Shoonya and IE', () => {
+  const m = impliedComplete({ samyama_date: '2023-01-01' })
+  assert.equal(m.get('ie'), 'samyama')
+  assert.equal(m.get('bsp'), 'samyama')
+  assert.equal(m.get('shoonya'), 'samyama')
+})
+
+// The honesty limits — these are the whole reason the feature is safe.
+t('it never infers through anyOf: Samyama does not name Surya Kriya', () => {
+  const m = impliedComplete({ samyama_date: '2023-01-01' })
+  assert.equal(m.has('surya_kriya'), false, 'holding Samyama proves ONE of the kriyas, not which')
+  assert.equal(m.has('shakti_chalana'), false)
+})
+
+t('an inferred prerequisite can never satisfy a timing clause', () => {
+  // Samyama needs a kriya completed >=60 days before. Inference gives no date,
+  // so this must stay unjudgeable rather than silently passing the clause.
+  const st = programmeState({ bsp_date: '2021-03-01', yogasanas_date: '2022-01-01', shoonya_date: null }, 'samyama', TODAY)
+  assert.notEqual(st.status, 'eligible', 'must not become eligible on a date we do not have')
+})
+
+t('a real date always wins over an inference', () => {
+  const p = { ie_date: '2019-06-01', bsp_date: '2021-03-01' }
+  const ie = programmeState(p, 'ie', TODAY)
+  assert.equal(ie.on.toISOString().slice(0, 10), '2019-06-01')
+  assert.equal(ie.impliedBy, undefined)
+})
+
+t('someone with nothing recorded infers nothing', () => {
+  assert.equal(impliedComplete({}).size, 0)
+  assert.equal(impliedComplete(null).size, 0)
+  assert.equal(programmeState({}, 'ie', TODAY).status, 'eligible', 'a true newcomer is still eligible FOR ie')
+})
+
+
+
+// The generated SQL view imports `provingProgrammes` from here rather than
+// reimplementing it, so a profile and a smart list can never disagree about
+// the same person. These pin the shared definition.
+
+t('provingProgrammes(ie) is every programme gated on IE', () => {
+  const p = provingProgrammes('ie')
+  for (const k of ['bsp', 'shoonya', 'samyama', 'guru_pooja', 'eoe', 'lom']) {
+    assert.ok(p.includes(k), `${k} requires IE, so holding it proves IE`)
+  }
+  assert.ok(!p.includes('angamardhana'), 'open-to-everyone modules prove nothing')
+  assert.ok(!p.includes('ie'))
+})
+
+t('nothing proves an anyOf alternative', () => {
+  assert.equal(proves('samyama', 'surya_kriya'), false)
+  assert.equal(provingProgrammes('surya_kriya').length, 0)
+})
+
+t('proof relation is consistent with what impliedComplete produces', () => {
+  // The invariant the SQL generator relies on: for every programme, the set of
+  // things holding it implies must be exactly the set of things that name it as
+  // a prover. The universe includes requirement-only keys like `yogasanas`,
+  // which have no rule of their own but can still be implied.
+  const COL = { ie: 'ie_date', bsp: 'bsp_date', shoonya: 'shoonya_date', samyama: 'samyama_date',
+    yogasanas: 'yogasanas_date', surya_kriya: 'surya_kriya_date', guru_pooja: 'guru_puja_date',
+    eoe: 'eoe_date', lom: 'lom_date', angamardhana: 'angamardhana_date', bhutha_shuddhi: 'bhutha_shuddhi_date' }
+  const universe = [...new Set([
+    ...Object.keys(ELIGIBILITY_RULES),
+    ...Object.values(ELIGIBILITY_RULES).flatMap((r) => r.requires.flatMap((q) => q.anyOf || [q.key])),
+  ])].filter(Boolean)
+
+  for (const key of Object.keys(ELIGIBILITY_RULES)) {
+    if (!COL[key]) continue
+    const implied = [...impliedComplete({ [COL[key]]: '2020-01-01' }).keys()].sort()
+    const expected = universe.filter((t2) => provingProgrammes(t2).includes(key)).sort()
+    assert.deepEqual(implied, expected, `holding ${key} must imply exactly ${expected.join(', ') || '(nothing)'}`)
+  }
+})
+
+console.log(`\n${pass}/${pass} passed`)

@@ -25,7 +25,7 @@
 //
 // The generated SQL is verbose. Nobody edits it; it is checked by running it.
 
-import { ELIGIBILITY_RULES } from '../src/lib/eligibility.js'
+import { ELIGIBILITY_RULES, provingProgrammes } from '../src/lib/eligibility.js'
 import { PROGRAM_BY_KEY, MIN_ROWS_TO_TRUST } from '../src/lib/programCatalog.js'
 
 // Columns that genuinely exist on public.people, verified against the live
@@ -51,6 +51,28 @@ const colOf = (key) => {
 const colsFor = (req) => (req.anyOf || [req.key]).map(colOf).filter(Boolean)
 const keysFor = (req) => req.anyOf || [req.key]
 
+// ── Backward inference, same rule as impliedComplete() in the engine ─────────
+// Holding a programme proves its prerequisites happened, so a missing date is
+// not a missing completion. Without this the view would say "blocked on IE" for
+// the 195 people whose ie_date the sync drops, while the profile — which now
+// infers — says "done". The two must never disagree; that is the whole reason
+// this file is generated rather than written.
+//
+// Inference never crosses an `anyOf`: holding Samyama proves ONE of Surya Kriya
+// or Shakti Chalana Kriya happened, and naming either would be a fabrication.
+// `provingProgrammes` is imported from the engine, not reimplemented here — two
+// copies of "what proves what" would be exactly the drift this file exists to
+// prevent.
+
+/** Date columns of programmes whose presence proves `key` was completed. */
+const proofColsFor = (key) => provingProgrammes(key).map(colOf).filter(Boolean)
+
+/** Proof columns for any alternative of a requirement, minus its own columns. */
+const proofColsForReq = (req) => {
+  const own = new Set(colsFor(req))
+  return [...new Set(keysFor(req).flatMap(proofColsFor))].filter((c) => !own.has(c))
+}
+
 const anyPresent = (cols) => cols.map((c) => `p.${c} is not null`).join(' or ')
 const allAbsent = (cols) => cols.map((c) => `p.${c} is null`).join(' and ')
 
@@ -74,25 +96,42 @@ function programmeColumns(key, rule) {
 
   const reqs = rule.requires.filter((r) => colsFor(r).length > 0)
 
-  // A requirement is unmet when no alternative has a date, OR when the timing
-  // clause has not matured yet.
+  // A requirement is unmet when NEITHER its own date NOR any proof of it is
+  // present, or when a timing clause has not matured yet. Proof satisfies the
+  // requirement but carries no date, so it can only clear the untimed half.
   const unmet = reqs.map((r) => {
     const cols = colsFor(r)
-    const absent = `(${allAbsent(cols)})`
+    const proof = proofColsForReq(r)
+    const absent = proof.length
+      ? `((${allAbsent(cols)}) and (${allAbsent(proof)}))`
+      : `(${allAbsent(cols)})`
     if (!r.minDaysBefore) return absent
     return `(${absent} or ${maturityExpr(r, cols)} > now())`
   })
 
-  // Indeterminate: some requirement is both absent for this person and unrecorded
-  // for everyone. We cannot tell, so we must not claim.
+  // Indeterminate: either the requirement is absent for this person AND
+  // unrecorded for everyone, or it is PROVEN but undated while a timing clause
+  // needs to know when. Both are "cannot tell", and must not be claimed.
   const indeterminate = reqs
     .map((r) => {
+      const parts = []
       const u = untrackedExpr(r)
-      return u ? `((${allAbsent(colsFor(r))}) and (${u}))` : null
+      const proof = proofColsForReq(r)
+      if (u) {
+        const noProof = proof.length ? ` and (${allAbsent(proof)})` : ''
+        parts.push(`((${allAbsent(colsFor(r))})${noProof} and (${u}))`)
+      }
+      if (r.minDaysBefore && proof.length) {
+        parts.push(`((${allAbsent(colsFor(r))}) and (${anyPresent(proof)}))`)
+      }
+      return parts.length ? `(${parts.join(' or ')})` : null
     })
     .filter(Boolean)
 
-  const doneClause = rule.repeatable ? null : `when p.${selfCol} is not null then 'done'`
+  const selfProof = proofColsFor(key)
+  const doneClause = rule.repeatable
+    ? null
+    : `when p.${selfCol} is not null${selfProof.length ? ` or ${anyPresent(selfProof)}` : ''} then 'done'`
   const clauses = [
     doneClause,
     indeterminate.length ? `when ${indeterminate.join(' or ')} then 'indeterminate'` : null,
