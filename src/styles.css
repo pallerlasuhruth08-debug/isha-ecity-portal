@@ -55,6 +55,7 @@ input[type="date"] { cursor: pointer; }
   --muted-2: #a8997f;
   --border: #e7dcc9;
   --border-soft: #ece3d4;
+  --border-strong: #d8cbb6;
 
   /* sidebar */
   --sb-bg: #241b14;
