@@ -52,7 +52,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
         supabase.from('nurturing_assignments').select('nurturer:people!nurturing_assignments_nurturer_person_id_fkey(full_name)').eq('cared_person_id', personId).eq('active', true),
         supabase.from('manual_tags').select('id, tag').eq('person_id', personId).order('created_at', { ascending: false }),
         supabase.from('attendance').select('time_in, status, activity_type_id, activities!attendance_activity_id_fkey(name, activity_date), atype:activity_types(label, kind)').eq('person_id', personId),
-        supabase.from('journeys').select('type, campaign:campaigns(is_test), calls(reachability, sadhana_status, remarks, completed_at)').eq('person_id', personId),
+        supabase.from('journeys').select('id, type, campaign:campaigns(is_test), calls(reachability, sadhana_status, remarks, completed_at)').eq('person_id', personId),
         supabase.from('person_skills').select('id, skill:skills(id, label)').eq('person_id', personId),
         supabase.from('skills').select('id, label').eq('active', true).order('sort_order', { ascending: true }).order('label', { ascending: true }),
       ])
@@ -72,10 +72,41 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
       // Derived activity-type chips reflect what the person actually DID → attended only.
       for (const a of att.data || []) { if ((a.status || 'attended') !== 'attended') continue; const t = a.atype?.label; if (t) types.add(t) }
       setDerived([...types])
+      // Call history spans TWO tables: the legacy `calls` (joined off journeys) and
+      // the modern append-only `call_logs` that every log action in the app writes to
+      // (this profile, CallLogDialog, Nurturing, Interest, Campaigns). Reading only
+      // `calls` meant a call logged here vanished from this very panel. Read both,
+      // normalise to one shape, newest first.
+      const journeys = jn.data || []
+      const testJourneyIds = new Set(journeys.filter((j) => j.campaign?.is_test).map((j) => j.id))
+      const journeyIds = journeys.map((j) => j.id).filter(Boolean)
+
       const cs = []
-      // Skip test-campaign calls — test contact never reads as real contact.
-      for (const j of jn.data || []) { if (j.campaign?.is_test) continue; for (const c of j.calls || []) if (c.completed_at || c.remarks || c.reachability) cs.push(c) }
-      cs.sort((a, b) => new Date(b.completed_at || 0) - new Date(a.completed_at || 0))
+      // Legacy `calls` — skip test-campaign contact, it never reads as real contact.
+      for (const j of journeys) {
+        if (j.campaign?.is_test) continue
+        for (const c of j.calls || []) {
+          if (c.completed_at || c.remarks || c.reachability) {
+            cs.push({ key: `c:${j.id}:${c.completed_at || ''}:${c.remarks || ''}`, when: c.completed_at, outcome: c.reachability, sadhana: c.sadhana_status, remarks: c.remarks })
+          }
+        }
+      }
+
+      // Modern `call_logs`: by person, plus by journey (some writers leave person_id null).
+      const logQueries = [supabase.from('call_logs').select('id, journey_id, reachability, remarks, logged_at').eq('person_id', personId)]
+      if (journeyIds.length) logQueries.push(supabase.from('call_logs').select('id, journey_id, reachability, remarks, logged_at').in('journey_id', journeyIds))
+      const logResults = await Promise.all(logQueries)
+      const seen = new Set()
+      for (const res of logResults) {
+        for (const l of res.data || []) {
+          if (seen.has(l.id)) continue
+          if (l.journey_id && testJourneyIds.has(l.journey_id)) continue
+          seen.add(l.id)
+          cs.push({ key: `l:${l.id}`, when: l.logged_at, outcome: l.reachability, sadhana: null, remarks: l.remarks })
+        }
+      }
+
+      cs.sort((a, b) => new Date(b.when || 0) - new Date(a.when || 0))
       setCalls(cs)
     } catch (e) { setErr(e.message || String(e)) }
   }, [personId])
@@ -295,7 +326,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
                 <div className="card" style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                     <thead><tr style={{ textAlign: 'left', color: 'var(--muted-2)' }}><th style={th}>Call Status</th><th style={th}>Response</th><th style={th}>Remarks</th><th style={th}>Date</th></tr></thead>
-                    <tbody>{calls.map((c, i) => (<tr key={i} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{c.completed_at ? 'Completed' : 'Scheduled'}{c.reachability ? ` · ${c.reachability.replace('_', ' ')}` : ''}</td><td style={td}>{c.sadhana_status || '—'}</td><td style={td}>{c.remarks || '—'}</td><td style={td}>{fmt(c.completed_at) || '—'}</td></tr>))}</tbody>
+                    <tbody>{calls.map((c) => (<tr key={c.key} style={{ borderTop: '1px solid #F1E9DB' }}><td style={td}>{c.when ? 'Completed' : 'Scheduled'}{c.outcome ? ` · ${String(c.outcome).replace('_', ' ')}` : ''}</td><td style={td}>{c.sadhana || '—'}</td><td style={td}>{c.remarks || '—'}</td><td style={td}>{fmt(c.when) || '—'}</td></tr>))}</tbody>
                   </table>
                 </div>
               )}
