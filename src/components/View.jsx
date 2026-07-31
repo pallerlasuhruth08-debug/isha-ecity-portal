@@ -69,18 +69,28 @@ const DASH = (
 )
 
 // state: 'all' | 'partial' | 'none' | boolean
-export function Checkbox({ state, onClick, size = 19 }) {
+export function Checkbox({ state, onClick, size = 19, label = 'Select' }) {
   const on = state === true || state === 'all'
   const partial = state === 'partial'
   const filled = on || partial
+  // A real checkbox: <button role="checkbox"> gives keyboard (Space/Enter fire
+  // onClick natively), focus-visible, and aria-checked for assistive tech.
   return (
-    <div onClick={onClick} className="tap-hit-44" style={{ cursor: 'pointer', flexShrink: 0 }}>
-      <div
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={on ? 'true' : partial ? 'mixed' : 'false'}
+      aria-label={label}
+      onClick={onClick}
+      className="tap-hit-44"
+      style={{ cursor: 'pointer', flexShrink: 0, padding: 0, border: 'none', background: 'none', display: 'inline-flex', borderRadius: 6 }}
+    >
+      <span
         style={{
           width: size,
           height: size,
           borderRadius: 6,
-          border: '1.5px solid ' + (filled ? 'var(--orange)' : '#D8CBB6'),
+          border: '1.5px solid ' + (filled ? 'var(--orange)' : 'var(--border-strong)'),
           background: filled ? 'var(--orange)' : '#fff',
           display: 'flex',
           alignItems: 'center',
@@ -90,8 +100,8 @@ export function Checkbox({ state, onClick, size = 19 }) {
         }}
       >
         {on ? CHECK : partial ? DASH : null}
-      </div>
-    </div>
+      </span>
+    </button>
   )
 }
 
