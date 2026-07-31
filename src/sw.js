@@ -1,6 +1,6 @@
 import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching'
 import { registerRoute } from 'workbox-routing'
-import { NetworkFirst } from 'workbox-strategies'
+import { CacheFirst, NetworkFirst } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 
 // __WB_MANIFEST is replaced at build time (vite-plugin-pwa's injectManifest) with
@@ -18,6 +18,21 @@ registerRoute(({ request }) => request.mode === 'navigate', new NetworkFirst({
   cacheName: 'pages',
   plugins: [new ExpirationPlugin({ maxEntries: 10, maxAgeSeconds: 7 * 24 * 3600 })],
 }))
+
+// The OCR engine for "Scan attendance sheet" — the tesseract.js script, its WASM
+// core, and the English traineddata — is fetched from a CDN on first use and is
+// tens of megabytes. That download happens at a venue, on venue wi-fi, which is
+// the worst possible moment for it. CacheFirst means it is paid for exactly once
+// per device and every later scan works instantly, including with no signal at
+// all. These files are immutable per version, so cache-first is safe: a version
+// bump changes the URL.
+registerRoute(
+  ({ url }) => /(^|\.)jsdelivr\.net$|(^|\.)unpkg\.com$|(^|\.)projectnaptha\.com$/.test(url.hostname),
+  new CacheFirst({
+    cacheName: 'ocr-engine',
+    plugins: [new ExpirationPlugin({ maxEntries: 24, maxAgeSeconds: 180 * 24 * 3600, purgeOnQuotaError: true })],
+  }),
+)
 
 // Stays in the "waiting" state after install (registerType: 'prompt') until the
 // client explicitly asks to activate -- see PwaUpdatePrompt's updateServiceWorker(true),
