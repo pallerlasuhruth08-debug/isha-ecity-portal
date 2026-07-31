@@ -116,6 +116,72 @@ export const ELIGIBILITY_RULES = {
   },
 }
 
+// ── Backward inference ──────────────────────────────────────────────────────
+// The rules say "X requires Y". The engine only ever read that forwards — can
+// this person do X? — and never backwards: X is recorded as done, therefore Y
+// was done.
+//
+// That gap has a real cost. 195 people hold Bhava Spandana, Shoonya or Samyama
+// with no `ie_date`, because the Ishangam sync drops INNER_ENGINEERING for some
+// records (see ISHANGAM_SYNC_FINDINGS.md). Their profiles therefore read "needs
+// Inner Engineering" — about people who have completed a programme that CANNOT
+// be taken without it. A coordinator ringing to suggest Inner Engineering to
+// someone who has sat Bhava Spandana is the single most embarrassing call this
+// app could produce, and it was set up to produce 195 of them.
+//
+// Holding the advanced programme is the evidence. The missing date is a sync
+// defect, not a fact about the person.
+//
+// TWO THINGS THIS DELIBERATELY WILL NOT DO
+//
+//  · It will not infer through `anyOf`. Samyama requires "Surya Kriya OR Shakti
+//    Chalana Kriya"; holding Samyama proves one of them happened, not which. To
+//    name either would be inventing a completion.
+//  · An inferred prerequisite carries NO DATE, so it can never satisfy a
+//    `minDaysBefore` clause. We know they did it; we do not know when, and
+//    "at least 60 days ago" is a claim about when. Same ceiling the Ishangam
+//    tags run into.
+
+/** Does completing `from` prove `target` was completed? Never crosses anyOf. */
+export function proves(from, target, seen = new Set()) {
+  for (const req of ELIGIBILITY_RULES[from]?.requires || []) {
+    if (req.anyOf || !req.key || seen.has(req.key)) continue
+    seen.add(req.key)
+    if (req.key === target || proves(req.key, target, seen)) return true
+  }
+  return false
+}
+
+/** Every programme whose completion proves `key` was completed. */
+export function provingProgrammes(key) {
+  return Object.keys(ELIGIBILITY_RULES).filter((p) => p !== key && proves(p, key))
+}
+
+/**
+ * Programmes a person must have completed, deduced from what they hold.
+ * → Map(implied key -> the completed programme key that proves it)
+ */
+export function impliedComplete(person) {
+  const out = new Map()
+  if (!person) return out
+  const walk = (key, evidence, seen) => {
+    for (const req of ELIGIBILITY_RULES[key]?.requires || []) {
+      if (req.anyOf || !req.key) continue // cannot name which alternative happened
+      if (seen.has(req.key)) continue
+      seen.add(req.key)
+      if (!completedOn(person, req.key) && !out.has(req.key)) out.set(req.key, evidence)
+      walk(req.key, evidence, seen)
+    }
+  }
+  for (const key of Object.keys(ELIGIBILITY_RULES)) {
+    // Only a genuine completion is evidence. A repeatable event's date means
+    // "last attended", which is still proof they attended — and attending an
+    // EOE also requires IE — so those count too.
+    if (completedOn(person, key)) walk(key, key, new Set([key]))
+  }
+  return out
+}
+
 const DAY = 86400000
 const addDays = (d, n) => new Date(d.getTime() + n * DAY)
 
@@ -145,13 +211,19 @@ export function labelOf(key) {
  *
  * Pass null to assume everything is tracked.
  */
-export function programmeState(person, key, today = new Date(), coverage = null) {
+export function programmeState(person, key, today = new Date(), coverage = null, implied = null) {
   const done = completedOn(person, key)
   const rule = ELIGIBILITY_RULES[key]
   if (!rule) return { key, label: labelOf(key), status: 'no_rule', on: null, blockers: [], readyOn: null, rule: null }
   // A repeatable event stays open after attendance — carry the last date through
   // and keep evaluating. Only a one-time programme is finished by doing it.
   if (done && !rule.repeatable) return { key, label: labelOf(key), status: 'done', on: done, blockers: [], readyOn: null, rule }
+  const inferred = implied || impliedComplete(person)
+  // Done, but the date never arrived. Reported as done WITH its evidence, and
+  // with `on: null` so nothing downstream can print a date we do not have.
+  if (!done && inferred.has(key) && !rule.repeatable) {
+    return { key, label: labelOf(key), status: 'done', on: null, impliedBy: inferred.get(key), blockers: [], readyOn: null, rule }
+  }
   const lastOn = rule.repeatable ? done : null
 
   const rowsFor = (k) => (coverage ? coverage.get(k) ?? 0 : Infinity)
@@ -161,6 +233,13 @@ export function programmeState(person, key, today = new Date(), coverage = null)
     const keys = req.anyOf || [req.key]
     const label = req.label || labelOf(req.key)
     const dates = keys.map((k) => completedOn(person, k)).filter(Boolean)
+    // Undated but proven: satisfies the requirement, but cannot answer "when",
+    // so a timing clause still has to fall through to indeterminate below.
+    if (dates.length === 0 && keys.some((k) => inferred.has(k))) {
+      if (!req.minDaysBefore) continue
+      blockers.push({ key: keys[0], label, reason: 'untracked', readyOn: null, recordedFor: null, impliedBy: inferred.get(keys.find((k) => inferred.has(k))) })
+      continue
+    }
     if (dates.length === 0) {
       // Absent because they haven't done it, or absent because nobody records it?
       const known = keys.some(isTracked)
@@ -186,7 +265,10 @@ export function programmeState(person, key, today = new Date(), coverage = null)
 
 /** Every programme that has a rule, evaluated for one person. */
 export function eligibility(person, today = new Date(), coverage = null) {
-  const states = Object.keys(ELIGIBILITY_RULES).map((k) => programmeState(person, k, today, coverage))
+  // Computed once and threaded through, so the inference walk runs a single time
+  // per person rather than once per programme.
+  const implied = impliedComplete(person)
+  const states = Object.keys(ELIGIBILITY_RULES).map((k) => programmeState(person, k, today, coverage, implied))
   // The ladder is the sadhana progression — only things whose answer DIFFERS
   // between people. Rare events (EOE, Lap of the Master) and open-to-everyone
   // hatha modules are excluded: their verdict is the same for everyone, so it is
