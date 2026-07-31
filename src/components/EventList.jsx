@@ -4,7 +4,7 @@ import { eventDays, currentPhase, phaseTone, rangeLabel, todayISO, seriesDatesUp
 
 // Shared event-list UI used by BOTH the Attendance and Planning pages. Identical
 // layout; the PAGE supplies onOpen (its own detail) — the two never share a detail.
-// Default tab = upcoming only; past events live behind the "All" tab.
+// Default tab = upcoming; past events live under "Completed"; "All" shows every occurrence.
 // phasesByEvent: activity_id -> event_phases[] (drives the current-phase pill).
 export default function EventList({ events, phasesByEvent = {}, onOpen, right = null }) {
   const [tab, setTab] = useState('upcoming')
@@ -23,11 +23,16 @@ export default function EventList({ events, phasesByEvent = {}, onOpen, right = 
       return true
     })
   }, [events, t])
+  const completed = useMemo(
+    () => events.filter((e) => (e.end_date || e.start_date || e.activity_date || '') < t)
+      .sort((a, b) => (b.start_date || b.activity_date || '').localeCompare(a.start_date || a.activity_date || '')),
+    [events, t],
+  )
   const all = useMemo(
     () => [...events].sort((a, b) => (b.start_date || b.activity_date || '').localeCompare(a.start_date || a.activity_date || '')),
     [events],
   )
-  const shown = tab === 'upcoming' ? upcoming : all
+  const shown = tab === 'upcoming' ? upcoming : tab === 'completed' ? completed : all
 
   const TabBtn = ({ k, label, n }) => (
     <button onClick={() => setTab(k)} className="btn" style={{ padding: '7px 14px', fontSize: 12.5, borderRadius: 20, background: tab === k ? '#241B14' : '#fff', color: tab === k ? '#F6ECDC' : 'var(--ink-soft)', border: tab === k ? 'none' : '1px solid var(--border)' }}>
@@ -39,6 +44,7 @@ export default function EventList({ events, phasesByEvent = {}, onOpen, right = 
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
         <TabBtn k="upcoming" label="Upcoming" n={upcoming.length} />
+        <TabBtn k="completed" label="Completed" n={completed.length} />
         <TabBtn k="all" label="All events" n={all.length} />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>{right}</div>
       </div>
@@ -46,7 +52,7 @@ export default function EventList({ events, phasesByEvent = {}, onOpen, right = 
       <div className="card" style={{ overflow: 'hidden' }}>
         {shown.length === 0 ? (
           <div style={{ padding: 26, textAlign: 'center', fontSize: 13, color: 'var(--muted-2)' }}>
-            {tab === 'upcoming' ? 'No upcoming events.' : 'No events yet.'}
+            {tab === 'upcoming' ? 'No upcoming events.' : tab === 'completed' ? 'No completed events.' : 'No events yet.'}
           </div>
         ) : shown.map((e) => {
           const past = (e.end_date || e.start_date || e.activity_date || '') < t
