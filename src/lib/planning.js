@@ -303,12 +303,25 @@ export function rangeLabel(start, end) {
 }
 // // e.g. "Promotion · 1 Jul–9 Jul". Phases carry a label like "Pre-far · promotion".
 
-// Natural-language countdown to an event's start (or overdue days past it).
-export function countdownLabel(startISO) {
+// Natural-language countdown to an event's start.
+//
+// It used to read only the start date, so EVERY finished event said
+// "Overdue · N days" — all 25 completed events, including "Guru Pooja Training"
+// which ran to plan and ended a fortnight ago. An event that has happened is not
+// overdue; it is over. Passing the end date is what tells the two apart.
+export function countdownLabel(startISO, endISO = null) {
   if (!startISO) return ''
   const today = todayISO()
+  const last = endISO || startISO
+  if (last < today) {
+    const over = daysBetweenISO(today, last) // today - end
+    if (over === 1) return 'Ended yesterday'
+    if (over < 14) return `Ended ${over} days ago`
+    if (over < 60) { const w = Math.round(over / 7); return `Ended ${w} week${w === 1 ? '' : 's'} ago` }
+    const mo = Math.round(over / 30); return `Ended ${mo} month${mo === 1 ? '' : 's'} ago`
+  }
   const days = daysBetweenISO(startISO, today) // start - today
-  if (days < 0) return `Overdue · ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'}`
+  if (days < 0) return 'Running now'
   if (days === 0) return 'Today'
   if (days === 1) return '1 day to go'
   if (days < 14) return `${days} days to go`
