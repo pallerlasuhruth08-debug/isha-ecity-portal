@@ -8,7 +8,7 @@ import CreateTeamForm from '../components/CreateTeamForm'
 import { CreateSessionForm } from './Events'
 import { AddImport } from './Interest'
 import KebabMenu from '../components/KebabMenu'
-import { eventDays, currentPhase, phaseTone, groupPhases, PHASE_SHORT, flaggedPhases, FLAG_META, fmtDay, rangeLabel } from '../lib/planning'
+import { eventDays, currentPhase, phaseTone, groupPhases, PHASE_SHORT, flaggedPhases, FLAG_META, fmtDay, rangeLabel, phaseFlag } from '../lib/planning'
 import { ensureSeriesWindow } from '../lib/series'
 
 // Planning = the per-event TO-DO LIST + action launchers (block/team editing lives in
@@ -143,11 +143,92 @@ export function PlanningEvent({ ev, me, isCoordinator, onBack, onToast, onEventC
       )}
 
       {err && <ErrorCard>{err}</ErrorCard>}
+      <PhaseChecklist phases={phases} isCoordinator={isCoordinator} onToast={onToast} onChanged={() => { load(); onEventChanged?.() }} />
       <EventTodos ev={ev} me={me} isCoordinator={isCoordinator} onToast={onToast}
         onStartCampaign={onStartCampaign} onOpenInterest={onOpenInterest} />
     </>
   )
   return embedded ? inner : <Pad>{inner}</Pad>
+}
+
+// ------------------------------------------------------------- Preparation phases
+// THE ALARM NOBODY COULD SWITCH OFF
+// `phaseFlag` calls a phase overdue when it is past its start date and `started_at`
+// is null. Across the live database there are 104 phase rows and **zero** have
+// `started_at` or `completed_at` set \u2014 because until now nothing in the entire
+// app wrote to those columns. Every `event_phases` reference in the codebase was a
+// SELECT.
+//
+// So the Dashboard's "Event preparation slipping" panel, sitting at the top of the
+// landing screen, was permanently red for every event with a past-dated phase, and
+// no coordinator could clear a single one. An alarm that cannot be answered stops
+// being an alarm within about a week \u2014 it teaches people to skip the top of the
+// screen, which is where the people worklist lives.
+//
+// This is the missing control. Start it, finish it, or undo either \u2014 and the same
+// row that reports the flag is the row that clears it.
+function PhaseChecklist({ phases, isCoordinator, onToast, onChanged }) {
+  const [busy, setBusy] = useState(null)
+  if (!phases || phases.length === 0) return null
+
+  async function setPhase(p, patch, said) {
+    setBusy(p.id)
+    try {
+      const { error } = await supabase.from('event_phases').update(patch).eq('id', p.id)
+      if (error) throw error
+      onToast(said)
+      onChanged()
+    } catch (e) { onToast('Could not update: ' + (e.message || e)) } finally { setBusy(null) }
+  }
+
+  const flagged = phases.filter((p) => phaseFlag(p)).length
+  const done = phases.filter((p) => p.completed_at).length
+
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 14, fontWeight: 600 }}>Preparation</span>
+        <span className="pill" style={flagged ? pill(FLAG_META.overdue.bg, FLAG_META.overdue.fg) : pill('var(--success-bg)', 'var(--success-fg)')}>
+          {flagged ? `${flagged} needs attention` : done === phases.length ? 'All done' : 'On track'}
+        </span>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-2)' }}>{done}/{phases.length} done</span>
+      </div>
+      {phases.map((p) => {
+        const flag = phaseFlag(p)
+        const meta = flag ? FLAG_META[flag] : null
+        const label = PHASE_SHORT[p.kind] || p.label || p.kind
+        const window = p.start_by ? `${fmtDay(p.start_by)}${p.finish_by && p.finish_by !== p.start_by ? ` \u2013 ${fmtDay(p.finish_by)}` : ''}` : 'No dates set'
+        return (
+          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: '1px solid #F4EEE2', flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 0, flex: '1 1 190px' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: p.completed_at ? 'var(--muted)' : 'var(--ink)', textDecoration: p.completed_at ? 'line-through' : 'none' }}>{label}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>{window}</div>
+            </div>
+            {meta && <span className="pill" style={{ ...pill(meta.bg, meta.fg), flexShrink: 0 }}>{meta.label}</span>}
+            {p.completed_at && <span className="pill" style={{ ...pill('var(--success-bg)', 'var(--success-fg)'), flexShrink: 0 }}>Done</span>}
+            {!p.completed_at && p.started_at && !meta && <span className="pill" style={{ ...pill('var(--pill-warm-bg)', 'var(--pill-orange-fg)'), flexShrink: 0 }}>In progress</span>}
+            {isCoordinator && (
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginLeft: 'auto' }}>
+                {!p.started_at && !p.completed_at && (
+                  <button className="btn btn-ghost tap44" disabled={busy === p.id} style={{ fontSize: 12, padding: '6px 11px' }}
+                    onClick={() => setPhase(p, { started_at: new Date().toISOString() }, `${label} started.`)}>Start</button>
+                )}
+                {!p.completed_at && (
+                  <button className="btn btn-primary tap44" disabled={busy === p.id} style={{ fontSize: 12, padding: '6px 11px' }}
+                    onClick={() => setPhase(p, { started_at: p.started_at || new Date().toISOString(), completed_at: new Date().toISOString() }, `${label} marked done.`)}>Done</button>
+                )}
+                {(p.started_at || p.completed_at) && (
+                  <button className="btn btn-ghost tap44" disabled={busy === p.id} style={{ fontSize: 12, padding: '6px 9px' }}
+                    title="Put this phase back the way it was"
+                    onClick={() => setPhase(p, p.completed_at ? { completed_at: null } : { started_at: null }, `${label} reopened.`)}>Undo</button>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 // ------------------------------------------------------------- Event to-do list
