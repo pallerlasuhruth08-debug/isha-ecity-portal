@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "test": "node scripts/eligibility.test.mjs && node scripts/paging.test.mjs && node scripts/calllog.test.mjs && node scripts/calendar.test.mjs && node scripts/attention.test.mjs && node scripts/assignment.test.mjs && node scripts/engagement.test.mjs && node scripts/readiness.test.mjs",
+    "test": "node scripts/eligibility.test.mjs && node scripts/paging.test.mjs && node scripts/calllog.test.mjs && node scripts/calendar.test.mjs && node scripts/assignment.test.mjs && node scripts/engagement.test.mjs && node scripts/readiness.test.mjs && node scripts/sessions.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
