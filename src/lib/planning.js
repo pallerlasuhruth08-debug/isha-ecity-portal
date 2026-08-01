@@ -63,6 +63,16 @@ export const PHASE_TONE = {
 }
 export const phaseTone = (kind) => PHASE_TONE[kind] || PHASE_TONE.Upcoming
 
+// TEMPORARY during the phase removal: this file ships one commit ahead of the
+// views so no intermediate state on `main` is broken. The next lib commit drops
+// everything above.
+export const STAGE_TONE = {
+  'Day-of': { bg: '#EAF2E5', fg: '#4E7C3F' },
+  Done: { bg: '#F1EADD', fg: '#8C7E6B' },
+  Upcoming: { bg: '#FBEAD9', fg: '#C28A2A' },
+}
+export const stageTone = (stage) => STAGE_TONE[stage] || STAGE_TONE.Upcoming
+
 // Group flat event_phases rows into { activity_id: phases[] } for the list/grid.
 export function groupPhases(rows) {
   const map = {}

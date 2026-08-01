@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { seriesDatesUpTo, addDaysISO, todayISO } from './planning'
+import { createSessionsFor } from './eventSessions'
 
 export const SERIES_WINDOW_DAYS = 28 // rolling ~4-week materialization window
 
@@ -32,8 +33,13 @@ export async function ensureSeriesWindow(windowDays = SERIES_WINDOW_DAYS) {
     }
   }
   if (!rows.length) return 0
-  const { error: insErr } = await supabase.from('activities').insert(rows)
-  return insErr ? 0 : rows.length
+  // Select the new rows back: a recurring occurrence needs its hall-setup and
+  // class-support sessions exactly as much as a one-off does, and this is the only
+  // moment we know which occurrences are new.
+  const { data: made, error: insErr } = await supabase.from('activities').insert(rows).select('id, start_date, end_date, activity_date, center_id')
+  if (insErr) return 0
+  for (const ev of made || []) await createSessionsFor(ev)
+  return rows.length
 }
 
 // Materialize ONE specific projected occurrence (coordinator opened it to plan).
@@ -45,6 +51,8 @@ export async function materializeOccurrence(series, dateISO) {
     name: series.name, center_id: series.center_id, activity_type_id: series.activity_type_id,
     description: series.description, activity_date: dateISO, start_date: dateISO,
     end_date: addDaysISO(dateISO, series.span_days || 0), is_open: true, created_by: series.created_by, series_id: series.id,
-  }).select('id').single()
-  return error ? null : data.id
+  }).select('id, start_date, end_date, activity_date, center_id').single()
+  if (error) return null
+  await createSessionsFor(data)
+  return data.id
 }
