@@ -35,8 +35,7 @@ export function eventDaysWithSetup(start, end) {
   return days.length ? [dayBefore(days[0]), ...days] : days
 }
 
-// Coarse date-derived status — only a FALLBACK now, for events that have no
-// phases (e.g. old past events not backfilled). The lifecycle is the phase model.
+// The event's stage, from its dates. This is the whole lifecycle now.
 export function deriveStage(startDate, endDate, t = todayISO()) {
   const s = startDate || endDate
   const e = endDate || startDate
@@ -46,26 +45,14 @@ export function deriveStage(startDate, endDate, t = todayISO()) {
   return 'Upcoming'
 }
 
-// ── Phase model (replaces the old 3-stage event_stages) ───────────────────────
-export const PHASE_ORDER = ['pre_far', 'pre_near', 'day_of', 'post']
-// Our own display names. "Pre-far" / "Pre-near" is how the schema thinks about a
-// phase, not how a coordinator thinks about their week. (The stored `label` column
-// still reads "Pre-far · promotion" — that is template data and is left alone;
-// this is the vocabulary the app speaks in.)
-export const PHASE_SHORT = { pre_far: 'Early prep', pre_near: 'Final prep', day_of: 'Event days', post: 'Wrap-up' }
-export const PHASE_TONE = {
-  pre_far: { bg: '#FBEAD9', fg: '#C28A2A' },
-  pre_near: { bg: '#F6E8D8', fg: '#C2691F' },
-  day_of: { bg: '#EAF2E5', fg: '#4E7C3F' },
-  post: { bg: '#E9F0EF', fg: '#2F6E5E' },
-  Done: { bg: '#F1EADD', fg: '#8C7E6B' },
-  Upcoming: { bg: '#FBEAD9', fg: '#C28A2A' },
-}
-export const phaseTone = (kind) => PHASE_TONE[kind] || PHASE_TONE.Upcoming
-
-// TEMPORARY during the phase removal: this file ships one commit ahead of the
-// views so no intermediate state on `main` is broken. The next lib commit drops
-// everything above.
+// ── Event stage, derived from dates ──────────────────────────────────────────
+// What replaced `event_phases`. The phase model tracked four preparation windows
+// per event with start/finish dates and started/completed stamps — and across the
+// whole live database there were 104 phase rows with ZERO ever started or
+// completed, because nothing in the app could write those columns. It was a
+// template generating alarms nobody could answer. It is gone; the per-event to-do
+// list is the preparation surface, and hall-setup / class-support attendance
+// sessions are created with the event (lib/eventSessions.js).
 export const STAGE_TONE = {
   'Day-of': { bg: '#EAF2E5', fg: '#4E7C3F' },
   Done: { bg: '#F1EADD', fg: '#8C7E6B' },
@@ -73,12 +60,6 @@ export const STAGE_TONE = {
 }
 export const stageTone = (stage) => STAGE_TONE[stage] || STAGE_TONE.Upcoming
 
-// Group flat event_phases rows into { activity_id: phases[] } for the list/grid.
-export function groupPhases(rows) {
-  const map = {}
-  for (const r of rows || []) (map[r.activity_id] ||= []).push(r)
-  return map
-}
 
 // ── Attendance mode (a property of the BLOCK; event/phase only seed a default) ──
 export const ATTENDANCE_MODES = ['per_day', 'span', 'involved_only']
@@ -100,55 +81,7 @@ export function modeSummary(defaultMode, blocks) {
   return `defaults to ${MODE_LABEL[dm]}${overridden ? ` · ${overridden} block${overridden > 1 ? 's' : ''} overridden` : ''}`
 }
 
-// ── Stage-2 in-app flags (computed on load; status indicators, not alerts) ────
-export const FLAG_META = {
-  overdue: { label: 'Overdue', bg: '#FBE0DA', fg: '#B5391F' },
-  at_risk: { label: 'At risk', bg: '#FBEAD9', fg: '#C2691F' },
-}
-const NEAR_DAYS = 2 // "near finish_by" window for AT-RISK
 
-// A phase's flag, or null. OVERDUE = past start_by and never started.
-// AT-RISK = started, still incomplete, and finish_by is near or past.
-export function phaseFlag(p, t = todayISO()) {
-  if (!p || p.completed_at) return null
-  if (!p.started_at) return p.start_by && p.start_by < t ? 'overdue' : null
-  if (p.finish_by && addDaysISO(t, NEAR_DAYS) >= p.finish_by) return 'at_risk'
-  return null
-}
-
-// Total unfilled slots across a phase's blocks over its window days
-// (needed − filled, floored at 0 per block-day). Shortfall + a flag = urgent.
-export function phaseShortfall(days, blocks, assignments) {
-  let short = 0
-  for (const b of blocks || []) {
-    const need = Number(b.volunteers_needed) || 0
-    const bAsg = (assignments || []).filter((a) => a.block_id === b.id)
-    for (const d of days || []) short += Math.max(0, need - fillCount(bAsg, d))
-  }
-  return short
-}
-
-// One event's preparation, rolled up to what a LIST ROW can say.
-//
-// WHY THIS EXISTS
-// The Event Hub is the screen that owns events, and it was the only screen in the
-// app that never said whether an event was ready. It loaded every phase, passed
-// them into the list, and the rows ignored them; the event header computed the
-// current phase and the flagged phases and rendered neither. Meanwhile the
-// Dashboard shouted "Event preparation slipping" and offered "6 more in the Event
-// Hub \u2192" \u2014 a link to a list where none of the six could be identified.
-export function phaseSummary(phases, t = todayISO()) {
-  let overdue = 0
-  let atRisk = 0
-  let nextDue = null
-  for (const p of phases || []) {
-    const f = phaseFlag(p, t)
-    if (f === 'overdue') overdue++
-    else if (f === 'at_risk') atRisk++
-    if (!p.completed_at && p.start_by && (!nextDue || p.start_by < nextDue)) nextDue = p.start_by
-  }
-  return { overdue, atRisk, worst: overdue ? 'overdue' : atRisk ? 'at_risk' : null, nextDue }
-}
 
 // Staffing for one event: how many people its teams ask for and how many are on
 // them. `needed` counts each team once (not per day) — a list row is answering
@@ -169,68 +102,15 @@ export function teamFill(blocks, assignments) {
   }
 }
 
-// Every flagged phase across a set of events, worst (overdue) first — powers the
-// global Planning "needs attention" panel.
-export function flaggedPhases(events, phasesByEvent, t = todayISO()) {
-  const out = []
-  for (const e of events || []) {
-    for (const p of phasesByEvent[e.id] || []) {
-      const flag = phaseFlag(p, t)
-      if (flag) out.push({ event: e, phase: p, flag })
-    }
-  }
-  return out.sort((a, b) => (a.flag === 'overdue' ? 0 : 1) - (b.flag === 'overdue' ? 0 : 1))
-}
 
-// Has the event itself already finished? A phase on a finished event is not work
-// that is late — it is work that will never be done, and it does not belong on
-// anyone's worklist. Without this, "IE - 2 day (Dec 2025)" was still shouting
-// "Overdue · start by 29 Nov" in July.
+// Has the event itself already finished? A finished event does not belong on
+// anyone's worklist, so its readiness chips stay silent.
 export function eventIsOver(e, t = todayISO()) {
   const last = e?.end_date || e?.start_date || e?.activity_date
   return !!last && String(last).slice(0, 10) < t
 }
 
-/**
- * Flagged phases rolled up to ONE ROW PER EVENT, which is how a coordinator
- * thinks about it: "Guru Purnima prep is behind", not four separate rows for
- * Pre-far, Pre-near, Day-of and Post. Finished events are dropped entirely.
- *
- * Sorted by the soonest date anyone is late against, so the top of the list is
- * the thing to deal with first. → [{ event, count, overdue, atRisk, earliest }]
- */
-export function eventsNeedingAttention(events, phasesByEvent, t = todayISO()) {
-  const byEvent = new Map()
-  for (const { event, phase, flag } of flaggedPhases(events, phasesByEvent, t)) {
-    if (eventIsOver(event, t)) continue
-    const due = (flag === 'overdue' ? phase.start_by : phase.finish_by) || null
-    const row = byEvent.get(event.id) || { event, count: 0, overdue: 0, atRisk: 0, earliest: null }
-    row.count += 1
-    if (flag === 'overdue') row.overdue += 1
-    else row.atRisk += 1
-    if (due && (!row.earliest || due < row.earliest)) row.earliest = due
-    byEvent.set(event.id, row)
-  }
-  return [...byEvent.values()].sort((a, b) => {
-    if (!!b.overdue !== !!a.overdue) return b.overdue - a.overdue   // anything overdue first
-    return String(a.earliest || '9999').localeCompare(String(b.earliest || '9999'))
-  })
-}
 
-// The event's headline phase for the coarse pill: the window we're inside, else
-// "Upcoming" (before the first) / "Done" (after the last). Falls back to the
-// date-derived stage when the event has no phases at all.
-export function currentPhase(ev, phases, t = todayISO()) {
-  const list = (phases || []).slice().sort((a, b) => a.sort_order - b.sort_order)
-  if (!list.length) return { label: deriveStage(ev?.start_date, ev?.end_date, t), kind: 'Upcoming' }
-  const last = list[list.length - 1]
-  if (last.finish_by && t > last.finish_by) return { label: 'Done', kind: 'Done' }
-  const inWin = list.find((p) => (!p.start_by || p.start_by <= t) && (!p.finish_by || t <= p.finish_by))
-  if (inWin) return { label: PHASE_SHORT[inWin.kind] || inWin.label, kind: inWin.kind }
-  const next = list.find((p) => p.start_by && p.start_by > t)
-  if (next) return { label: 'Upcoming', kind: 'Upcoming' }
-  return { label: PHASE_SHORT[list[0].kind] || list[0].label, kind: list[0].kind }
-}
 
 // fill for a (block, day): people still expected or present (assigned|show).
 // no_show / dropped VACATE the slot (excluded here) but are kept for reliability.
@@ -421,16 +301,7 @@ export function rangeLabel(start, end) {
   if (!end || end === start) return fmtDay(start)
   return `${fmtDay(start)} – ${fmtDay(end)}`
 }
-
-// Phase chip label WITHOUT the pre-far/pre-near jargon: the descriptor + date span,
-// e.g. "Promotion · 1 Jul–9 Jul". Phases carry a label like "Pre-far · promotion".
-export function phaseChipLabel(p) {
-  if (!p) return ''
-  const raw = (p.label || '').includes('·') ? p.label.split('·').slice(1).join('·').trim() : (p.label || p.kind || 'Phase')
-  const name = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Phase'
-  const span = p.start_by ? ` · ${fmtDay(p.start_by)}${p.finish_by && p.finish_by !== p.start_by ? `–${fmtDay(p.finish_by)}` : ''}` : ''
-  return name + span
-}
+// // e.g. "Promotion · 1 Jul–9 Jul". Phases carry a label like "Pre-far · promotion".
 
 // Natural-language countdown to an event's start (or overdue days past it).
 export function countdownLabel(startISO) {
