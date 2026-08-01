@@ -4,7 +4,6 @@ import { Icon } from '../lib/icons'
 import { pill } from '../lib/ui'
 import { Pad, ErrorCard } from '../components/View'
 import KpiCard from '../components/KpiCard'
-import { eventsNeedingAttention, groupPhases, fmtDay } from '../lib/planning'
 
 // A count(*) helper — head:true keeps it cheap (no rows returned).
 async function countRows(table, build = (q) => q) {
@@ -55,7 +54,6 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
   // signal. Now: finished events are dropped, phases roll up to their event, and
   // only the few most urgent are shown here — the rest live in the Event Hub, which
   // is where you would go to act on them anyway.
-  const [attentionEvents, setAttentionEvents] = useState([])
 
   useEffect(() => {
     let alive = true
@@ -96,18 +94,6 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
     }
   }, [])
 
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      const [a, ph] = await Promise.all([
-        supabase.from('activities').select('id, name, center_id, activity_date, start_date, end_date').is('archived_at', null),
-        supabase.from('event_phases').select('activity_id, kind, sort_order, start_by, finish_by, started_at, completed_at'),
-      ])
-      if (!alive || a.error || ph.error) return
-      setAttentionEvents(eventsNeedingAttention(a.data || [], groupPhases(ph.data)))
-    })()
-    return () => { alive = false }
-  }, [])
 
   const loading = !kpis && !err
   const k = kpis || {}
@@ -210,7 +196,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
 
       {loading && <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>Counting…</div>}
 
-      {!loading && attention.length === 0 && attentionEvents.length === 0 && (
+      {!loading && attention.length === 0 && (
         <div className="card" style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--muted)', fontSize: 'var(--fs-body)' }}>
           Nothing needs attention right now.
         </div>
@@ -220,49 +206,6 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
           the unit of work is an EVENT, not a list of people — one click goes to that
           event's hub. Deliberately compact: at most SHOW_EVENTS rows, because a
           worklist that needs three screens of scrolling stops being read at all. */}
-      {attentionEvents.length > 0 && (
-        <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: 'var(--danger-border)', background: 'var(--danger-bg)' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--danger-fg)' }}>Event preparation slipping</div>
-            <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--muted)' }}>
-              {attentionEvents.length} upcoming {attentionEvents.length === 1 ? 'event' : 'events'}
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {attentionEvents.slice(0, SHOW_EVENTS).map((r) => (
-              <button key={r.event.id} className="rowhover" onClick={() => onOpenEvent?.(r.event.id)}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 9, cursor: 'pointer', background: '#fff', border: '1px solid var(--danger-border)', textAlign: 'left', font: 'inherit', width: '100%' }}>
-                <span className="pill" style={pill(r.overdue ? 'var(--danger-bg)' : 'var(--pill-orange-bg)', r.overdue ? 'var(--danger-fg)' : 'var(--pill-orange-fg)')}>
-                  {r.overdue ? `${r.overdue} overdue` : `${r.atRisk} at risk`}
-                </span>
-                <span style={{ fontSize: 13.5, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.event.name}</span>
-                {/* A recurring series puts two "Monthly Satsang" rows side by side.
-                    Without its own date they are the same row twice and neither can
-                    be acted on with any confidence. */}
-                {/* Date AND centre. Four "Monthly Satsang" rows on 2 Aug are four
-                    DIFFERENT centres, not duplicates — the Event Hub shows the centre
-                    and is legible; this row hid it and looked like a data error. */}
-                <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
-                  {(r.event.start_date || r.event.activity_date) ? `· ${fmtDay(r.event.start_date || r.event.activity_date)}` : ''}
-                  {r.event.center_id ? ` · ${r.event.center_id}` : ''}
-                </span>
-                {r.overdue > 0 && r.atRisk > 0 && (
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>· {r.atRisk} more at risk</span>
-                )}
-                <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted-2)', whiteSpace: 'nowrap' }}>
-                  {r.earliest ? `due ${fmtDay(r.earliest)}` : ''}
-                </span>
-              </button>
-            ))}
-          </div>
-          {attentionEvents.length > SHOW_EVENTS && (
-            <button onClick={() => onNavigate('hub')}
-              style={{ marginTop: 10, background: 'none', border: 'none', color: 'var(--danger-fg)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
-              {attentionEvents.length - SHOW_EVENTS} more in the Event Hub →
-            </button>
-          )}
-        </div>
-      )}
 
       <div className="dash-grid2" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
         {!loading && attention.map((r) => (

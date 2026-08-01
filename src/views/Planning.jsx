@@ -8,7 +8,7 @@ import CreateTeamForm from '../components/CreateTeamForm'
 import { CreateSessionForm } from './Events'
 import { AddImport } from './Interest'
 import KebabMenu from '../components/KebabMenu'
-import { eventDays, currentPhase, phaseTone, groupPhases, PHASE_SHORT, flaggedPhases, FLAG_META, fmtDay, rangeLabel, phaseFlag } from '../lib/planning'
+import { eventDays, fmtDay, rangeLabel } from '../lib/planning'
 import { ensureSeriesWindow } from '../lib/series'
 
 // Planning = the per-event TO-DO LIST + action launchers (block/team editing lives in
@@ -17,20 +17,15 @@ import { ensureSeriesWindow } from '../lib/series'
 
 export default function Planning({ me, isCoordinator, onToast, openEventId = null, onEventConsumed, onCreateEvent }) {
   const [events, setEvents] = useState(null)
-  const [phasesByEvent, setPhasesByEvent] = useState({}) // activity_id -> phases[]
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
 
   const load = useCallback(async () => {
     setErr(null)
     await ensureSeriesWindow().catch(() => {}) // roll the recurring-event window forward
-    const [a, p] = await Promise.all([
-      supabase.from('activities').select('id, name, center_id, activity_date, start_date, end_date, activity_type_id, description, series_id, default_attendance_mode').is('archived_at', null).order('start_date', { ascending: true }),
-      supabase.from('event_phases').select('activity_id, kind, sort_order, start_by, finish_by, started_at, completed_at'),
-    ])
+    const a = await supabase.from('activities').select('id, name, center_id, activity_date, start_date, end_date, activity_type_id, description, series_id, default_attendance_mode').is('archived_at', null).order('start_date', { ascending: true })
     if (a.error) { setErr(a.error.message); setEvents([]); return }
     setEvents(a.data || [])
-    setPhasesByEvent(groupPhases(p.data))
   }, [])
   useEffect(() => { load() }, [load])
 
@@ -56,68 +51,19 @@ export default function Planning({ me, isCoordinator, onToast, openEventId = nul
   return (
     <Pad>
       <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--muted)' }}>Staff volunteers for each event — activity blocks, per-day slots, recruiting.</p>
-      <AttentionPanel events={events} phasesByEvent={phasesByEvent} onOpen={setOpenId} />
-      <EventList events={events} phasesByEvent={phasesByEvent} onOpen={setOpenId} right={isCoordinator && onCreateEvent && (
+      <EventList events={events} onOpen={setOpenId} right={isCoordinator && onCreateEvent && (
         <button className="btn btn-primary" style={{ fontSize: 12, padding: '8px 14px' }} onClick={() => onCreateEvent()}>＋ Create event</button>
       )} />
     </Pad>
   )
 }
 
-// Global "needs attention" — every OVERDUE / AT-RISK phase across all events in one
-// place (the demoted Planning view's headline). Click routes to that event's detail.
-function AttentionPanel({ events, phasesByEvent, onOpen }) {
-  const flagged = flaggedPhases(events, phasesByEvent)
-  if (!flagged.length) return null
-  return (
-    <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: '#EBC7BB', background: '#FDF3EF' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B5391F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><path d="M12 9v4M12 17h.01" /></svg>
-        <div style={{ fontSize: 14, fontWeight: 600, color: '#8A2E18' }}>Needs attention</div>
-        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{flagged.length} phase{flagged.length > 1 ? 's' : ''} across all events</span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {flagged.map(({ event, phase, flag }) => {
-          const m = FLAG_META[flag]
-          return (
-            <div key={phase.activity_id + phase.kind} className="rowhover" onClick={() => onOpen(event.id)}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, cursor: 'pointer', background: '#fff', border: '1px solid #F0DED6' }}>
-              <span className="pill" style={{ background: m.bg, color: m.fg, fontSize: 10.5 }}>{m.label}</span>
-              <span style={{ fontSize: 13, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{event.name}</span>
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>· {PHASE_SHORT[phase.kind] || phase.label}</span>
-              <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted-2)', whiteSpace: 'nowrap' }}>
-                {flag === 'overdue' ? `start by ${fmtDay(phase.start_by)}` : `finish by ${fmtDay(phase.finish_by)}`}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
 // ------------------------------------------------------------- Event planning detail
 // Phases (from the template) group the activity blocks. Each phase carries a date
-// window (start_by/finish_by) and explicit started/complete toggles. A phase-linked
-// block draws its per-day slots from the PHASE window; unphased blocks fall back to
-// the event span.
-export function PlanningEvent({ ev, me, isCoordinator, onBack, onToast, onEventChanged, onStartCampaign, onOpenInterest, embedded = false }) {
-  const [phases, setPhases] = useState([])
-  const [err, setErr] = useState(null)
-
+// The per-event surface is the to-do list. Teams live in the Teams tab and
+// attendance sessions in the Attendance tab; nothing is duplicated here.
+export function PlanningEvent({ ev, me, isCoordinator, onBack, onToast, onStartCampaign, onOpenInterest, embedded = false }) {
   const eventSpan = eventDays(ev.start_date, ev.end_date)
-
-  // Phases stay as the invisible backbone (current-phase pill + notifications); the
-  // Planning surface itself is now a to-do list. Blocks/teams live in the Teams tab.
-  const load = useCallback(async () => {
-    setErr(null)
-    const { data, error } = await supabase.from('event_phases').select('*').eq('activity_id', ev.id).order('sort_order')
-    if (error) { setErr(error.message); return }
-    setPhases(data || [])
-  }, [ev.id])
-  useEffect(() => { load() }, [load])
-
-  const cur = currentPhase(ev, phases || [])
 
   const inner = (
     <>
@@ -129,7 +75,7 @@ export function PlanningEvent({ ev, me, isCoordinator, onBack, onToast, onEventC
       )}
 
       {/* Event header only on the standalone page — redundant in the Event Hub,
-          which already shows name/date/phase above the tabs. */}
+          which already shows name and date above the tabs. */}
       {!embedded && (
         <div className="card" style={{ padding: 22, marginBottom: 18 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -137,98 +83,14 @@ export function PlanningEvent({ ev, me, isCoordinator, onBack, onToast, onEventC
               <h2 style={{ fontSize: 21, fontWeight: 600, margin: '0 0 3px' }}>{ev.name}</h2>
               <div style={{ fontSize: 13, color: 'var(--muted)' }}>{rangeLabel(ev.start_date, ev.end_date)} · {eventSpan.length} day{eventSpan.length !== 1 ? 's' : ''} · {ev.center_id}</div>
             </div>
-            <span className="pill" style={{ background: phaseTone(cur.kind).bg, color: phaseTone(cur.kind).fg }}>{cur.label}</span>
           </div>
         </div>
       )}
-
-      {err && <ErrorCard>{err}</ErrorCard>}
-      <PhaseChecklist phases={phases} isCoordinator={isCoordinator} onToast={onToast} onChanged={() => { load(); onEventChanged?.() }} />
       <EventTodos ev={ev} me={me} isCoordinator={isCoordinator} onToast={onToast}
         onStartCampaign={onStartCampaign} onOpenInterest={onOpenInterest} />
     </>
   )
   return embedded ? inner : <Pad>{inner}</Pad>
-}
-
-// ------------------------------------------------------------- Preparation phases
-// THE ALARM NOBODY COULD SWITCH OFF
-// `phaseFlag` calls a phase overdue when it is past its start date and `started_at`
-// is null. Across the live database there are 104 phase rows and **zero** have
-// `started_at` or `completed_at` set \u2014 because until now nothing in the entire
-// app wrote to those columns. Every `event_phases` reference in the codebase was a
-// SELECT.
-//
-// So the Dashboard's "Event preparation slipping" panel, sitting at the top of the
-// landing screen, was permanently red for every event with a past-dated phase, and
-// no coordinator could clear a single one. An alarm that cannot be answered stops
-// being an alarm within about a week \u2014 it teaches people to skip the top of the
-// screen, which is where the people worklist lives.
-//
-// This is the missing control. Start it, finish it, or undo either \u2014 and the same
-// row that reports the flag is the row that clears it.
-function PhaseChecklist({ phases, isCoordinator, onToast, onChanged }) {
-  const [busy, setBusy] = useState(null)
-  if (!phases || phases.length === 0) return null
-
-  async function setPhase(p, patch, said) {
-    setBusy(p.id)
-    try {
-      const { error } = await supabase.from('event_phases').update(patch).eq('id', p.id)
-      if (error) throw error
-      onToast(said)
-      onChanged()
-    } catch (e) { onToast('Could not update: ' + (e.message || e)) } finally { setBusy(null) }
-  }
-
-  const flagged = phases.filter((p) => phaseFlag(p)).length
-  const done = phases.filter((p) => p.completed_at).length
-
-  return (
-    <div className="card" style={{ padding: 16, marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 14, fontWeight: 600 }}>Preparation</span>
-        <span className="pill" style={flagged ? pill(FLAG_META.overdue.bg, FLAG_META.overdue.fg) : pill('var(--success-bg)', 'var(--success-fg)')}>
-          {flagged ? `${flagged} needs attention` : done === phases.length ? 'All done' : 'On track'}
-        </span>
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-2)' }}>{done}/{phases.length} done</span>
-      </div>
-      {phases.map((p) => {
-        const flag = phaseFlag(p)
-        const meta = flag ? FLAG_META[flag] : null
-        const label = PHASE_SHORT[p.kind] || p.label || p.kind
-        const window = p.start_by ? `${fmtDay(p.start_by)}${p.finish_by && p.finish_by !== p.start_by ? ` \u2013 ${fmtDay(p.finish_by)}` : ''}` : 'No dates set'
-        return (
-          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: '1px solid #F4EEE2', flexWrap: 'wrap' }}>
-            <div style={{ minWidth: 0, flex: '1 1 190px' }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: p.completed_at ? 'var(--muted)' : 'var(--ink)', textDecoration: p.completed_at ? 'line-through' : 'none' }}>{label}</div>
-              <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>{window}</div>
-            </div>
-            {meta && <span className="pill" style={{ ...pill(meta.bg, meta.fg), flexShrink: 0 }}>{meta.label}</span>}
-            {p.completed_at && <span className="pill" style={{ ...pill('var(--success-bg)', 'var(--success-fg)'), flexShrink: 0 }}>Done</span>}
-            {!p.completed_at && p.started_at && !meta && <span className="pill" style={{ ...pill('var(--pill-warm-bg)', 'var(--pill-orange-fg)'), flexShrink: 0 }}>In progress</span>}
-            {isCoordinator && (
-              <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginLeft: 'auto' }}>
-                {!p.started_at && !p.completed_at && (
-                  <button className="btn btn-ghost tap44" disabled={busy === p.id} style={{ fontSize: 12, padding: '6px 11px' }}
-                    onClick={() => setPhase(p, { started_at: new Date().toISOString() }, `${label} started.`)}>Start</button>
-                )}
-                {!p.completed_at && (
-                  <button className="btn btn-primary tap44" disabled={busy === p.id} style={{ fontSize: 12, padding: '6px 11px' }}
-                    onClick={() => setPhase(p, { started_at: p.started_at || new Date().toISOString(), completed_at: new Date().toISOString() }, `${label} marked done.`)}>Done</button>
-                )}
-                {(p.started_at || p.completed_at) && (
-                  <button className="btn btn-ghost tap44" disabled={busy === p.id} style={{ fontSize: 12, padding: '6px 9px' }}
-                    title="Put this phase back the way it was"
-                    onClick={() => setPhase(p, p.completed_at ? { completed_at: null } : { started_at: null }, `${label} reopened.`)}>Undo</button>
-                )}
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
 }
 
 // ------------------------------------------------------------- Event to-do list

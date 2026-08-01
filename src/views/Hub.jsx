@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import { pill, initials, avatarFor } from '../lib/ui'
-import { rangeLabel, groupPhases, phaseFlag, currentPhase, phaseTone, fmtDay, countdownLabel, eventDaysWithSetup, phaseSummary, teamFill, PHASE_SHORT, FLAG_META, eventIsOver } from '../lib/planning'
+import { rangeLabel, fmtDay, countdownLabel, eventDaysWithSetup, teamFill, eventIsOver } from '../lib/planning'
 import { ensureSeriesWindow } from '../lib/series'
 import { fetchActivityTypes } from '../lib/activityTypes'
 import EventList from '../components/EventList'
@@ -28,7 +28,6 @@ import PersonProfile from '../components/PersonProfile'
 export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStartCampaign, onOpenInterestInbox, openEventId = null, onEventConsumed, onListModeChange, onCreateEvent }) {
   const { isPhone } = useBreakpoint()
   const [events, setEvents] = useState(null)
-  const [phasesByEvent, setPhasesByEvent] = useState({})
   const [readiness, setReadiness] = useState({})
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
@@ -43,18 +42,15 @@ export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStar
   const load = useCallback(async () => {
     setErr(null)
     await ensureSeriesWindow().catch(() => {})
-    const [a, p, bl, ba, ei] = await Promise.all([
+    const [a, bl, ba, ei] = await Promise.all([
       supabase.from('activities').select('id, name, center_id, activity_date, start_date, end_date, series_id').is('archived_at', null).order('start_date', { ascending: true }),
-      supabase.from('event_phases').select('activity_id, kind, label, sort_order, start_by, finish_by, started_at, completed_at'),
       supabase.from('activity_blocks').select('id, activity_id, volunteers_needed, archived_at').is('archived_at', null),
       supabase.from('block_assignments').select('block_id, person_id, status'),
       supabase.from('event_interest').select('activity_id, status'),
     ])
     if (a.error) { setErr(a.error.message); setEvents([]); return }
     const evs = a.data || []
-    const phases = groupPhases(p.data)
     setEvents(evs)
-    setPhasesByEvent(phases)
 
     const blocksByEvent = {}
     for (const b of bl.data || []) (blocksByEvent[b.activity_id] ||= []).push(b)
@@ -62,15 +58,10 @@ export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStar
     for (const r of ei.data || []) if (r.status === 'interested') waitingByEvent[r.activity_id] = (waitingByEvent[r.activity_id] || 0) + 1
     const map = {}
     for (const e of evs) {
-      // A phase on a finished event is not late work, it is work that will never be
-      // done — the same rule the Dashboard already follows, so the two agree.
-      const over = eventIsOver(e)
       map[e.id] = {
-        phase: currentPhase(e, phases[e.id]),
-        prep: over ? { overdue: 0, atRisk: 0, worst: null, nextDue: null } : phaseSummary(phases[e.id]),
         team: teamFill(blocksByEvent[e.id], ba.data),
         waiting: waitingByEvent[e.id] || 0,
-        over,
+        over: eventIsOver(e),
       }
     }
     setReadiness(map)
@@ -98,7 +89,7 @@ export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStar
 
   return (
     <Pad>
-      <EventList events={events} phasesByEvent={phasesByEvent} readiness={readiness} onOpen={setOpenId} />
+      <EventList events={events} readiness={readiness} onOpen={setOpenId} />
       {isPhone && isCoordinator && onCreateEvent && (
         <>
           {/* Clears the fixed bar below so the last list row stays reachable. */}
@@ -115,28 +106,17 @@ export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStar
 // ---- one event's hub: TABS, every one scoped to THIS event --------------------
 function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampaign, onOpenInterestInbox, onToast }) {
   const [tab, setTab] = useState('planning')
-  const [phases, setPhases] = useState([])
   const [types, setTypes] = useState([])
   const [reloadKey, setReloadKey] = useState(0)
   const reload = () => setReloadKey((k) => k + 1)
 
   useEffect(() => {
     let alive = true
-    supabase.from('event_phases').select('kind, label, sort_order, start_by, finish_by, started_at, completed_at').eq('activity_id', ev.id).order('sort_order')
-      .then(({ data }) => { if (alive) setPhases(data || []) })
     fetchActivityTypes().then((t) => { if (alive) setTypes(t || []) }).catch(() => {})
     return () => { alive = false }
     // reloadKey: marking a phase started/done in the Planning tab must clear the
     // banner above the tabs too, or the header keeps insisting on work you just did.
   }, [ev.id, reloadKey])
-
-  // `cur` and `flags` were computed here and rendered NOWHERE — and Planning had
-  // dropped its own current-phase pill with the comment "redundant in the Event Hub,
-  // which already shows name/date/phase above the tabs". It did not. So the phase
-  // backbone was invisible on the one screen that owns events.
-  const cur = currentPhase(ev, phases)
-  const over = eventIsOver(ev)
-  const flags = over ? [] : phases.map((p) => ({ label: PHASE_SHORT[p.kind] || p.label, start_by: p.start_by, flag: phaseFlag(p) })).filter((f) => f.flag)
 
   // Five tabs, and for most events four of them are empty — but you had to open each
   // one to find that out. The counts are one head-query apiece, once per event.
@@ -175,7 +155,6 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <span className="pill" style={{ background: phaseTone(cur.kind).bg, color: phaseTone(cur.kind).fg, fontWeight: 600 }}>{cur.label}</span>
             {(() => {
               const cd = countdownLabel(ev.start_date || ev.activity_date)
               const late = cd.startsWith('Overdue')
@@ -196,23 +175,7 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
         ))}
       </div>
 
-      {/* The one thing the Dashboard sends people here to see. It links to Planning
-          because that is where the phases can now actually be marked. */}
-      {flags.length > 0 && (
-        <div className="card" style={{ padding: '11px 14px', marginBottom: 14, background: FLAG_META.overdue.bg, borderColor: '#E7C9B8', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13, color: FLAG_META.overdue.fg, fontWeight: 600 }}>
-            {flags.length} preparation {flags.length === 1 ? 'phase needs' : 'phases need'} attention
-          </span>
-          <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>
-            {flags.map((f) => `${f.label}${f.start_by ? ` · due ${fmtDay(f.start_by)}` : ''}`).join(' · ')}
-          </span>
-          {tab !== 'planning' && (
-            <button className="btn btn-ghost tap44" style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 11px' }} onClick={() => setTab('planning')}>Open Planning</button>
-          )}
-        </div>
-      )}
-
-      {tab === 'planning' && <PlanningEvent ev={ev} me={me} isCoordinator={isCoordinator} embedded onToast={onToast} onEventChanged={reload} onStartCampaign={onStartCampaign} onOpenInterest={onOpenInterestInbox} />}
+      {tab === 'planning' && <PlanningEvent ev={ev} me={me} isCoordinator={isCoordinator} embedded onToast={onToast} onStartCampaign={onStartCampaign} onOpenInterest={onOpenInterestInbox} />}
       {tab === 'teams' && <EventTeams ev={ev} me={me} isCoordinator={isCoordinator} onToast={onToast} />}
       {tab === 'interest' && <EventInterestTab ev={ev} me={me} isCoordinator={isCoordinator} onToast={onToast} />}
       {tab === 'campaigns' && <EventCampaignsTab ev={ev} isCoordinator={isCoordinator} onOpenCampaign={onOpenCampaign} onStartCampaign={onStartCampaign} />}

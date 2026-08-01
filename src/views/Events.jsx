@@ -6,7 +6,7 @@ import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import { ensureParticipation } from '../lib/volunteers'
 import CommentThread from '../components/CommentThread'
 import { fetchActivityTypes } from '../lib/activityTypes'
-import { fmtDay, groupPhases, seriesDatesUpTo, seriesEndDate, todayISO, addDaysISO, recurrenceLabel } from '../lib/planning'
+import { fmtDay, seriesDatesUpTo, seriesEndDate, todayISO, addDaysISO, recurrenceLabel } from '../lib/planning'
 import { ensureSeriesWindow, SERIES_WINDOW_DAYS } from '../lib/series'
 import RecurrenceFields, { toRule } from '../components/RecurrenceFields'
 import EventList from '../components/EventList'
@@ -38,7 +38,6 @@ function TypeBadge({ typeId, types = [] }) {
 
 export default function Events({ me, isCoordinator = false, onToast, openEventId = null, onEventConsumed, onCreateEvent }) {
   const [acts, setActs] = useState(null)
-  const [phasesByEvent, setPhasesByEvent] = useState({}) // activity_id -> phases[]
   const [types, setTypes] = useState([])
   const [centers, setCenters] = useState([])
   const [err, setErr] = useState(null)
@@ -49,13 +48,11 @@ export default function Events({ me, isCoordinator = false, onToast, openEventId
       await ensureSeriesWindow().catch(() => {}) // roll the recurring-event window forward
       const [a, p, t, c] = await Promise.all([
         supabase.from('activities').select('id, name, center_id, activity_date, start_date, end_date, activity_type, activity_type_id, is_open, description, archived_at, series_id').is('archived_at', null).order('start_date', { ascending: true }).limit(300),
-        supabase.from('event_phases').select('activity_id, kind, sort_order, start_by, finish_by'),
         fetchActivityTypes().catch(() => []),
         supabase.from('centers').select('id, name').order('name'),
       ])
       if (a.error) throw a.error
       setActs(a.data || [])
-      setPhasesByEvent(groupPhases(p.data))
       setTypes(t || [])
       setCenters(c.data || [])
     } catch (e) {
@@ -85,7 +82,7 @@ export default function Events({ me, isCoordinator = false, onToast, openEventId
       <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--muted)' }}>Mark show / no-show for planned volunteers and capture walk-ins on the day.</p>
       {err && <ErrorCard>Couldn't load events: {err}</ErrorCard>}
       {loading ? <Loading label="Loading events…" /> : (
-        <EventList events={acts} phasesByEvent={phasesByEvent} onOpen={setOpenId} />
+        <EventList events={acts} onOpen={setOpenId} />
       )}
     </Pad>
   )
@@ -410,15 +407,12 @@ export function CreateSessionForm({ activity, session = null, attnCount = 0, typ
   const [addingType, setAddingType] = useState(false)
   const [title, setTitle] = useState(session?.title || '')
   const [titleEdited, setTitleEdited] = useState(!!session?.title)
-  const [earliestPhase, setEarliestPhase] = useState(null)
   const [confirmedFar, setConfirmedFar] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     supabase.from('centers').select('id, name, active').order('name')
       .then(({ data }) => setCentres((data || []).filter((c) => c.active && !['all', 'unassigned'].includes(c.id))))
-    supabase.from('event_phases').select('start_by').eq('activity_id', activity.id).not('start_by', 'is', null).order('start_by').limit(1)
-      .then(({ data }) => setEarliestPhase(data?.[0]?.start_by || null))
   }, [activity.id])
 
   const allTypes = [...types, ...localTypes]
@@ -428,10 +422,9 @@ export function CreateSessionForm({ activity, session = null, attnCount = 0, typ
   const autoTitle = `${allTypes.find((t) => t.id === typeId)?.label || 'Attendance'} — ${fmtDay(date)}`
   const effTitle = titleEdited && title.trim() ? title.trim() : autoTitle
 
-  // Soft window: from 1 day before the event start (or the earliest planned phase,
-  // whichever is earlier) through the event end. Outside is allowed but warns.
-  const startMinus1 = addDays(spanStart, -1)
-  const windowStart = earliestPhase && earliestPhase < startMinus1 ? earliestPhase : startMinus1
+  // Soft window: from 1 day before the event start (Day 0 — where hall setup lands)
+  // through the event end. Outside is allowed but warns.
+  const windowStart = addDays(spanStart, -1)
   const outside = date < windowStart || date > spanEnd
   const nBefore = date < spanStart ? daysBetween(spanStart, date) : 0
   const nAfter = date > spanEnd ? daysBetween(date, spanEnd) : 0
