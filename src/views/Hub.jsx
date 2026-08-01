@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import { pill, initials, avatarFor } from '../lib/ui'
@@ -31,6 +31,7 @@ export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStar
   const [readiness, setReadiness] = useState({})
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
+  const retried = useRef(null) // guards the reload-once retry below
 
   // Report list-vs-detail mode up so the Topbar knows when to show "+ Create event"
   // (it only makes sense on the events LIST, not inside a specific event's hub).
@@ -73,7 +74,18 @@ export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStar
   // event's HUB rather than the list / the wrong page.
   useEffect(() => {
     if (!openEventId || events === null) return
-    if (events.some((e) => e.id === openEventId)) setOpenId(openEventId)
+    if (events.some((e) => e.id === openEventId)) {
+      setOpenId(openEventId)
+      onEventConsumed?.()
+      retried.current = null
+      return
+    }
+    // A just-created event is not in this list yet — the Hub was already mounted
+    // when it was made. Without this, creating an event from the Event Hub looked
+    // like nothing happened: no new row, and the event did not open. Reload once
+    // and let the next pass find it; the ref stops it from looping if it never
+    // arrives (e.g. another centre's event the reader cannot see).
+    if (retried.current !== openEventId) { retried.current = openEventId; load(); return }
     onEventConsumed?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openEventId, events])
