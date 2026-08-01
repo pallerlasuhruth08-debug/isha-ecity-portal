@@ -59,8 +59,8 @@ export default function EventList({ events, readiness = {}, onOpen, right = null
           </div>
         ) : shown.map((e) => {
           const past = (e.end_date || e.start_date || e.activity_date || '') < t
-          const cd = countdownLabel(e.start_date || e.activity_date)
-          const over = cd.startsWith('Overdue')
+          const cd = countdownLabel(e.start_date || e.activity_date, e.end_date)
+          const over = cd === 'Running now'
           return (
             <div key={e.id} className="rowhover" onClick={() => onOpen(e.id)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', borderBottom: '1px solid #F1E9DB', cursor: 'pointer' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
