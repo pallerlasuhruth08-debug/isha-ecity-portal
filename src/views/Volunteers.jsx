@@ -14,7 +14,8 @@ import { fetchActivityTypes } from '../lib/activityTypes'
 import { PROGRAMS, PROGRAM_BY_KEY, programsWithData } from '../lib/programs'
 import { COHORT_PROGRAMMES, eligibilityCohort } from '../lib/cohorts'
 import { usePagedQuery, useDebounced, fetchAllMatchingIds } from '../lib/usePagedQuery'
-import { excludeTooLarge, EXCLUDE_TOO_LARGE_MESSAGE } from '../lib/coveredFilter'
+import { excludeTooLarge, EXCLUDE_TOO_LARGE_MESSAGE, CONTACT_EXCLUDE_TOO_LARGE_MESSAGE } from '../lib/coveredFilter'
+import { contactState, ishaActivityLabel, applyIshaActivity, ISHA_ACTIVITY_OPTIONS, CONTACT_OPTIONS } from '../lib/engagement'
 
 // "samyama" -> "Ready now · Samyama"; "samyama:soon" -> "Ready soon · Samyama"
 function readyLabel(v) {
@@ -27,24 +28,47 @@ import { addRecipientsToCampaign } from '../lib/campaignRecipients'
 const STAGE_TO_STATUS = { New: 'new', 'Reached out': 'contacted', Oriented: 'matched', Active: 'active' }
 const STATUS_TO_STAGE = { new: 'New', contacted: 'Reached out', matched: 'Oriented', active: 'active', inactive: 'New' }
 
-const lastActiveLabel = (d) => {
-  if (!d) return '—'
-  const days = Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
-  if (days <= 0) return 'Today'
-  if (days === 1) return 'Yesterday'
-  if (days < 30) return `${days} days ago`
-  return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-}
-const daysAgoISO = (d) => new Date(Date.now() - d * 86400000).toISOString().slice(0, 10)
-const todayISO = () => new Date().toISOString().slice(0, 10)
 const uniq = (a) => [...new Set(a.filter(Boolean))]
+
+// Four chip vocabularies were repeated inline in eight places across the phone and
+// desktop rows, which is how the same chip ended up two different shades.
+const chip = (fg, bg) => ({ fontSize: 12, fontWeight: 600, color: fg, background: bg, padding: '2px 7px', borderRadius: 6 })
+const CHIP = {
+  programme: chip('#6A4CA0', '#F0EAF7'),
+  seva: chip('#7A5230', '#F3EADB'),
+  skill: chip('#33507D', '#E7EEF7'),
+  tag: chip('#fff', 'var(--rust)'),
+}
+const CONTACT_TONE = { warn: 'var(--rust)', ok: 'var(--leaf)' }
+
+// Up to two seva chips, then a count — a volunteer who has done six kinds of seva
+// should not push every other row down by three lines to say so.
+const SEVA_SHOWN = 2
+
+// "4 attended" and the kinds of seva were two separate columns saying one thing.
+function SevaCell({ v }) {
+  if (!v.attended) return <span style={{ fontSize: 14, color: 'var(--muted-2)' }}>—</span>
+  const shown = v.derivedTags.slice(0, SEVA_SHOWN)
+  const more = v.derivedTags.length - shown.length
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 14, color: 'var(--leaf)', fontWeight: 600 }}>{v.attended} attended</div>
+      {shown.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3 }}>
+          {shown.map((t) => (<span key={t} style={CHIP.seva}>{t}</span>))}
+          {more > 0 && <span style={{ fontSize: 12, color: 'var(--muted-2)', fontWeight: 600 }}>+{more}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
 const NIL = '00000000-0000-0000-0000-000000000000'
 
 // One source of truth for the filter shape — initial state AND "Clear filters"
 // both use it, so the two can never drift out of sync (they previously did:
 // clearing wrote a stray `bsp` key and dropped `program`, leaving that select
 // uncontrolled).
-const INITIAL_FILTERS = { stage: '', centre: '', ie: '', program: '', last: '', tag: '', event: '', atype: '', sub: '', skill: '', nurt: '', ready: '', contact: '' }
+const INITIAL_FILTERS = { stage: '', centre: '', ie: '', program: '', last: '', tag: '', event: '', atype: '', sub: '', skill: '', nurt: '', ready: '', contact: '', seen: '' }
 
 export default function Volunteers({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone, preset = null, onPresetConsumed }) {
   const { isPhone } = useBreakpoint()
@@ -65,7 +89,8 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const [subIds, setSubIds] = useState(null) // sub-activity filter -> person ids captured under that sub-activity
   const [skillIds, setSkillIds] = useState(null) // skill filter -> person ids who have that skill
   const [coveredIds, setCoveredIds] = useState(null)
-  const [readyIds, setReadyIds] = useState(null) // null = off, 'loading', array, or { tooBroad } 
+  const [seenIds, setSeenIds] = useState(null) // people we have actually met or called
+  const [readyIds, setReadyIds] = useState(null) // null = off, 'loading', array, or { tooBroad }
 
   const sel = useTableSelection()
   const [showForm, setShowForm] = useState(false)
@@ -228,6 +253,24 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     return () => { alive = false }
   }, [fil.nurt])
 
+  // "We have met or called them" / "Never contacted by us" — the only two facts
+  // about the relationship that this centre actually owns. Neither `last_activity_at`
+  // (the sync stamp) nor `last_active_date` (an upstream Isha transaction date)
+  // can answer it, so it is resolved from attendance + call logs.
+  useEffect(() => {
+    if (!fil.seen) { setSeenIds(null); return }
+    let alive = true
+    setSeenIds('loading')
+    Promise.all([
+      supabase.from('attendance').select('person_id').eq('status', 'attended').not('person_id', 'is', null).limit(20000),
+      supabase.from('call_logs').select('person_id').not('person_id', 'is', null).limit(20000),
+    ]).then(([a, c]) => {
+      if (!alive) return
+      setSeenIds([...new Set([...(a.data || []), ...(c.data || [])].map((r) => r.person_id))])
+    })
+    return () => { alive = false }
+  }, [fil.seen])
+
   // Smart list: "ready for <programme>", resolved to person ids from the
   // generated person_eligibility view so the cohort and the profile verdict
   // come from the same rules.
@@ -251,13 +294,15 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (Array.isArray(subIds)) q = q.in('person_id', subIds.length ? subIds : [NIL])
       if (Array.isArray(skillIds)) q = q.in('person_id', skillIds.length ? skillIds : [NIL])
       if (fil.nurt === 'needs' && Array.isArray(coveredIds) && coveredIds.length && !excludeTooLarge(coveredIds)) q = q.not('person_id', 'in', `(${coveredIds.join(',')})`)
+      if (fil.seen === 'met' && Array.isArray(seenIds)) q = q.in('person_id', seenIds.length ? seenIds : [NIL])
+      if (fil.seen === 'never' && Array.isArray(seenIds) && seenIds.length && !excludeTooLarge(seenIds)) q = q.not('person_id', 'in', `(${seenIds.join(',')})`)
       if (Array.isArray(readyIds)) q = q.in('person_id', readyIds.length ? readyIds : [NIL])
       if (fil.centre) q = q.eq('center_id', fil.centre)
       if (fil.ie) q = q.gte('ie_date', `${fil.ie}-01-01`).lte('ie_date', `${fil.ie}-12-31`)
       if (PROGRAM_BY_KEY[fil.program]) q = q.not(PROGRAM_BY_KEY[fil.program].col, 'is', null)
-      if (fil.last === '30') q = q.gte('last_active_date', daysAgoISO(30))
-      if (fil.last === '90') q = q.gte('last_active_date', daysAgoISO(90))
-      if (fil.last === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
+      // `last_active_date` is the upstream Isha transaction date, not our contact —
+      // one shared helper so the filter, the label and the other screens agree.
+      q = applyIshaActivity(q, fil.last)
       // Data quality as a first-class filter: a volunteer with no number cannot be
       // called or messaged, so "who can't we reach" is a real working list, not an
       // export-and-clean-later job.
@@ -266,7 +311,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (searchOr) q = q.or(searchOr)
       return q
     },
-    [fil, debounced, tagIds, eventIds, atypeIds, subIds, skillIds, coveredIds, readyIds],
+    [fil, debounced, tagIds, eventIds, atypeIds, subIds, skillIds, coveredIds, seenIds, readyIds],
   )
 
   const fetchAllIds = useCallback(
@@ -278,9 +323,12 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   // person_id as a stable tiebreak — so page 1 is globally most-recent.
   const buildPage = useCallback(
     () => applyFilters(
-      supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date, tags, last_activity_at', { count: 'exact' }),
+      supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date, tags', { count: 'exact' }),
     )
-      .order('last_activity_at', { ascending: false, nullsFirst: false })
+      // Page 1 used to be "whoever the importer touched last", because the sort was
+      // on `last_activity_at` — a sync stamp that lands 917 of 941 values in a single
+      // July run. `last_active_date` is at least a real date about a real person.
+      .order('last_active_date', { ascending: false, nullsFirst: false })
       .order('person_id', { ascending: true }),
     [applyFilters],
   )
@@ -295,6 +343,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     !(fil.sub && !Array.isArray(subIds)) &&
     !(fil.skill && !Array.isArray(skillIds)) &&
     !(fil.nurt === 'needs' && !Array.isArray(coveredIds)) &&
+    !(fil.seen && !Array.isArray(seenIds)) &&
     readyIds !== 'loading'
 
   const enrichPage = useCallback(async (data) => {
@@ -309,28 +358,37 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
           stage: isCore ? 'Core Group' : STATUS_TO_STAGE[r.status] || 'New',
           programs: PROGRAMS.filter((pr) => r[pr.col]).map((pr) => pr.chip),
           where: [r.area, r.pincode].filter(Boolean).join(' · ') || r.center_id || '—',
-          last: lastActiveLabel(r.last_activity_at),
+          isha: r.last_active_date,
           attended: 0,
           derivedTags: [],
           manualTags: [],
           skills: [],
+          nurturer: null,
+          contact: contactState({}),
         }
       })
 
     const ids = mapped.map((m) => m.id)
     if (ids.length) {
-      const [attRes, mtRes, skRes] = await Promise.all([
-        supabase.from('attendance').select('person_id, atype:activity_types(label)').in('person_id', ids).eq('status', 'attended'),
+      const [attRes, mtRes, skRes, callRes, nurtRes] = await Promise.all([
+        supabase.from('attendance').select('person_id, time_in, atype:activity_types(label)').in('person_id', ids).eq('status', 'attended'),
         supabase.from('manual_tags').select('person_id, tag').in('person_id', ids),
         supabase.from('person_skills').select('person_id, skill:skills(label)').in('person_id', ids),
+        supabase.from('call_logs').select('person_id, logged_at').in('person_id', ids),
+        supabase.from('nurturing_assignments').select('cared_person_id, nurturer:people!nurturing_assignments_nurturer_person_id_fkey(full_name)').in('cared_person_id', ids).eq('active', true),
       ])
       const att = {}
       for (const a of attRes.data || []) {
-        const b = (att[a.person_id] ||= { count: 0, types: new Set() })
+        const b = (att[a.person_id] ||= { count: 0, types: new Set(), lastAt: null })
         b.count += 1
         const t = a.atype?.label
         if (t) b.types.add(t)
+        if (a.time_in && (!b.lastAt || a.time_in > b.lastAt)) b.lastAt = a.time_in
       }
+      const calls = {}
+      for (const c of callRes.data || []) if (c.logged_at && (!calls[c.person_id] || c.logged_at > calls[c.person_id])) calls[c.person_id] = c.logged_at
+      const nurt = {}
+      for (const n of nurtRes.data || []) if (n.nurturer?.full_name) nurt[n.cared_person_id] = n.nurturer.full_name
       const mtags = {}
       for (const m of mtRes.data || []) (mtags[m.person_id] ||= []).push(m.tag)
       const sks = {}
@@ -340,6 +398,8 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
         if (b) { m.attended = b.count; m.derivedTags = [...b.types] }
         m.manualTags = mtags[m.id] || []
         m.skills = sks[m.id] || []
+        m.nurturer = nurt[m.id] || null
+        m.contact = contactState({ metAt: b?.lastAt || null, calledAt: calls[m.id] || null })
       }
     }
     return mapped
@@ -429,23 +489,34 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   const togglePage = () => (pageSelectedCount === pageIds.length && pageIds.length > 0 ? sel.deselectIds(pageIds) : sel.selectIds(pageIds))
 
   const selStyle ={ padding: isPhone ? '11px' : '8px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: isPhone ? 44 : undefined, flex: isPhone ? '1 1 calc(50% - 4px)' : undefined }
-  const selectDefs = [
-    { k: 'program', all: 'All programmes', chip: 'Programme', opts: PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => ({ v: p.key, label: p.label })) },
-    { k: 'event', all: 'Any event', chip: 'Event', opts: opts.events },
-    { k: 'atype', all: 'Any activity type', chip: 'Activity type', opts: opts.atypes },
-    ...(opts.subs.length ? [{ k: 'sub', all: 'Any sub-activity', chip: 'Sub-activity', opts: opts.subs }] : []),
-    { k: 'skill', all: 'Any skill', chip: 'Skill', opts: opts.skills },
-    { k: 'tag', all: 'Any tag', chip: 'Tag', opts: opts.tags },
-    { k: 'centre', all: 'All centres', chip: 'Centre', opts: opts.centres },
-    { k: 'ie', all: 'Any IE year', chip: 'IE year', opts: opts.ieYears },
-    { k: 'last', all: 'Active · any time', chip: 'Activity', opts: [{ v: '30', label: 'Active · 30 days' }, { v: '90', label: 'Active · 90 days' }, { v: 'quiet', label: 'Quiet · 90+ days' }] },
-    { k: 'nurt', all: 'Nurturer · any', chip: 'Nurturer', opts: [{ v: 'needs', label: 'Needs a nurturer' }] },
-    { k: 'contact', all: 'Contactable · any', chip: 'Contact', opts: [{ v: 'no_phone', label: 'No phone on record' }] },
-    { k: 'ready', all: 'Ready for · any', chip: 'Ready for', opts: COHORT_PROGRAMMES.flatMap((c) => [
-      { v: c.key, label: `Ready now · ${c.label}` },
-      ...(c.hasRipening ? [{ v: `${c.key}:soon`, label: `Ready soon · ${c.label}` }] : []),
-    ]) },
+  // Twelve dropdowns in one undifferentiated row asked the coordinator to read all
+  // of them to find one. They answer three separate questions, so they are now
+  // asked in three labelled groups — the same shape as the Interest inbox.
+  const groupedDefs = [
+    ['Care', [
+      { k: 'seen', all: 'Our contact · any', chip: 'Our contact', opts: CONTACT_OPTIONS },
+      { k: 'nurt', all: 'Nurturer · any', chip: 'Nurturer', opts: [{ v: 'needs', label: 'Needs a nurturer' }] },
+      { k: 'last', all: 'Isha activity · any time', chip: 'Isha activity', opts: ISHA_ACTIVITY_OPTIONS },
+      { k: 'contact', all: 'Reachable · any', chip: 'Reachable', opts: [{ v: 'no_phone', label: 'No phone on record' }] },
+    ]],
+    ['Sadhana', [
+      { k: 'program', all: 'All programmes', chip: 'Programme', opts: PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => ({ v: p.key, label: p.label })) },
+      { k: 'ready', all: 'Ready for · any', chip: 'Ready for', opts: COHORT_PROGRAMMES.flatMap((c) => [
+        { v: c.key, label: `Ready now · ${c.label}` },
+        ...(c.hasRipening ? [{ v: `${c.key}:soon`, label: `Ready soon · ${c.label}` }] : []),
+      ]) },
+      { k: 'ie', all: 'Any IE year', chip: 'IE year', opts: opts.ieYears },
+    ]],
+    ['Seva', [
+      { k: 'event', all: 'Any event', chip: 'Event', opts: opts.events },
+      { k: 'atype', all: 'Any activity type', chip: 'Activity type', opts: opts.atypes },
+      ...(opts.subs.length ? [{ k: 'sub', all: 'Any sub-activity', chip: 'Sub-activity', opts: opts.subs }] : []),
+      ...(opts.skills.length ? [{ k: 'skill', all: 'Any skill', chip: 'Skill', opts: opts.skills }] : []),
+      ...(opts.tags.length ? [{ k: 'tag', all: 'Any tag', chip: 'Tag', opts: opts.tags }] : []),
+      { k: 'centre', all: 'All centres', chip: 'Centre', opts: opts.centres },
+    ]],
   ]
+  const selectDefs = groupedDefs.flatMap(([, defs]) => defs)
   // Removable chips for every active filter (+ the search term). Value is the human
   // label, resolved from each select's options.
   const activeFilterItems = [
@@ -457,7 +528,14 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       return { key: d.k, label: d.chip, value, onRemove: () => setFil((f) => ({ ...f, [d.k]: '' })) }
     }),
   ]
-  const grid = '34px 2fr 1.15fr 1.4fr 1.1fr 1.1fr 0.85fr'
+  // Was: Volunteer | Programmes | Past activities | Skill | Where | Attended.
+  // Three of those six were chip columns, and the database holds 29 person_skills
+  // rows and 18 manual tags in total — so "Skill" rendered an em-dash on ~98% of
+  // rows while the app's own subject, who is looking after this person, was on no
+  // row at all. Skills and tags moved into the name cell (they appear the moment
+  // they exist), "Past activities" merged into Seva with the count it belongs to,
+  // and the two freed columns went to Nurturer and Last contact.
+  const grid = '34px 1.9fr 1.1fr 1.35fr 1fr 1fr 1.1fr'
 
   return (
     <Pad>
@@ -476,7 +554,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       <div style={{ marginBottom: 16, fontSize: 14, color: 'var(--muted)' }}>
         {loading ? 'Loading…' : (
           <>
-            {total} volunteer{total === 1 ? '' : 's'}
+            {total.toLocaleString('en-IN')} volunteer{total === 1 ? '' : 's'}
             <span className="mobile-hide"> · click a row to open the profile; use checkboxes to build a campaign.</span>
           </>
         )}
@@ -490,6 +568,11 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       {fil.nurt === 'needs' && excludeTooLarge(coveredIds) && (
         <div className="card" style={{ padding: '11px 14px', marginBottom: 12, background: 'var(--pill-yellow-bg)', borderColor: '#E4D9A8' }}>
           <span style={{ fontSize: 13, color: 'var(--pill-yellow-fg)' }}>{EXCLUDE_TOO_LARGE_MESSAGE}</span>
+        </div>
+      )}
+      {fil.seen === 'never' && excludeTooLarge(seenIds) && (
+        <div className="card" style={{ padding: '11px 14px', marginBottom: 12, background: 'var(--pill-yellow-bg)', borderColor: '#E4D9A8' }}>
+          <span style={{ fontSize: 13, color: 'var(--pill-yellow-fg)' }}>{CONTACT_EXCLUDE_TOO_LARGE_MESSAGE}</span>
         </div>
       )}
       {/* A cohort past the cap is refused, not truncated: showing the first 2,000
@@ -508,15 +591,20 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email or pincode…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
         <MobileFilterSheet count={Object.values(fil).filter(Boolean).length}>
-          {selectDefs.map((d) => (
-            <select key={d.k} value={fil[d.k]} onChange={setF(d.k)} style={selStyle}>
-              <option value="">{d.all}</option>
-              {d.opts.map((o) => {
-                const v = typeof o === 'string' ? o : o.v
-                const label = typeof o === 'string' ? o : o.label
-                return <option key={v} value={v}>{label}</option>
-              })}
-            </select>
+          {groupedDefs.map(([group, defs]) => (
+            <div key={group} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', flexBasis: isPhone ? '100%' : undefined }}>
+              <span style={{ fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, flexShrink: 0 }}>{group}</span>
+              {defs.map((d) => (
+                <select key={d.k} value={fil[d.k]} onChange={setF(d.k)} style={selStyle}>
+                  <option value="">{d.all}</option>
+                  {d.opts.map((o) => {
+                    const v = typeof o === 'string' ? o : o.v
+                    const label = typeof o === 'string' ? o : o.label
+                    return <option key={v} value={v}>{label}</option>
+                  })}
+                </select>
+              ))}
+            </div>
           ))}
           {filterActive && <button onClick={clearFil} style={{ background: 'none', border: 'none', color: '#B85C1E', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Clear filters</button>}
         </MobileFilterSheet>
@@ -538,15 +626,23 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
             <Checkbox state={pageHeaderState} onClick={(e) => { e.stopPropagation(); togglePage() }} />
             <span>Volunteer</span>
             <span>Programmes</span>
-            <span>Past activities</span>
-            <span>Skill</span>
+            <span>Seva</span>
             <span>Where</span>
-            <span>Attended</span>
+            <span>Nurturer</span>
+            <span>Last contact</span>
           </div>
         )}
 
         {loading && <Loading label="Loading volunteers…" />}
-        {!loading && rows.length === 0 && <Empty label="No volunteers match these filters." />}
+        {/* An empty list with no way out is a dead end — several of these filters
+            intersect to zero easily, and the way back was to hunt the right
+            dropdown among twelve. */}
+        {!loading && rows.length === 0 && (
+          <Empty
+            label={filterActive ? 'No volunteers match these filters.' : 'No volunteers on record yet.'}
+            action={filterActive ? <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={clearFil}>Clear all filters</button> : null}
+          />
+        )}
 
         {!loading && isPhone &&
           rows.map((v, i) => (
@@ -561,26 +657,33 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
                 </div>
                 <div style={{ fontSize: 12, color: v.phone ? 'var(--muted)' : 'var(--red)', marginTop: 2 }}>{v.phone || 'No phone on record'}</div>
                 <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4 }}>{v.where}</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                  {v.attended > 0 ? <span style={{ color: 'var(--leaf)', fontWeight: 600 }}>{v.attended} attended</span> : 'No attendance'} · {v.last}
+                {/* The two facts a coordinator needs before tapping this row, in the
+                    order they need them: has anyone here spoken to them, and is
+                    anyone already looking after them. */}
+                <div style={{ fontSize: 12, marginTop: 3, fontWeight: 600, color: CONTACT_TONE[v.contact.tone] || 'var(--muted)' }}>
+                  {v.contact.label}
+                  {v.attended > 0 && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {v.attended} attended</span>}
+                </div>
+                <div style={{ fontSize: 12, color: v.nurturer ? 'var(--muted)' : 'var(--muted-2)', marginTop: 1 }}>
+                  {v.nurturer ? `Nurturer · ${v.nurturer}` : 'No nurturer yet'}
                 </div>
                 {v.programs.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-                    {v.programs.map((p) => (<span key={p} style={{ fontSize: 12, fontWeight: 600, color: '#6A4CA0', background: '#F0EAF7', padding: '2px 7px', borderRadius: 6 }}>{p}</span>))}
+                    {v.programs.map((p) => (<span key={p} style={CHIP.programme}>{p}</span>))}
                   </div>
                 )}
                 {v.derivedTags.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-                    {v.derivedTags.map((t) => (<span key={'d' + t} style={{ fontSize: 12, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
+                    {v.derivedTags.map((t) => (<span key={'d' + t} style={CHIP.seva}>{t}</span>))}
                   </div>
                 )}
                 {v.skills.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-                    {v.skills.map((s) => (<span key={s} style={{ fontSize: 12, fontWeight: 600, color: '#33507D', background: '#E7EEF7', padding: '2px 7px', borderRadius: 6 }}>{s}</span>))}
+                    {v.skills.map((s) => (<span key={s} style={CHIP.skill}>{s}</span>))}
                   </div>
                 )}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-                  {v.manualTags.map((t) => (<span key={'m' + t} style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--rust)', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
+                  {v.manualTags.map((t) => (<span key={'m' + t} style={CHIP.tag}>{t}</span>))}
                   {tagRow === v.id ? (
                     <input autoFocus value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addRowTag(v.id); if (e.key === 'Escape') setTagRow(null) }} onBlur={() => addRowTag(v.id)} placeholder="tag…" style={{ width: 90, fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', outline: 'none' }} />
                   ) : (
@@ -601,7 +704,8 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
                   <div style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.name}</div>
                   <div style={{ fontSize: 12, color: v.phone ? 'var(--muted)' : 'var(--red)', marginTop: 1 }}>{v.phone || 'No phone on record'}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-                    {v.manualTags.map((t) => (<span key={'m' + t} style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--rust)', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))}
+                    {v.skills.map((s) => (<span key={'s' + s} style={CHIP.skill}>{s}</span>))}
+                    {v.manualTags.map((t) => (<span key={'m' + t} style={CHIP.tag}>{t}</span>))}
                     {tagRow === v.id ? (
                       <input autoFocus value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addRowTag(v.id); if (e.key === 'Escape') setTagRow(null) }} onBlur={() => addRowTag(v.id)} placeholder="tag…" style={{ width: 90, fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', outline: 'none' }} />
                     ) : (
@@ -612,23 +716,17 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
                 {v.programs.length
-                  ? v.programs.map((p) => (<span key={p} style={{ fontSize: 12, fontWeight: 600, color: '#6A4CA0', background: '#F0EAF7', padding: '2px 7px', borderRadius: 6 }}>{p}</span>))
+                  ? v.programs.map((p) => (<span key={p} style={CHIP.programme}>{p}</span>))
                   : <span style={{ fontSize: 14, color: 'var(--muted-2)' }}>—</span>}
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
-                {v.derivedTags.length
-                  ? v.derivedTags.map((t) => (<span key={t} style={{ fontSize: 12, fontWeight: 600, color: '#7A5230', background: '#F3EADB', padding: '2px 7px', borderRadius: 6 }}>{t}</span>))
-                  : <span style={{ fontSize: 14, color: 'var(--muted-2)' }}>—</span>}
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
-                {v.skills.length
-                  ? v.skills.map((s) => (<span key={s} style={{ fontSize: 12, fontWeight: 600, color: '#33507D', background: '#E7EEF7', padding: '2px 7px', borderRadius: 6 }}>{s}</span>))
-                  : <span style={{ fontSize: 14, color: 'var(--muted-2)' }}>—</span>}
-              </div>
+              <SevaCell v={v} />
               <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.where}</div>
-              <div style={{ fontSize: 14, color: 'var(--muted)' }}>
-                {v.attended > 0 ? <span style={{ color: 'var(--leaf)', fontWeight: 600 }}>{v.attended} attended</span> : '—'}
-                <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>{v.last}</div>
+              <div style={{ fontSize: 14, color: v.nurturer ? 'var(--ink-soft)' : 'var(--muted-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {v.nurturer || 'Nobody yet'}
+              </div>
+              <div style={{ fontSize: 13, fontWeight: v.contact.at ? 500 : 600, color: CONTACT_TONE[v.contact.tone] || 'var(--muted)' }}>
+                {v.contact.label}
+                {v.isha && <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted-2)', marginTop: 1 }}>{ishaActivityLabel(v.isha)}</div>}
               </div>
             </div>
           ))}

@@ -132,8 +132,13 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
       key: 'quiet',
       n: k.quietVols,
       tag: 'VOLUNTEERS',
-      title: `${k.quietVols} volunteers with no activity in 90+ days`,
-      body: 'Worth a personal call from their nurturer before they drift further.',
+      // Was "no activity in 90+ days", which read as "we have not spoken to them".
+      // It counts `last_active_date` — the upstream Isha transaction date — and `lt`
+      // drops NULL, so the ~1,150 volunteers with nothing in that column at all were
+      // silently outside the number. The row now says what it counts and names the
+      // door to the rest. See lib/engagement.js.
+      title: `${k.quietVols} volunteers whose last Isha activity was 90+ days ago`,
+      body: 'Worth a personal call from their nurturer before they drift further. Most volunteers have no activity date on record at all — the Isha activity filter on that screen has a “not on record” option for them.',
       cta: 'Open these volunteers',
       to: 'volunteers', preset: { last: 'quiet' },
       tint: 'var(--pill-warm-bg)', ink: 'var(--pill-warm-fg)',

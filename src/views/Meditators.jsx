@@ -15,6 +15,7 @@ import { PROGRAMS, PROGRAM_BY_KEY, programsWithData } from '../lib/programs'
 import { COHORT_PROGRAMMES, eligibilityCohort } from '../lib/cohorts'
 import { usePagedQuery, useDebounced, fetchAllMatchingIds } from '../lib/usePagedQuery'
 import { excludeTooLarge, EXCLUDE_TOO_LARGE_MESSAGE } from '../lib/coveredFilter'
+import { ishaActivityLabel, applyIshaActivity, ISHA_ACTIVITY_OPTIONS } from '../lib/engagement'
 
 // "samyama" -> "Ready now · Samyama"; "samyama:soon" -> "Ready soon · Samyama"
 function readyLabel(v) {
@@ -23,25 +24,18 @@ function readyLabel(v) {
   return `${mode === 'soon' ? 'Ready soon' : 'Ready now'} · ${c ? c.label : key}`
 }
 
-const RECENCY = [
-  { key: 'any', label: 'Any time' },
-  { key: '30', label: 'Active · 30 days' },
-  { key: '90', label: 'Active · 90 days' },
-  { key: 'quiet', label: 'Quiet · 90+ days' },
-]
+// `last_active_date` is the upstream Isha transaction date, not our contact with
+// this person — calling it "Active" here was the same mistake the Volunteers list
+// made. And the three options below were all gte/lt, which drop NULL, so the
+// people with nothing in the column at all matched none of them and could not be
+// listed. `none` is that missing door. See lib/engagement.js.
+const RECENCY = [{ key: 'any', label: 'Isha activity · any time' }, ...ISHA_ACTIVITY_OPTIONS.map((o) => ({ key: o.v, label: o.label }))]
 
 const daysAgoISO = (d) => new Date(Date.now() - d * 86400000).toISOString().slice(0, 10)
 function progList(p) {
   return PROGRAMS.filter((pr) => p[pr.col]).map((pr) => pr.chip)
 }
-function lastActive(d) {
-  if (!d) return 'No recent activity'
-  const days = Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
-  if (days <= 0) return 'Active today'
-  if (days < 30) return `Active ${days}d ago`
-  if (days < 90) return `Active ${Math.round(days / 30)}mo ago`
-  return `Quiet ${Math.round(days / 30)}mo`
-}
+
 
 export default function Meditators({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone, preset = null, onPresetConsumed }) {
   const { isPhone } = useBreakpoint()
@@ -122,9 +116,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       if (Array.isArray(eventPersonIds)) {
         q = eventPersonIds.length ? q.in('id', eventPersonIds) : q.eq('id', '00000000-0000-0000-0000-000000000000')
       }
-      if (recency === '30') q = q.gte('last_active_date', daysAgoISO(30))
-      if (recency === '90') q = q.gte('last_active_date', daysAgoISO(90))
-      if (recency === 'quiet') q = q.lt('last_active_date', daysAgoISO(90))
+      q = applyIshaActivity(q, recency)
       // The single most time-sensitive cohort in the whole product: someone who has
       // just finished Inner Engineering is at their most open, and that window shuts.
       if (ieWindow === '60') q = q.gte('ie_date', daysAgoISO(60))
@@ -234,7 +226,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     ...(prog !== 'all' ? [{ key: 'prog', label: 'Programme', value: PROGRAMS.find((p) => p.key === prog)?.label || prog, onRemove: () => setProg('all') }] : []),
     ...(eventId !== 'all' ? [{ key: 'event', label: 'Event', value: eventOpts.find((e) => String(e.id) === String(eventId))?.name || 'Event', onRemove: () => { setEventId('all'); setAttStatus('all') } }] : []),
     ...(eventId !== 'all' && attStatus !== 'all' ? [{ key: 'status', label: 'Status', value: attStatus === 'attended' ? 'Attended' : 'Registered', onRemove: () => setAttStatus('all') }] : []),
-    ...(recency !== 'any' ? [{ key: 'recency', label: 'Activity', value: RECENCY.find((r) => r.key === recency)?.label || recency, onRemove: () => setRecency('any') }] : []),
+    ...(recency !== 'any' ? [{ key: 'recency', label: 'Isha activity', value: RECENCY.find((r) => r.key === recency)?.label || recency, onRemove: () => setRecency('any') }] : []),
     ...(needsNurt ? [{ key: 'nurt', label: 'Nurturer', value: 'Needs a nurturer', onRemove: () => setNeedsNurt(false) }] : []),
     ...(ieWindow !== 'any' ? [{ key: 'iew', label: 'Inner Engineering', value: 'Finished · last 60 days', onRemove: () => setIeWindow('any') }] : []),
     ...(ready !== 'all' ? [{ key: 'ready', label: 'Ready for', value: readyLabel(ready), onRemove: () => setReady('all') }] : []),
@@ -372,7 +364,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
                   {progList(p).map((t) => (<span key={t} className="pill" style={pill('var(--pill-rust-bg)', 'var(--pill-rust-fg)')}>{t}</span>))}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 6 }}>{[p.area, p.pincode].filter(Boolean).join(' · ') || p.center_id || '—'}</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{lastActive(p.last_active_date)}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{ishaActivityLabel(p.last_active_date)}</div>
               </div>
             </div>
           ))}
@@ -393,7 +385,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
                 {progList(p).map((t) => (<span key={t} className="pill" style={pill('var(--pill-rust-bg)', 'var(--pill-rust-fg)')}>{t}</span>))}
               </div>
               <div style={{ fontSize: 14, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[p.area, p.pincode].filter(Boolean).join(' · ') || p.center_id || '—'}</div>
-              <div style={{ fontSize: 14, color: 'var(--muted)' }}>{lastActive(p.last_active_date)}</div>
+              <div style={{ fontSize: 14, color: 'var(--muted)' }}>{ishaActivityLabel(p.last_active_date)}</div>
             </div>
           ))}
       </div>
