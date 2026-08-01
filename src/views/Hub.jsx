@@ -122,11 +122,13 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
 
   useEffect(() => {
     let alive = true
-    supabase.from('event_phases').select('kind, sort_order, start_by, finish_by, started_at, completed_at').eq('activity_id', ev.id).order('sort_order')
+    supabase.from('event_phases').select('kind, label, sort_order, start_by, finish_by, started_at, completed_at').eq('activity_id', ev.id).order('sort_order')
       .then(({ data }) => { if (alive) setPhases(data || []) })
     fetchActivityTypes().then((t) => { if (alive) setTypes(t || []) }).catch(() => {})
     return () => { alive = false }
-  }, [ev.id])
+    // reloadKey: marking a phase started/done in the Planning tab must clear the
+    // banner above the tabs too, or the header keeps insisting on work you just did.
+  }, [ev.id, reloadKey])
 
   // `cur` and `flags` were computed here and rendered NOWHERE — and Planning had
   // dropped its own current-phase pill with the comment "redundant in the Event Hub,
