@@ -1,68 +1,18 @@
-// Event readiness: the roll-up a list row can say, and the staffing count behind it.
+// Event readiness: the staffing count a list row shows.
 import assert from 'node:assert/strict'
-import { phaseSummary, teamFill, phaseFlag, PHASE_SHORT, currentPhase } from '../src/lib/planning.js'
+import { teamFill, deriveStage, stageTone, eventIsOver } from '../src/lib/planning.js'
 
 let pass = 0
+let total = 0
 const t = (name, fn) => {
+  total++
   try { fn(); pass++; console.log('  ok  ' + name) }
   catch (e) { console.log('FAIL  ' + name + '\n      ' + e.message); process.exitCode = 1 }
 }
 
 const TODAY = '2026-08-01'
-const ph = (o) => ({ kind: 'pre_far', start_by: null, finish_by: null, started_at: null, completed_at: null, ...o })
 
 console.log('\nreadiness')
-
-t('no phases is not a problem, it is silence', () => {
-  const s = phaseSummary([], TODAY)
-  assert.deepEqual(s, { overdue: 0, atRisk: 0, worst: null, nextDue: null })
-  assert.equal(phaseSummary(null, TODAY).worst, null)
-})
-
-t('a phase past its start date and never started is overdue', () => {
-  const s = phaseSummary([ph({ start_by: '2026-07-11' }), ph({ start_by: '2026-07-25' })], TODAY)
-  assert.equal(s.overdue, 2)
-  assert.equal(s.worst, 'overdue')
-})
-
-// The whole reason this pass exists: 104 phase rows in the live database, 0 with
-// started_at or completed_at set, because nothing in the app could write them. The
-// Dashboard's "preparation slipping" panel was an alarm nobody could switch off.
-t('marking a phase started clears overdue', () => {
-  const p = ph({ start_by: '2026-07-11' })
-  assert.equal(phaseFlag(p, TODAY), 'overdue')
-  assert.equal(phaseFlag({ ...p, started_at: '2026-07-12T00:00:00Z' }, TODAY), null)
-})
-
-t('marking a phase done clears every flag, including at-risk', () => {
-  const p = ph({ start_by: '2026-07-11', finish_by: '2026-08-02', started_at: '2026-07-12T00:00:00Z' })
-  assert.equal(phaseFlag(p, TODAY), 'at_risk')
-  assert.equal(phaseFlag({ ...p, completed_at: '2026-08-01T00:00:00Z' }, TODAY), null)
-})
-
-t('a started phase with a near finish date is at risk, not overdue', () => {
-  const s = phaseSummary([ph({ start_by: '2026-07-11', finish_by: '2026-08-02', started_at: '2026-07-12T00:00:00Z' })], TODAY)
-  assert.equal(s.overdue, 0)
-  assert.equal(s.atRisk, 1)
-  assert.equal(s.worst, 'at_risk')
-})
-
-t('overdue outranks at-risk', () => {
-  const s = phaseSummary([
-    ph({ start_by: '2026-07-11', finish_by: '2026-08-02', started_at: '2026-07-12T00:00:00Z' }),
-    ph({ start_by: '2026-07-25' }),
-  ], TODAY)
-  assert.equal(s.worst, 'overdue')
-})
-
-t('nextDue is the earliest incomplete start date', () => {
-  const s = phaseSummary([
-    ph({ start_by: '2026-09-01' }),
-    ph({ start_by: '2026-07-11', completed_at: '2026-07-12T00:00:00Z' }),
-    ph({ start_by: '2026-08-15' }),
-  ], TODAY)
-  assert.equal(s.nextDue, '2026-08-15', 'a completed phase is not still due')
-})
 
 // ── staffing ────────────────────────────────────────────────────────────────
 const bl = (id, needed, archived = null) => ({ id, volunteers_needed: needed, archived_at: archived })
@@ -110,22 +60,22 @@ t('a missing volunteers_needed is 0, never NaN', () => {
   assert.ok(Number.isFinite(f.needed))
 })
 
-// ── vocabulary ──────────────────────────────────────────────────────────────
-t('phase names are words a coordinator would use', () => {
-  for (const v of Object.values(PHASE_SHORT)) {
-    assert.doesNotMatch(v, /pre[-_]|_/i, `"${v}" is schema jargon`)
-  }
-  assert.equal(PHASE_SHORT.pre_far, 'Early prep')
-  assert.equal(PHASE_SHORT.day_of, 'Event days')
+
+// ── stage, which replaced the phase model ───────────────────────────────────
+t('an event stage comes from its dates alone', () => {
+  assert.equal(deriveStage('2026-08-10', '2026-08-12', TODAY), 'Upcoming')
+  assert.equal(deriveStage('2026-08-01', '2026-08-01', TODAY), 'Day-of')
+  assert.equal(deriveStage('2026-07-01', '2026-07-02', TODAY), 'Done')
 })
 
-t('currentPhase speaks the same vocabulary', () => {
-  const ev = { start_date: '2026-08-01', end_date: '2026-08-01' }
-  const phases = [
-    { kind: 'pre_far', sort_order: 0, start_by: '2026-07-11', finish_by: '2026-07-24' },
-    { kind: 'day_of', sort_order: 1, start_by: '2026-08-01', finish_by: '2026-08-01' },
-  ]
-  assert.equal(currentPhase(ev, phases, TODAY).label, 'Event days')
+t('every stage has a tone, and an unknown one does not crash the calendar', () => {
+  for (const st of ['Upcoming', 'Day-of', 'Done']) assert.ok(stageTone(st).bg && stageTone(st).fg)
+  assert.deepEqual(stageTone('nonsense'), stageTone('Upcoming'))
 })
 
-console.log(`\n${pass}/${pass} passed`)
+t('a finished event is over', () => {
+  assert.equal(eventIsOver({ end_date: '2026-07-31' }, TODAY), true)
+  assert.equal(eventIsOver({ end_date: '2026-08-01' }, TODAY), false)
+})
+
+console.log(`\n${pass}/${total} passed`)
