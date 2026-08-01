@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { Pad, ErrorCard, Loading, Empty } from '../components/View'
+import { Pad, ErrorCard, Loading } from '../components/View'
 import { pill } from '../lib/ui'
 import { fetchActivityTypes } from '../lib/activityTypes'
 import EventList from '../components/EventList'
@@ -189,9 +189,25 @@ function EventTodos({ ev, me, isCoordinator, onToast, onStartCampaign, onOpenInt
     <div className="card" style={{ padding: 18 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>To-do</h3>
-        <span className="pill" style={{ ...pill('var(--neutral-bg)', 'var(--neutral-fg)'), fontSize: 11 }}>{done}/{rows.length} done</span>
+        {rows.length > 0 && <span className="pill" style={{ ...pill('var(--neutral-bg)', 'var(--neutral-fg)'), fontSize: 11 }}>{done}/{rows.length} done</span>}
       </div>
-      {rows.length === 0 && <Empty label="No to-dos yet — add the first below." />}
+      {/* Empty on ~34 of 37 events, and the old empty state was "No to-dos yet — add
+          the first below." over a blank box. It never mentioned the thing that makes
+          this list worth using: a to-do can LAUNCH the work and tick itself off. That
+          was hidden behind the ⋯ menu of a to-do you had not created yet. */}
+      {rows.length === 0 && (
+        <div style={{ padding: '4px 2px 2px' }}>
+          <div style={{ fontSize: 13.5, color: 'var(--ink-soft)', marginBottom: 4 }}>Nothing planned for this event yet.</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>
+            Add what has to happen — then each to-do can start the work itself and tick off when it is done:
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 4 }}>
+            {TODO_ACTIONS.map((a) => (
+              <span key={a.kind} style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 7, padding: '4px 9px' }}>{a.label}</span>
+            ))}
+          </div>
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {displayRows.map((r) => (
           <TodoRow key={r.id} r={r} isCoordinator={isCoordinator}

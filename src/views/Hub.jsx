@@ -19,6 +19,7 @@ import KebabMenu from '../components/KebabMenu'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import AssignToTeamModal from '../components/AssignToTeamModal'
 import { Checkbox } from '../components/View'
+import { teamStatus, sortTeams, summariseTeams, describeTeams, orderedDayLabels, TEAM_FILTERS, SHORT, OVER } from '../lib/teams'
 import PersonProfile from '../components/PersonProfile'
 
 // EVENT HUB — the home for events. The list surfaces overdue/at-risk phases across
@@ -168,8 +169,8 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {(() => {
-              const cd = countdownLabel(ev.start_date || ev.activity_date)
-              const late = cd.startsWith('Overdue')
+              const cd = countdownLabel(ev.start_date || ev.activity_date, ev.end_date)
+              const late = cd === 'Running now'
               return cd ? <span className="pill" style={{ background: late ? '#FBE0DA' : '#EAF2E5', color: late ? '#B5391F' : '#4E7C3F', fontWeight: 600 }}>{cd}</span> : null
             })()}
           </div>
@@ -284,6 +285,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   const [unassignedSortDir, setUnassignedSortDir] = useState('asc')
   const [showAssignUnassigned, setShowAssignUnassigned] = useState(false)
   const [assignUnassignedBusy, setAssignUnassignedBusy] = useState(false)
+  const [teamFilter, setTeamFilter] = useState('all')
 
   const load = useCallback(async () => {
     setErr(null)
@@ -506,7 +508,13 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
           Teams are this event's activity blocks. Here you create teams and set members &amp; POCs; a team's <strong>dates &amp; attendance mode</strong> are set in <strong>Planning</strong> — it's the same block.
         </div>
       )}
-      {interest.length > 0 && (
+      {/* When everyone is placed this is good news, not a headline — one line, no card. */}
+      {interest.length > 0 && unassigned.length === 0 && (
+        <div style={{ fontSize: 12.5, color: 'var(--muted-2)', padding: '0 2px' }}>
+          All {interest.length} approved volunteers are on a team.
+        </div>
+      )}
+      {interest.length > 0 && unassigned.length > 0 && (
         <div className="card" style={{ padding: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: unassigned.length ? 10 : 0, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 14, fontWeight: 600 }}>Unassigned Volunteers</span>
@@ -514,9 +522,7 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
             <button className="btn btn-ghost tap44" disabled={exporting} onClick={exportUnassigned} title="CSV of unassigned volunteers — same columns as the team roster CSV, minus email."
               style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 11px', opacity: exporting ? 0.6 : 1 }}>⬇ CSV</button>
           </div>
-          {unassigned.length === 0 ? (
-            <div style={{ fontSize: 12.5, color: 'var(--muted-2)' }}>Every approved volunteer is on a team.</div>
-          ) : (
+          {(
             <>
               {isCoordinator && selUnassigned.size > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', marginBottom: 8, background: '#FBF1E6', border: '1px solid var(--border)', borderRadius: 9 }}>
@@ -568,13 +574,44 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
       {showAssignUnassigned && (
         <AssignToTeamModal eventId={ev.id} busy={assignUnassignedBusy} onClose={() => setShowAssignUnassigned(false)} onPick={assignSelectedUnassigned} />
       )}
-      {blocks.length === 0 ? <Empty label="No event teams yet — create one below." /> : blocks.map((b) => (
-        <TeamCard key={b.id} ev={ev} block={b} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator} types={types}
-          assigns={assigns.filter((a) => a.block_id === b.id)} allAssigns={assigns} allBlocks={blocks} people={people}
-          phaseSpan={phaseSpanByBlock[b.id]} teamDays={teamDaysByBlock[b.id] || []} eventDayList={eventDays(ev.start_date || ev.activity_date, ev.end_date)}
-          dayList0={eventDaysWithSetup(ev.start_date || ev.activity_date, ev.end_date)} availByPerson={availByPerson}
-          onToast={onToast} onChanged={load} />
-      ))}
+      {blocks.length === 0 ? <Empty label="No event teams yet — create one below." /> : (() => {
+        // 24 teams, of which two need a decision, is a reading problem before it is
+        // a layout problem. Summarise, then put the rows that need someone first.
+        const live = (b) => {
+          const held = new Set(assigns.filter((a) => a.block_id === b.id && ['assigned', 'show', 'involved'].includes(a.status)).map((a) => a.person_id))
+          return { ...b, status: teamStatus(b.volunteers_needed, held.size) }
+        }
+        const withStatus = blocks.map(live)
+        const summary = summariseTeams(withStatus)
+        const counts = { all: withStatus.length, [SHORT]: summary.shortTeams, [OVER]: summary.overTeams }
+        const shown = sortTeams(withStatus).filter((b) => teamFilter === 'all' || b.status.state === teamFilter)
+        return (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '2px 2px 4px' }}>
+              <span style={{ fontSize: 13, color: summary.shortTeams ? 'var(--rust)' : 'var(--muted)', fontWeight: summary.shortTeams ? 600 : 400 }}>
+                {describeTeams(summary)}
+              </span>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                {TEAM_FILTERS.filter((f) => counts[f.v] > 0 || f.v === 'all').map((f) => (
+                  <button key={f.v} className="tap44" onClick={() => setTeamFilter(f.v)}
+                    style={{ fontSize: 12, fontWeight: 600, padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
+                      border: '1px solid ' + (teamFilter === f.v ? 'transparent' : 'var(--border)'),
+                      background: teamFilter === f.v ? '#241B14' : '#fff', color: teamFilter === f.v ? '#F6ECDC' : 'var(--ink-soft)' }}>
+                    {f.label} {counts[f.v] || 0}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {shown.map((b) => (
+              <TeamCard key={b.id} ev={ev} block={b} status={b.status} typeLabel={typeLabel} firstDay={firstDay} me={me} isCoordinator={isCoordinator} types={types}
+                assigns={assigns.filter((a) => a.block_id === b.id)} allAssigns={assigns} allBlocks={blocks} people={people}
+                phaseSpan={phaseSpanByBlock[b.id]} teamDays={teamDaysByBlock[b.id] || []} eventDayList={eventDays(ev.start_date || ev.activity_date, ev.end_date)}
+                dayList0={eventDaysWithSetup(ev.start_date || ev.activity_date, ev.end_date)} availByPerson={availByPerson}
+                onToast={onToast} onChanged={load} />
+            ))}
+          </>
+        )
+      })()}
       {isCoordinator && (
         <button className="btn btn-primary tap44" style={{ padding: '11px', fontSize: 14 }} onClick={() => setCreating(true)}>＋ Create team</button>
       )}
@@ -583,7 +620,14 @@ function EventTeams({ ev, me, isCoordinator, onToast }) {
   )
 }
 
-function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, phaseSpan, teamDays = [], eventDayList = [], dayList0 = [], availByPerson = {}, types = [], onToast, onChanged }) {
+const FILL_TONE = {
+  ok: pill('var(--success-bg)', 'var(--success-fg)'),
+  warn: pill('var(--pill-warm-bg)', 'var(--pill-orange-fg)'),
+  over: pill('var(--pill-yellow-bg)', 'var(--pill-yellow-fg)'),
+  neutral: pill('var(--neutral-bg)', 'var(--neutral-fg)'),
+}
+
+function TeamCard({ ev, block, status, typeLabel, firstDay, me, isCoordinator, assigns, allAssigns = [], allBlocks = [], people, phaseSpan, teamDays = [], eventDayList = [], dayList0 = [], availByPerson = {}, types = [], onToast, onChanged }) {
   const [q, setQ] = useState('')
   const [debouncedQ, setDebouncedQ] = useState('')
   const [pickerTab, setPickerTab] = useState('interest') // 'interest' (default) | 'all'
@@ -612,8 +656,7 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   const members = Object.values(byPerson).sort((a, b) => Number(b.poc) - Number(a.poc))
   const filled = members.length
   const size = block.volunteers_needed || 0
-  const short = size - filled
-  const full = short <= 0
+  const fill = status || teamStatus(size, filled)
   const pocs = members.filter((m) => m.poc)
   const memberIds = new Set(members.map((m) => m.person_id))
 
@@ -699,9 +742,8 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
 
   // Required-days summary for this team's card — dayList0 INCLUDES Day 0 (unlike
   // eventDayList/dayLabels above, which are for the older availability-mismatch check).
-  const requiredDaysLabel = (block.required_days || []).length
-    ? block.required_days.map((d) => { const i = dayList0.indexOf(d); return i >= 0 ? `Day ${i}` : fmtDay(d) }).join(', ')
-    : 'All days'
+  // Ordered, so real teams stop reading "Day 1, Day 2, Day 3, Day 0".
+  const requiredDaysLabel = orderedDayLabels(block.required_days, dayList0, fmtDay)
 
   async function addMember(p) {
     if (locked) { onToast(`${block.heading} is locked — unlock it to change the roster.`); return }
@@ -792,19 +834,21 @@ function TeamCard({ ev, block, typeLabel, firstDay, me, isCoordinator, assigns, 
   }
 
   return (
-    <div className="card" style={{ padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+    <div className="card" style={{ padding: collapsed ? '10px 14px' : '14px 16px' }}>
+      {/* Collapsed, a team is one line: name, when, who leads it, how it is staffed.
+          The status pill sits beside the title instead of a screen-width away. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: collapsed ? 0 : 6 }}>
         <button className="tap44" onClick={() => setCollapsed((c) => !c)} title={collapsed ? 'Expand team' : 'Collapse team'}
           style={{ fontSize: 13, padding: '4px 6px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform .15s ease' }}>▾</button>
-        <div style={{ minWidth: 0, flex: 1, cursor: 'pointer' }} onClick={() => setCollapsed((c) => !c)}>
-          <div style={{ fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{block.heading}{block.activity_type_id && typeLabel(block.activity_type_id) ? <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {typeLabel(block.activity_type_id)}</span> : null}</div>
+        <div style={{ minWidth: 0, flex: '1 1 260px', cursor: 'pointer' }} onClick={() => setCollapsed((c) => !c)}>
+          <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{block.heading}{block.activity_type_id && typeLabel(block.activity_type_id) ? <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {typeLabel(block.activity_type_id)}</span> : null}</div>
           <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {pocs.length > 0 && <>POC: {pocs.map((m) => people[m.person_id]?.full_name).filter(Boolean).join(', ')} · </>}
             {requiredDaysLabel}
           </div>
         </div>
         {locked && <span className="pill" style={{ ...pill('var(--pill-purple-bg)', 'var(--pill-purple-fg)'), flexShrink: 0 }} title={block.locked_by ? undefined : 'Roster finalised'}>🔒 Locked</span>}
-        <span className="pill" style={{ ...(full ? pill('var(--success-bg)', 'var(--success-fg)') : pill('var(--pill-warm-bg)', 'var(--pill-orange-fg)')), flexShrink: 0 }}>{filled}/{size}{full ? ' · full' : ` · short ${short}`}</span>
+        <span className="pill" style={{ ...FILL_TONE[fill.tone], flexShrink: 0 }}>{fill.label}</span>
 
         {/* All team actions live behind one 3-dot menu (desktop + mobile). */}
         <div style={{ flexShrink: 0 }}>
