@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { pill } from '../lib/ui'
-import { phaseChipLabel, eventDaysWithSetup, fmtDay } from '../lib/planning'
+import { eventDaysWithSetup, fmtDay } from '../lib/planning'
 
 // Create a team = create an ACTIVITY BLOCK on this event (one source of truth).
 // Shared by the Teams tab and the Planning to-do launchers. onCreated(blockId) fires
@@ -15,7 +15,6 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
   const [needed, setNeeded] = useState(block?.volunteers_needed ?? 4)
   const [requiredDays, setRequiredDays] = useState(block?.required_days || []) // [] = All Days
   const [phaseIds, setPhaseIds] = useState([]) // multi-phase (block_phases junction)
-  const [phases, setPhases] = useState([])
   const [attnLocked, setAttnLocked] = useState(false) // team has captured attendance → activity_type locked
   const [leadQ, setLeadQ] = useState('')
   const [leadResults, setLeadResults] = useState([])
@@ -25,10 +24,6 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
   const [newType, setNewType] = useState('')
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    supabase.from('event_phases').select('id, label, kind, start_by, finish_by').eq('activity_id', ev.id).order('sort_order')
-      .then(({ data }) => setPhases(data || []))
-  }, [ev.id])
   // Edit mode: load the team's current phases + whether it has captured attendance
   // (marked assignment or event-level rows) — which locks the activity_type.
   useEffect(() => {
@@ -186,20 +181,6 @@ export default function CreateTeamForm({ ev, types = [], firstDay, me, block = n
               <button type="button" onClick={() => setRequiredDays([])} style={dayChip(requiredDays.length === 0)}>All Days</button>
               {dayList.map((d, di) => (
                 <button type="button" key={d} onClick={() => toggleDay(d)} style={dayChip(requiredDays.includes(d))}>Day {di} · {fmtDay(d)}</button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {phases.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <span style={lbl}>Phase(s) <span style={{ fontWeight: 400, color: 'var(--muted-2)' }}>· a team can span several</span></span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {phases.map((p) => (
-                <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '6px 9px', border: '1px solid var(--border)', borderRadius: 8, background: phaseIds.includes(p.id) ? '#F6E8D8' : '#fff' }}>
-                  <input type="checkbox" checked={phaseIds.includes(p.id)} onChange={() => togglePhase(p.id)} />
-                  {phaseChipLabel(p)}
-                </label>
               ))}
             </div>
           </div>

@@ -4,6 +4,7 @@ import { fetchActivityTypes } from '../lib/activityTypes'
 import { seriesEndDate } from '../lib/planning'
 import { ensureSeriesWindow, materializeOccurrence } from '../lib/series'
 import RecurrenceFields, { toRule } from './RecurrenceFields'
+import { createSessionsFor, describePlan } from '../lib/eventSessions'
 
 // The SINGLE event-creation entry point (opened from the site toolbar, coordinators
 // only — the button is gated in App and the write is gated at the table by RLS:
@@ -49,7 +50,10 @@ export default function CreateEventModal({ me, presetDate, onClose, onCreated, o
         const { data, error } = await supabase.from('activities')
           .insert({ ...base, start_date: start, end_date: end, activity_date: start }).select('id').single()
         if (error) throw error
-        onToast(`Event "${name.trim()}" created.`)
+        // Hall setup (day before) + class support (one per day) are created with
+        // the event — they were the same four decisions typed by hand every time.
+        const plan = await createSessionsFor({ ...base, id: data?.id, start_date: start, end_date: end }, me?.id)
+        onToast(`Event "${name.trim()}" created · ${describePlan(plan)}.`)
         onCreated?.(data?.id)
       } else {
         const spanDays = Math.round((Date.parse(end) - Date.parse(start)) / 86400000)
@@ -61,9 +65,11 @@ export default function CreateEventModal({ me, presetDate, onClose, onCreated, o
           created_by: me?.id || null,
         }).select('*').single()
         if (e1) throw e1
+        // materializeOccurrence / ensureSeriesWindow create each occurrence's
+        // sessions themselves, so every future occurrence gets the same two.
         const firstId = await materializeOccurrence(s, start)
         await ensureSeriesWindow()
-        onToast(`Recurring "${name.trim()}" created.`)
+        onToast(`Recurring "${name.trim()}" created — each occurrence gets its hall setup and class support sessions.`)
         onCreated?.(firstId)
       }
     } catch (e) {
@@ -78,7 +84,7 @@ export default function CreateEventModal({ me, presetDate, onClose, onCreated, o
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }} onClick={onClose}>
       <div className="card scrollarea" style={{ width: 460, maxWidth: '100%', padding: 24, boxShadow: 'var(--shadow-lg)', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 2px' }}>Create event</h3>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16 }}>Attendance, staffing and stage are managed on the event afterwards.</div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16 }}>Hall setup (the day before) and class support (one per day) are created with the event. Staffing is set up on the event afterwards.</div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div><span style={label}>Name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Guru Purnima Setup" style={input} autoFocus /></div>

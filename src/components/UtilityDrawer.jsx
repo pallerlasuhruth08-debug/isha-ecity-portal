@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Loading, Empty } from './View'
 import { MonthGrid } from './EventList'
-import { fmtDay, groupPhases, addDaysISO } from '../lib/planning'
+import { fmtDay, addDaysISO } from '../lib/planning'
 import { materializeOccurrence } from '../lib/series'
 
 // Utility drawer — SEPARATE from the left nav. Slides in from the RIGHT edge over
@@ -40,7 +40,6 @@ function feedUrls(me) {
 
 function CalendarTab({ onOpenEvent, onCreateEvent, me }) {
   const [events, setEvents] = useState(null)
-  const [phasesByEvent, setPhasesByEvent] = useState({})
   const [series, setSeries] = useState([])
   const [copied, setCopied] = useState(false)
   const { https, webcal, label } = feedUrls(me)
@@ -56,12 +55,10 @@ function CalendarTab({ onOpenEvent, onCreateEvent, me }) {
     ;(async () => {
       const [a, p, s] = await Promise.all([
         supabase.from('activities').select('id, name, center_id, activity_date, start_date, end_date, series_id').is('archived_at', null),
-        supabase.from('event_phases').select('activity_id, kind, sort_order, start_by, finish_by'),
         supabase.from('event_series').select('*'),
       ])
       if (!alive) return
       setEvents(a.data || [])
-      setPhasesByEvent(groupPhases(p.data))
       setSeries(s.data || [])
     })()
     return () => { alive = false }
@@ -82,7 +79,7 @@ function CalendarTab({ onOpenEvent, onCreateEvent, me }) {
   return (
     <>
       <MonthGrid
-        events={events} phasesByEvent={phasesByEvent} series={series} compact
+        events={events} series={series} compact
         onOpen={(id) => onOpenEvent && onOpenEvent(id)}
         onOpenProjected={openProjected}
         onCreateDay={onCreateEvent ? (dayISO) => onCreateEvent(dayISO) : undefined}

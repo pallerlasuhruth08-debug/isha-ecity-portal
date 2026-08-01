@@ -1,18 +1,15 @@
 import { useMemo, useState } from 'react'
 import { pill } from '../lib/ui'
-import { eventDays, currentPhase, phaseTone, rangeLabel, todayISO, seriesDatesUpTo, addDaysISO, countdownLabel, FLAG_META } from '../lib/planning'
+import { eventDays, deriveStage, stageTone, rangeLabel, todayISO, seriesDatesUpTo, addDaysISO, countdownLabel } from '../lib/planning'
 
 // Shared event-list UI used by BOTH the Attendance and Planning pages. Identical
 // layout; the PAGE supplies onOpen (its own detail) — the two never share a detail.
 // Default tab = upcoming; past events live under "Completed"; "All" shows every occurrence.
 //
-// `readiness` (activity_id -> the roll-up from lib/planning) is what the ROWS say.
-// The doc comment here used to claim phasesByEvent "drives the current-phase pill" —
-// there was no pill, and no row carried a single word about whether an event was
-// ready. The Dashboard's "N more in the Event Hub →" landed on a list where none of
-// them could be found. (phasesByEvent is still accepted and still unused by the rows;
-// it predates this pass and the callers pass it — MonthGrid takes its own copy.)
-export default function EventList({ events, phasesByEvent = {}, readiness = {}, onOpen, right = null }) {
+// `readiness` (activity_id -> the roll-up from lib/planning) is what the ROWS say:
+// staffing and people waiting on triage. It used to carry phase flags too; event
+// phases were removed once it was clear nobody had ever marked one.
+export default function EventList({ events, readiness = {}, onOpen, right = null }) {
   const [tab, setTab] = useState('upcoming')
   const t = todayISO()
 
@@ -90,8 +87,6 @@ export default function EventList({ events, phasesByEvent = {}, readiness = {}, 
 function ReadinessChips({ r, past }) {
   if (!r || past) return null
   const chips = []
-  if (r.prep.worst === 'overdue') chips.push({ t: `${r.prep.overdue} overdue`, ...FLAG_META.overdue })
-  else if (r.prep.worst === 'at_risk') chips.push({ t: `${r.prep.atRisk} at risk`, ...FLAG_META.at_risk })
   if (r.waiting > 0) chips.push({ t: `${r.waiting} waiting`, bg: 'var(--info-bg)', fg: 'var(--info-fg)' })
   if (r.team.teams === 0) chips.push({ t: 'No teams yet', bg: 'var(--neutral-bg)', fg: 'var(--neutral-fg)' })
   else if (r.team.needed && r.team.filled < r.team.needed) chips.push({ t: `${r.team.filled}/${r.team.needed} staffed`, bg: 'var(--pill-warm-bg)', fg: 'var(--pill-orange-fg)' })
@@ -109,7 +104,7 @@ function ReadinessChips({ r, past }) {
 // Bare month grid (no overlay) — reused by the page-level calendar panel AND the
 // utility drawer's Calendar tab. Clicking an event calls onOpen; clicking a day
 // (when onCreateDay is provided) calls onCreateDay(dayISO).
-export function MonthGrid({ events, phasesByEvent = {}, series = [], onOpen, onOpenProjected, onCreateDay, compact = false, headerRight = null }) {
+export function MonthGrid({ events, series = [], onOpen, onOpenProjected, onCreateDay, compact = false, headerRight = null }) {
   const now = new Date()
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() })
   const first = new Date(ym.y, ym.m, 1)
@@ -179,7 +174,7 @@ export function MonthGrid({ events, phasesByEvent = {}, series = [], onOpen, onO
                         <div key={e.id} onClick={(ev) => { ev.stopPropagation(); onOpenProjected && onOpenProjected(e._series, e._date) }} title={`${e.name} · repeats (click to open)`} style={{ fontSize: 9.5, fontWeight: 600, background: 'transparent', color: 'var(--muted-2)', border: '1px dashed var(--border)', borderRadius: 4, padding: '0px 3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>↻ {e.name}</div>
                       )
                     }
-                    const tone = phaseTone(currentPhase(e, phasesByEvent[e.id]).kind)
+                    const tone = stageTone(deriveStage(e.start_date || e.activity_date, e.end_date))
                     return (
                       <div key={e.id} onClick={(ev) => { ev.stopPropagation(); onOpen && onOpen(e.id) }} title={e.name} style={{ fontSize: 9.5, fontWeight: 600, background: tone.bg, color: tone.fg, borderRadius: 4, padding: '1px 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>{e.name}</div>
                     )
@@ -196,11 +191,11 @@ export function MonthGrid({ events, phasesByEvent = {}, series = [], onOpen, onO
 }
 
 // Full-screen calendar panel over a page's list (page-level create-from-day).
-export function EventCalendarPanel({ events, phasesByEvent = {}, onOpen, onCreateDay, onClose }) {
+export function EventCalendarPanel({ events, onOpen, onCreateDay, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, zIndex: 120, overflowY: 'auto' }} onClick={onClose}>
       <div className="card" style={{ maxWidth: 760, width: '100%', marginTop: 30, padding: 20 }} onClick={(e) => e.stopPropagation()}>
-        <MonthGrid events={events} phasesByEvent={phasesByEvent} onOpen={onOpen} onCreateDay={onCreateDay}
+        <MonthGrid events={events} onOpen={onOpen} onCreateDay={onCreateDay}
           headerRight={<div onClick={onClose} style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 600, color: 'var(--orange)', cursor: 'pointer' }}>✕ Close</div>} />
         {onCreateDay && <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--muted-2)' }}>Click a day to create an event · click an event to open it.</div>}
       </div>
