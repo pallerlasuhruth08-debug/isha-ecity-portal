@@ -309,7 +309,7 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
             <Row label="Program Tags" value={progTags.length ? progTags.join(', ') : null} />
             {PROGRAMS.filter((pr) => p[pr.col]).map((pr) => (<Row key={pr.key} label={pr.label} value={fmt(p[pr.col])} />))}
             {!PROGRAMS.some((pr) => p[pr.col]) && <Row label="Programmes" value={null} />}
-            <Row label="Last Transaction Date" value={fmt(p.last_active_date)} />
+            <Row label="Last Isha activity" value={fmt(p.last_active_date)} />
           </Section>
 
 
