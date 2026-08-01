@@ -18,3 +18,11 @@ export const excludeTooLarge = (ids) => Array.isArray(ids) && ids.length > MAX_E
 export const EXCLUDE_TOO_LARGE_MESSAGE =
   `More than ${MAX_EXCLUDE_IDS} people now have a nurturer — good news, but too many to filter out from the browser. ` +
   'This filter needs a `people_without_nurturer` view in the database before it can be trusted again; until then it is switched off rather than showing a list that is quietly wrong.'
+
+// "Never contacted by us" is the same anti-join with the same failure mode, and
+// the same direction of danger: an empty list would read as "we have reached
+// everybody". Today 183 volunteers have an attendance or a call, so it fits —
+// but it grows every time attendance is captured, which is the point.
+export const CONTACT_EXCLUDE_TOO_LARGE_MESSAGE =
+  `We have now met or called more than ${MAX_EXCLUDE_IDS} people — too many to filter out from the browser. ` +
+  'This filter needs a `people_never_contacted` view in the database before it can be trusted again; until then it is switched off rather than showing a list that is quietly wrong.'
