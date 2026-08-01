@@ -48,7 +48,11 @@ export function deriveStage(startDate, endDate, t = todayISO()) {
 
 // ── Phase model (replaces the old 3-stage event_stages) ───────────────────────
 export const PHASE_ORDER = ['pre_far', 'pre_near', 'day_of', 'post']
-export const PHASE_SHORT = { pre_far: 'Pre-far', pre_near: 'Pre-near', day_of: 'Day-of', post: 'Post' }
+// Our own display names. "Pre-far" / "Pre-near" is how the schema thinks about a
+// phase, not how a coordinator thinks about their week. (The stored `label` column
+// still reads "Pre-far · promotion" — that is template data and is left alone;
+// this is the vocabulary the app speaks in.)
+export const PHASE_SHORT = { pre_far: 'Early prep', pre_near: 'Final prep', day_of: 'Event days', post: 'Wrap-up' }
 export const PHASE_TONE = {
   pre_far: { bg: '#FBEAD9', fg: '#C28A2A' },
   pre_near: { bg: '#F6E8D8', fg: '#C2691F' },
@@ -112,6 +116,47 @@ export function phaseShortfall(days, blocks, assignments) {
     for (const d of days || []) short += Math.max(0, need - fillCount(bAsg, d))
   }
   return short
+}
+
+// One event's preparation, rolled up to what a LIST ROW can say.
+//
+// WHY THIS EXISTS
+// The Event Hub is the screen that owns events, and it was the only screen in the
+// app that never said whether an event was ready. It loaded every phase, passed
+// them into the list, and the rows ignored them; the event header computed the
+// current phase and the flagged phases and rendered neither. Meanwhile the
+// Dashboard shouted "Event preparation slipping" and offered "6 more in the Event
+// Hub \u2192" \u2014 a link to a list where none of the six could be identified.
+export function phaseSummary(phases, t = todayISO()) {
+  let overdue = 0
+  let atRisk = 0
+  let nextDue = null
+  for (const p of phases || []) {
+    const f = phaseFlag(p, t)
+    if (f === 'overdue') overdue++
+    else if (f === 'at_risk') atRisk++
+    if (!p.completed_at && p.start_by && (!nextDue || p.start_by < nextDue)) nextDue = p.start_by
+  }
+  return { overdue, atRisk, worst: overdue ? 'overdue' : atRisk ? 'at_risk' : null, nextDue }
+}
+
+// Staffing for one event: how many people its teams ask for and how many are on
+// them. `needed` counts each team once (not per day) — a list row is answering
+// "is anyone on this yet", not "is every slot on every day covered".
+export function teamFill(blocks, assignments) {
+  const live = (blocks || []).filter((b) => !b.archived_at)
+  const ids = new Set(live.map((b) => b.id))
+  const held = new Set()
+  for (const a of assignments || []) {
+    if (!ids.has(a.block_id)) continue
+    if (!['assigned', 'show', 'involved'].includes(a.status)) continue
+    held.add(`${a.block_id}|${a.person_id}`)
+  }
+  return {
+    teams: live.length,
+    needed: live.reduce((n, b) => n + (Number(b.volunteers_needed) || 0), 0),
+    filled: held.size,
+  }
 }
 
 // Every flagged phase across a set of events, worst (overdue) first — powers the
