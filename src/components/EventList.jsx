@@ -1,12 +1,18 @@
 import { useMemo, useState } from 'react'
 import { pill } from '../lib/ui'
-import { eventDays, currentPhase, phaseTone, rangeLabel, todayISO, seriesDatesUpTo, addDaysISO, countdownLabel } from '../lib/planning'
+import { eventDays, currentPhase, phaseTone, rangeLabel, todayISO, seriesDatesUpTo, addDaysISO, countdownLabel, FLAG_META } from '../lib/planning'
 
 // Shared event-list UI used by BOTH the Attendance and Planning pages. Identical
 // layout; the PAGE supplies onOpen (its own detail) — the two never share a detail.
 // Default tab = upcoming; past events live under "Completed"; "All" shows every occurrence.
-// phasesByEvent: activity_id -> event_phases[] (drives the current-phase pill).
-export default function EventList({ events, phasesByEvent = {}, onOpen, right = null }) {
+//
+// `readiness` (activity_id -> the roll-up from lib/planning) is what the ROWS say.
+// The doc comment here used to claim phasesByEvent "drives the current-phase pill" —
+// there was no pill, and no row carried a single word about whether an event was
+// ready. The Dashboard's "N more in the Event Hub →" landed on a list where none of
+// them could be found. (phasesByEvent is still accepted and still unused by the rows;
+// it predates this pass and the callers pass it — MonthGrid takes its own copy.)
+export default function EventList({ events, phasesByEvent = {}, readiness = {}, onOpen, right = null }) {
   const [tab, setTab] = useState('upcoming')
   const t = todayISO()
 
@@ -68,13 +74,35 @@ export default function EventList({ events, phasesByEvent = {}, onOpen, right = 
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>{rangeLabel(e.start_date || e.activity_date, e.end_date)} · {e.center_id}</div>
               </div>
+              <ReadinessChips r={readiness[e.id]} past={past} />
               {cd && !past && <span className="pill" style={{ background: over ? '#FBE0DA' : '#EAF2E5', color: over ? '#B5391F' : '#4E7C3F', fontWeight: 600, whiteSpace: 'nowrap' }}>{cd}</span>}
-              <span style={{ fontSize: 12, color: 'var(--orange)', fontWeight: 600, whiteSpace: 'nowrap' }}>Open →</span>
             </div>
           )
         })}
       </div>
     </>
+  )
+}
+
+// What a row says about an event, and — as important — when it says nothing.
+// A quiet row means there is nothing to do here, so a row that speaks is worth
+// looking at. Eight rows all shouting is the same as eight rows all silent.
+function ReadinessChips({ r, past }) {
+  if (!r || past) return null
+  const chips = []
+  if (r.prep.worst === 'overdue') chips.push({ t: `${r.prep.overdue} overdue`, ...FLAG_META.overdue })
+  else if (r.prep.worst === 'at_risk') chips.push({ t: `${r.prep.atRisk} at risk`, ...FLAG_META.at_risk })
+  if (r.waiting > 0) chips.push({ t: `${r.waiting} waiting`, bg: 'var(--info-bg)', fg: 'var(--info-fg)' })
+  if (r.team.teams === 0) chips.push({ t: 'No teams yet', bg: 'var(--neutral-bg)', fg: 'var(--neutral-fg)' })
+  else if (r.team.needed && r.team.filled < r.team.needed) chips.push({ t: `${r.team.filled}/${r.team.needed} staffed`, bg: 'var(--pill-warm-bg)', fg: 'var(--pill-orange-fg)' })
+  else if (r.team.teams) chips.push({ t: `${r.team.teams} team${r.team.teams === 1 ? '' : 's'} ready`, bg: 'var(--success-bg)', fg: 'var(--success-fg)' })
+  if (!chips.length) return null
+  return (
+    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 0 }}>
+      {chips.map((c) => (
+        <span key={c.t} className="pill" style={{ background: c.bg, color: c.fg, fontWeight: 600, whiteSpace: 'nowrap' }}>{c.t}</span>
+      ))}
+    </div>
   )
 }
 
