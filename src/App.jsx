@@ -25,6 +25,8 @@ const PublicProgramInterest = lazy(() => import('./views/PublicProgramInterest')
 const PublicVolunteerPortal = lazy(() => import('./views/PublicVolunteerPortal'))
 const AttendancePortal = lazy(() => import('./views/AttendancePortal'))
 const VolunteerPortalClaim = lazy(() => import('./views/VolunteerPortalClaim'))
+const Poojas = lazy(() => import('./views/Poojas'))
+const PublicPoojas = lazy(() => import('./views/PublicPoojas'))
 
 // Neutral hold while a split chunk arrives. Deliberately quiet — a spinner that
 // flashes for 80ms is worse than a calm blank.
@@ -60,6 +62,15 @@ function readVolunteerPortalRoute() {
   const m = h.match(/volunteer-portal\/([0-9a-f]{32})(?:\/batch\/([0-9a-f-]{36}))?/i)
   return m ? { token: m[1], splitId: m[2] || null } : null
 }
+// Public pooja listing: #poojas. One link for every open pooja — unlike the
+// routes above it carries no id, because the guest browses rather than arriving
+// at one specific thing. The guest's own request is held by a token in
+// localStorage, not in the URL, so the link is safe to forward to anyone.
+function isPoojasRoute() {
+  const h = typeof window !== 'undefined' ? window.location.hash || '' : ''
+  return /^#poojas\/?$/i.test(h)
+}
+
 // Public per-day attendance capture: #attend/<32-hex session token>.
 function readAttendRoute() {
   const h = typeof window !== 'undefined' ? window.location.hash || '' : ''
@@ -84,6 +95,7 @@ function publicRoute() {
   if (vpRoute) return <VolunteerPortalClaim token={vpRoute.token} splitId={vpRoute.splitId} />
   const attendToken = readAttendRoute()
   if (attendToken) return <AttendancePortal token={attendToken} />
+  if (isPoojasRoute()) return <PublicPoojas />
   return null
 }
 
@@ -227,6 +239,8 @@ function Portal({ profile, email, sections }) {
         return <Planning me={profile} isCoordinator={isCoordinator} onToast={showToast} openEventId={pendingEventId} onEventConsumed={() => setPendingEventId(null)} />
       case 'hub':
         return <Hub me={profile} isCoordinator={isCoordinator} onToast={showToast} openEventId={pendingHubEventId} onEventConsumed={() => setPendingHubEventId(null)} onOpenCampaign={openCampaign} onStartCampaign={startCampaignForEvent} onOpenInterestInbox={(id) => { setPendingInterestEventId(id); setView('interest') }} onListModeChange={setHubListMode} onCreateEvent={isCoordinator ? () => requestCreate(null, 'hub') : undefined} />
+      case 'poojas':
+        return <Poojas me={profile} isCoordinator={isCoordinator} onToast={showToast} />
       case 'unresolved':
         return <Unresolved me={profile} isCoordinator={isCoordinator} onToast={showToast} />
       case 'admin':
