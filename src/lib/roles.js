@@ -5,6 +5,7 @@
 export const ALL_TABS = [
   'dashboard',
   'hub',
+  'poojas',
   'volunteers',
   'meditators',
   'advance',
@@ -26,7 +27,7 @@ export const NAV_GROUPS = [
   { label: 'Today', tabs: ['dashboard'] },
   { label: 'People', tabs: ['volunteers', 'meditators', 'advance'] },
   { label: 'Reaching out', tabs: ['campaigns', 'nurturing', 'interest'] },
-  { label: 'Events', tabs: ['hub'] },
+  { label: 'Events', tabs: ['hub', 'poojas'] },
   { label: 'Housekeeping', tabs: ['unresolved', 'admin'] },
 ]
 
@@ -61,6 +62,7 @@ export const SECTION_TO_TAB = {
   meditators: 'meditators',
   advance: 'advance',
   event_hub: 'hub',
+  poojas: 'poojas',
   attendance: 'events',
   nurturing: 'nurturing',
   interest: 'interest',
@@ -82,6 +84,7 @@ export const TAB_TITLES = {
   planning: ['Planning', 'Calendar & the things that need to get done'],
   events: ['Attendance', 'Mark show / no-show and capture walk-ins'],
   hub: ['Event Hub', 'Everything linked to one event — a read-through view'],
+  poojas: ['Poojas at homes', 'Posted for hosts — approve each guest before they get the address'],
   nurturing: ['Nurturing & Care', 'Volunteer core groups & nurturers'],
   meditators: ['Meditators', 'Nurturing those who have completed programmes'],
   advance: ['Advance Programmes', 'Bhava Spandana, Shoonya, Samyama & Guru Puja'],
@@ -97,6 +100,7 @@ export const TAB_LABELS = {
   planning: 'Planning',
   events: 'Attendance',
   hub: 'Event Hub',
+  poojas: 'Poojas at homes',
   nurturing: 'Nurturing & Care',
   meditators: 'Meditators',
   advance: 'Advance Programmes',
