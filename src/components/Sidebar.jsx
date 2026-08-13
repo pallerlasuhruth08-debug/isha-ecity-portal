@@ -7,7 +7,7 @@ import { TAB_LABELS, NAV_GROUPS } from '../lib/roles'
 const ICON = {
   dashboard: 'dashboard', hub: 'hub', volunteers: 'volunteers', meditators: 'meditators',
   campaigns: 'campaigns', interest: 'interest', nurturing: 'nurturing',
-  advance: 'advance', unresolved: 'unresolved', admin: 'admin',
+  advance: 'advance', unresolved: 'unresolved', admin: 'admin', poojas: 'poojas',
 }
 
 // variant 'rail' (default): the pinned in-flow sidebar (desktop full width,
@@ -114,7 +114,7 @@ export default function Sidebar({ me, view, tabs, onNavigate, variant = 'rail', 
                 title={TAB_LABELS[key]}
                 aria-current={view === key ? 'page' : undefined}
               >
-                {Icon[ICON[key]](18)}
+                {(Icon[ICON[key]] || Icon.dashboard)(18)}
                 <span className="sidebar-label">{TAB_LABELS[key]}</span>
               </button>
             ))}
