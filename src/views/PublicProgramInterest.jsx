@@ -30,8 +30,9 @@ export default function PublicProgramInterest() {
   const [fieldErr, setFieldErr] = useState({})
 
   // The server owns both vocabularies. Fetching them means this page can never
-  // offer a programme the database would reject, or a volunteer area that isn't
-  // in activity_types — the two ways this feature was broken before.
+  // offer a programme the database would reject, or a volunteer area outside
+  // settings.volunteer_interest_areas — and either list can be changed without
+  // touching this file.
   useEffect(() => {
     fetch(FN, { headers: { apikey: SUPABASE_KEY } })
       .then((r) => r.json())
@@ -145,7 +146,10 @@ export default function PublicProgramInterest() {
                   {cfg.areas.map((a) => (
                     <label key={a} style={rowStyle}>
                       <input type="checkbox" checked={areas.includes(a)} onChange={() => toggle(areas, setAreas, a)} style={boxStyle} />
-                      <span style={{ textTransform: 'capitalize' }}>{a}</span>
+                      {/* No textTransform: these labels come from settings and are
+                          already written the way the centre words them. Capitalising
+                          turned "Emedia / social media" into "Emedia / Social Media". */}
+                      <span>{a}</span>
                     </label>
                   ))}
                 </div>
