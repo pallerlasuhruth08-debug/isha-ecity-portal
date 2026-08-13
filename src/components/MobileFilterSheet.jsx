@@ -4,10 +4,16 @@ import { useBreakpoint } from '../lib/useBreakpoint'
 // Below the phone breakpoint, the page's filter controls collapse behind a single
 // "Filters (N)" button that opens a bottom-sheet (default mobile view = search +
 // results only). On desktop/tablet the children render inline, unchanged.
-export default function MobileFilterSheet({ count = 0, children }) {
+//
+// `always` opts a screen into the collapsed treatment at every width. The Interest
+// Inbox needs it: its filters were three stacked rows of pills whose Event row grew
+// by one every time an event was created, so "inline on desktop" meant a wall of
+// chips above the list. Default stays false, so Meditators and Volunteers are
+// untouched.
+export default function MobileFilterSheet({ count = 0, always = false, children }) {
   const { isPhone } = useBreakpoint()
   const [open, setOpen] = useState(false)
-  if (!isPhone) return children
+  if (!isPhone && !always) return children
 
   return (
     <>
