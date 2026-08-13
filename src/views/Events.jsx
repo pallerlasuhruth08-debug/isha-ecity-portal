@@ -565,6 +565,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
   const [addingType, setAddingType] = useState(false)
   const [newType, setNewType] = useState('')
   const [openComment, setOpenComment] = useState(null) // person_id whose comments are open
+  const [scanOpen, setScanOpen] = useState(false) // scan/upload a written attendance sheet
   const [refMembers, setRefMembers] = useState([]) // team members whose team activity = this session's activity
   const seq = useRef(0)
   // Capture is HARD-gated until the session's own date: creating a session in advance is
@@ -765,9 +766,12 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
       </div>
 
       <div style={{ position: 'relative', marginBottom: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: '9px 12px' }}>
-          {Icon.search(15)}
-          <input value={q} onChange={(e) => { setQ(e.target.value); setNewP(null) }} placeholder="Name or phone…" style={{ border: 'none', outline: 'none', fontSize: 13, background: 'transparent', width: '100%' }} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: '9px 12px' }}>
+            {Icon.search(15)}
+            <input value={q} onChange={(e) => { setQ(e.target.value); setNewP(null) }} placeholder="Name or phone…" style={{ border: 'none', outline: 'none', fontSize: 13, background: 'transparent', width: '100%' }} />
+          </div>
+          <button className="btn btn-ghost" onClick={() => setScanOpen(true)} title="Scan / upload a handwritten attendance sheet" style={{ fontSize: 12, padding: '0 12px', whiteSpace: 'nowrap' }}>📷 Upload sheet</button>
         </div>
         {q.trim().length >= 2 && (
           <div className="card" style={{ position: 'absolute', top: 46, left: 0, right: 0, zIndex: 20, boxShadow: 'var(--shadow-lg)', padding: 6 }}>
@@ -823,6 +827,165 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
       )}
 
       <button className="btn btn-primary" style={{ width: '100%', padding: '11px', fontSize: 14, marginTop: 14 }} onClick={onBack}>OK — done</button>
+
+      {scanOpen && (
+        <ScanAttendanceModal
+          session={session} activity={activity} presentIds={presentIds}
+          defaults={{ typeId: ovrType || session.activity_type_id || null, subId: ovrSub || null, centreId: ovrCentre || session.center_id || null }}
+          onClose={() => setScanOpen(false)}
+          onDone={() => { setScanOpen(false); load() }}
+          onToast={onToast}
+        />
+      )}
+    </div>
+  )
+}
+
+// Scan / upload a handwritten attendance SHEET (a list) into this session. The
+// ocr-attendance edge function reads the photo with Claude vision and returns a
+// structured roster [{name, phone}]; we match each by phone (fallback name) and —
+// after you review the list — mark matched people present. Unmatched rows go to the
+// review queue (source='scan'). phone is used when present, else a single
+// unambiguous name match. (parseSheet is a legacy fallback for raw-text responses.)
+const SCAN_PHONE = /(?:\+?91[\s-]?|0)?([6-9]\d{9})/
+function ScanAttendanceModal({ session, activity, presentIds, defaults, onClose, onDone, onToast }) {
+  const [rows, setRows] = useState(null) // [{name, phone, person, status}]
+  const [ocrBusy, setOcrBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  function parseSheet(text) {
+    const lines = (text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    const out = []
+    for (const raw of lines) {
+      if (/^(s\.?\s*no|sl\b|serial|phone\b|mobile|number|no\.?$|signature|sign\b|date\b|event\b|total)/i.test(raw)) continue
+      const joined = raw.replace(/(\d)[\s\-.](?=\d)/g, '$1') // join digit runs split by OCR spaces
+      const pm = joined.match(SCAN_PHONE)
+      const phone = pm ? pm[1] : ''
+      const name = raw
+        .replace(/\+?\d[\d\s\-.]{5,}\d/g, ' ') // strip phone-like digit runs
+        .replace(/^\s*\d+[).:-]?\s+/, ' ') // strip a leading serial number
+        .replace(/[|()._:]/g, ' ').replace(/\s{2,}/g, ' ').trim()
+      if (!name && !phone) continue
+      if (!name && phone && out.length && !out[out.length - 1].phone) { out[out.length - 1].phone = phone; continue }
+      out.push({ name, phone })
+    }
+    return out
+  }
+
+  async function resolve(parsed) {
+    const phones = [...new Set(parsed.map((r) => r.phone).filter(Boolean))]
+    const phoneMap = {}
+    if (phones.length) {
+      const { data } = await supabase.from('people').select('id, full_name, phone').in('phone', phones)
+      for (const p of data || []) phoneMap[p.phone] = p
+    }
+    const resolved = []
+    for (const r of parsed) {
+      let person = r.phone ? phoneMap[r.phone] : null
+      let status = person ? 'matched' : ''
+      if (!person && r.name && r.name.length >= 3) {
+        const { data } = await supabase.from('people').select('id, full_name, phone').ilike('full_name', r.name).limit(2)
+        if (data && data.length === 1) { person = data[0]; status = 'name' }
+        else if (data && data.length > 1) status = 'ambiguous'
+        else status = 'new'
+      } else if (!person) status = 'new'
+      resolved.push({ ...r, person, status, include: !!person && !presentIds.has(person.id) })
+    }
+    return resolved
+  }
+
+  async function onFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setErr(null); setOcrBusy(true); setRows(null)
+    try {
+      const b64 = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(String(rd.result).split(',')[1]); rd.onerror = rej; rd.readAsDataURL(file) })
+      // Claude vision returns a structured roster [{name, phone}]; fall back to
+      // parsing raw OCR text only if an older function shape is answering.
+      const { data, error } = await supabase.functions.invoke('ocr-attendance', { body: { image: b64, mime: file.type } })
+      if (error) throw new Error(error.message || 'OCR failed')
+      if (data?.error) throw new Error(data.error)
+      const parsed = Array.isArray(data?.rows)
+        ? data.rows.map((r) => ({ name: (r.name || '').trim(), phone: (r.phone || '').replace(/\D/g, '').slice(-10) })).filter((r) => r.name || r.phone)
+        : parseSheet(data?.rawText || '')
+      if (!parsed.length) { setErr('Read the photo but found no names/phones — try a clearer shot.'); return }
+      setRows(await resolve(parsed))
+    } catch (e2) { setErr(e2.message || String(e2)) } finally { setOcrBusy(false); e.target.value = '' }
+  }
+
+  const patch = (i, p) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...p } : r)))
+
+  async function commit() {
+    setBusy(true)
+    try {
+      const toMark = rows.filter((r) => r.include && r.person && !presentIds.has(r.person.id))
+      const toReview = rows.filter((r) => r.include && !r.person)
+      let marked = 0
+      if (toMark.length) {
+        const dedup = new Map(toMark.map((r) => [r.person.id, r]))
+        const insertRows = [...dedup.values()].map((r) => ({
+          session_id: session.id, activity_id: activity.id, person_id: r.person.id, status: 'attended',
+          activity_type_id: defaults.typeId || null, sub_activity_type_id: defaults.subId || null,
+          center_id: defaults.centreId || null, attended_on: session.session_date, capture_source: 'scan',
+        }))
+        const { error } = await supabase.from('attendance').insert(insertRows)
+        if (error) throw error
+        for (const r of dedup.values()) { try { await ensureParticipation(r.person.id, session.type, { source: 'scan' }) } catch { /* flag best-effort */ } }
+        marked = dedup.size
+      }
+      if (toReview.length) {
+        await supabase.from('iprs_review').insert(toReview.map((r) => ({
+          source: 'scan', event_name: session.title || activity.name, activity_id: activity.id,
+          name: r.name || null, phone: r.phone || null, state: 'attended',
+          center_id: defaults.centreId || activity.center_id, kind: session.type,
+        })))
+      }
+      onToast(`${marked} marked present${toReview.length ? ` · ${toReview.length} unmatched → review` : ''}.`)
+      onDone()
+    } catch (e) { onToast('Could not save: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
+  const _f = { width: '100%', padding: '7px 9px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', background: '#fff', outline: 'none', boxSizing: 'border-box' }
+  const TONE = { matched: '#4E7C3F', name: '#C2691F', ambiguous: 'var(--red)', new: 'var(--muted-2)', '': 'var(--muted-2)' }
+  const LBL = { matched: 'phone match', name: 'name match', ambiguous: 'name ambiguous', new: 'new → review', '': 'new → review' }
+  const matchedCount = rows ? rows.filter((r) => r.include && r.person).length : 0
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(40,25,15,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }} onClick={onClose}>
+      <div className="card scrollarea" style={{ width: 520, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: 22, boxShadow: 'var(--shadow-lg)' }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 2px' }}>Upload attendance sheet</h3>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>Photo of a written sheet → reads the list, matches by phone (or name), you review, then marks everyone present in <strong>{session.title || 'this session'}</strong>.</div>
+
+        <label className="btn btn-ghost" style={{ cursor: 'pointer' }}>
+          {ocrBusy ? 'Reading sheet…' : '📷 Choose / take a photo'}
+          <input type="file" accept="image/*" capture="environment" onChange={onFile} style={{ display: 'none' }} />
+        </label>
+        {err && <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 8 }}>{err}</div>}
+
+        {rows && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>{rows.length} rows read · {matchedCount} to mark present · uncheck any that are wrong.</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {rows.map((r, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={r.include} onChange={(e) => patch(i, { include: e.target.checked })} style={{ width: 16, height: 16, flexShrink: 0 }} />
+                  <input value={r.name} onChange={(e) => patch(i, { name: e.target.value })} placeholder="name" style={{ ..._f, flex: 1 }} />
+                  <input value={r.phone} onChange={(e) => patch(i, { phone: e.target.value.replace(/\D/g, '') })} placeholder="phone" style={{ ..._f, width: 120 }} />
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: TONE[r.status], width: 92, flexShrink: 0, textAlign: 'right' }}>{r.person ? (r.person.full_name.length > 14 ? r.person.full_name.slice(0, 13) + '…' : r.person.full_name) : LBL[r.status]}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+              <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+              <button className="btn btn-primary" disabled={busy} onClick={commit}>{busy ? 'Saving…' : `Mark ${matchedCount} present`}</button>
+            </div>
+          </div>
+        )}
+        {!rows && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}><button className="btn btn-ghost" onClick={onClose}>Close</button></div>
+        )}
+      </div>
     </div>
   )
 }

@@ -97,7 +97,7 @@ export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStar
   if (openId) {
     const ev = events.find((e) => e.id === openId)
     if (!ev) { setOpenId(null); return null }
-    return <EventHub ev={ev} me={me} isCoordinator={isCoordinator} onBack={() => setOpenId(null)} onOpenCampaign={onOpenCampaign} onStartCampaign={onStartCampaign} onOpenInterestInbox={onOpenInterestInbox} onToast={onToast} />
+    return <EventHub ev={ev} me={me} isCoordinator={isCoordinator} onBack={() => setOpenId(null)} onOpenCampaign={onOpenCampaign} onStartCampaign={onStartCampaign} onOpenInterestInbox={onOpenInterestInbox} onToast={onToast} onListReload={load} />
   }
 
   return (
@@ -117,7 +117,7 @@ export default function Hub({ me, isCoordinator, onToast, onOpenCampaign, onStar
 }
 
 // ---- one event's hub: TABS, every one scoped to THIS event --------------------
-function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampaign, onOpenInterestInbox, onToast }) {
+function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampaign, onOpenInterestInbox, onToast, onListReload }) {
   const [tab, setTab] = useState('planning')
   const [types, setTypes] = useState([])
   const [reloadKey, setReloadKey] = useState(0)
@@ -174,7 +174,10 @@ function EventHub({ ev, me, isCoordinator, onBack, onOpenCampaign, onStartCampai
               return cd ? <span className="pill" style={{ background: late ? '#FBE0DA' : '#EAF2E5', color: late ? '#B5391F' : '#4E7C3F', fontWeight: 600 }}>{cd}</span> : null
             })()}
           </div>
-          <EventActions activity={ev} me={me} isCoordinator={isCoordinator} onToast={onToast} onChanged={reload} onDeleted={onBack} />
+          {/* Renaming or deleting an event from inside its hub also has to refresh the
+              LIST behind it — otherwise going back showed the old name, or a row for an
+              event that no longer exists. */}
+          <EventActions activity={ev} me={me} isCoordinator={isCoordinator} onToast={onToast} onChanged={() => { reload(); onListReload?.() }} onDeleted={() => { onListReload?.(); onBack() }} />
         </div>
       </div>
 

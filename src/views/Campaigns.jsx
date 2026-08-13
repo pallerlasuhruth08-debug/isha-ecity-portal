@@ -6,7 +6,7 @@ import { STATUS_ORDER, OUTCOME_TO_STATUS, pillFor } from '../lib/calllog'
 import { MESSAGE_STATUS, pillForMessage, labelForMessage } from '../lib/messageStatus'
 import { fillTemplate } from '../lib/phone'
 import { useBreakpoint } from '../lib/useBreakpoint'
-import { Pad, ErrorCard, Empty, Pager } from '../components/View'
+import { Pad, ErrorCard, Empty, Loading, Pager } from '../components/View'
 import ReachButtons from '../components/ReachButtons'
 import CallLogDialog from '../components/CallLogDialog'
 import CampaignScriptPanel from '../components/CampaignScriptPanel'
@@ -45,20 +45,31 @@ function lastTouch(logs) {
 
 export default function Campaigns({ me, isCoordinator = false, onToast, onNavigate, openCampaignId = null, onCampaignConsumed, onAddRecipients }) {
   const [newOpen, setNewOpen] = useState(false)
+  const [page, setPage] = useState('campaigns') // 'campaigns' | 'templates'
   const [campaigns, setCampaigns] = useState(null)
+  const [stats, setStats] = useState({}) // campaign_id -> campaign_stats row (list-view counts)
+  const [eventNames, setEventNames] = useState({}) // activity.id -> {name, activity_date} for linked events
+  const [splitsByCampaign, setSplitsByCampaign] = useState({}) // campaign_id -> [campaign_splits row]
+  // ---- detail-scoped: these hold ONLY the currently-open campaign's data ----
   const [journeys, setJourneys] = useState([])
   const [logsByJourney, setLogsByJourney] = useState({})
   const [callerNames, setCallerNames] = useState({}) // `${source}:${id}` -> name
-  const [callerPools, setCallerPools] = useState({}) // campaign_id -> [{key,source,id,name,profileId}]
+  const [callerPool, setCallerPool] = useState([]) // [{key,source,id,name,profileId}]
   const [actorNames, setActorNames] = useState({}) // profile.id -> full_name (call_logs actor)
-  const [eventNames, setEventNames] = useState({}) // activity.id -> {name, activity_date} for linked events
-  const [splitsByCampaign, setSplitsByCampaign] = useState({}) // campaign_id -> [campaign_splits row]
+  const [detailId, setDetailId] = useState(null) // which campaign the detail state above belongs to
+  const [detailErr, setDetailErr] = useState(null)
   const [err, setErr] = useState(null)
   const [openId, setOpenId] = useState(null)
   const [editId, setEditId] = useState(null) // campaign being edited from the LIST view
   const [callFilter, setCallFilter] = useState('all')
   const [showTest, setShowTest] = useState(false)
 
+  // LIST load: campaigns + per-campaign counts + splits. Deliberately does NOT fetch
+  // journeys. It used to fetch every campaign's recipients at once under a flat row
+  // cap, so once the table outgrew that cap whole campaigns rendered as "no contacts"
+  // even though the rows were in the database. Counts now come from the campaign_stats
+  // view (one aggregate row per campaign); recipients are fetched per-campaign in
+  // loadDetail below.
   const load = useCallback(async () => {
     try {
       const { data: camps, error: e1 } = await supabase
@@ -76,16 +87,11 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
       }
       setEventNames(evNames)
 
-      const { data: js, error: e2 } = await supabase
-        .from('journeys')
-        .select(
-          'id, campaign_id, status, assigned_to, caller_source, caller_id, split_number, message_status, ' +
-            'person:people!journeys_person_id_fkey(id, full_name, phone, center_id), ' +
-            'assignee:profiles!journeys_assigned_to_fkey(full_name)',
-        )
-        .not('campaign_id', 'is', null)
-        .limit(2000)
+      const { data: st, error: e2 } = await supabase
+        .from('campaign_stats')
+        .select('campaign_id, reach, responded, enrolled, removed_count, msg_sent, msg_responded, caller_count')
       if (e2) throw e2
+      setStats(Object.fromEntries((st || []).map((r) => [r.campaign_id, r])))
 
       const { data: splits, error: e4 } = await supabase
         .from('campaign_splits')
@@ -96,20 +102,45 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
         (splits || []).reduce((m, s) => ((m[s.campaign_id] ||= []).push(s), m), {}),
       )
 
-      // Resolve callers (whichever source) to names, and build each campaign's caller
-      // POOL (from segment.callers ∪ callers seen on journeys) with profile ids for
-      // reassignment targets. Nurturing-team callers carry a profile_id (login); volunteer
-      // callers are assignment-only (no login), so assigned_to stays null for them.
-      const poolSpec = {} // campaign_id -> Set of "source:id"
-      for (const c of camps || []) {
-        const set = new Set()
-        for (const cc of c.segment?.callers || []) if (cc?.source && cc?.id) set.add(`${cc.source}:${cc.id}`)
-        poolSpec[c.id] = set
+      setCampaigns(camps || [])
+    } catch (e) {
+      setErr(e.message || String(e))
+    }
+  }, [])
+
+  // DETAIL load: everything the open campaign's recipient table needs, scoped to that
+  // one campaign. Paged to the end — a short page is the only stop condition — so the
+  // list is always complete however large the campaign grows.
+  const loadDetail = useCallback(async (campaignId) => {
+    if (!campaignId) return
+    setDetailErr(null)
+    try {
+      const camp = (campaigns || []).find((c) => c.id === campaignId)
+      const JSEL =
+        'id, campaign_id, status, assigned_to, caller_source, caller_id, split_number, message_status, ' +
+        'person:people!journeys_person_id_fkey(id, full_name, phone, center_id), ' +
+        'assignee:profiles!journeys_assigned_to_fkey(full_name)'
+      const js = []
+      const JCHUNK = 1000
+      for (;;) {
+        const { data: rows, error: e1 } = await supabase
+          .from('journeys')
+          .select(JSEL)
+          .eq('campaign_id', campaignId)
+          .order('id', { ascending: true })
+          .range(js.length, js.length + JCHUNK - 1)
+        if (e1) throw e1
+        js.push(...(rows || []))
+        if (!rows || rows.length < JCHUNK) break
       }
-      for (const j of js || []) {
-        if (j.caller_source && j.caller_id) (poolSpec[j.campaign_id] ||= new Set()).add(`${j.caller_source}:${j.caller_id}`)
-      }
-      const allKeys = [...new Set(Object.values(poolSpec).flatMap((s) => [...s]))]
+
+      // Caller POOL = segment.callers ∪ callers seen on this campaign's journeys, with
+      // profile ids for reassignment targets. Care-group callers carry a profile_id
+      // (login); volunteer callers are assignment-only, so assigned_to stays null.
+      const set = new Set()
+      for (const cc of camp?.segment?.callers || []) if (cc?.source && cc?.id) set.add(`${cc.source}:${cc.id}`)
+      for (const j of js) if (j.caller_source && j.caller_id) set.add(`${j.caller_source}:${j.caller_id}`)
+      const allKeys = [...set]
       const volIds = allKeys.filter((k) => k.startsWith('volunteer:')).map((k) => k.slice('volunteer:'.length))
       const nurIds = allKeys.filter((k) => k.startsWith('nurturing_team:')).map((k) => k.slice('nurturing_team:'.length))
       const names = {}
@@ -125,53 +156,63 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
           if (n.profile_id) profileByKey['nurturing_team:' + n.id] = n.profile_id
         }
       }
-      const pools = {}
-      for (const [cid, set] of Object.entries(poolSpec)) {
-        pools[cid] = [...set].map((key) => {
-          const [source, id] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]
-          return { key, source, id, name: names[key] || 'Unknown', profileId: profileByKey[key] || null }
-        })
-      }
+      const pool = allKeys.map((key) => {
+        const [source, id] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]
+        return { key, source, id, name: names[key] || 'Unknown', profileId: profileByKey[key] || null }
+      })
 
       // Chunked: journey_id=in.(...) with hundreds of UUIDs inline can exceed the
-      // gateway's URL-length limit and come back 400 as the recipient list grows.
-      const jIds = (js || []).map((j) => j.id)
-      let logs = []
-      const CALL_LOG_CHUNK = 200
-      for (let i = 0; i < jIds.length; i += CALL_LOG_CHUNK) {
-        const { data: ls, error: e3 } = await supabase
-          .from('call_logs')
-          .select('id, journey_id, reachability, remarks, logged_at, logged_by')
-          .in('journey_id', jIds.slice(i, i + CALL_LOG_CHUNK))
-          .order('logged_at', { ascending: false })
-        if (e3) throw e3
-        logs.push(...(ls || []))
-      }
+      // gateway's URL-length limit. Messaging campaigns never log calls (they track
+      // message_status), so skip those round-trips entirely for them.
       const byJ = {}
-      for (const c of logs) (byJ[c.journey_id] ||= []).push(c)
-      const actorIds = [...new Set(logs.map((l) => l.logged_by).filter(Boolean))]
       const actors = {}
-      if (actorIds.length) {
-        const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', actorIds)
-        for (const p of profs || []) actors[p.id] = p.full_name
+      if (camp?.campaign_type !== 'messaging') {
+        const jIds = js.map((j) => j.id)
+        const logs = []
+        const CALL_LOG_CHUNK = 200
+        for (let i = 0; i < jIds.length; i += CALL_LOG_CHUNK) {
+          const { data: ls, error: e3 } = await supabase
+            .from('call_logs')
+            .select('id, journey_id, reachability, remarks, logged_at, logged_by')
+            .in('journey_id', jIds.slice(i, i + CALL_LOG_CHUNK))
+            .order('logged_at', { ascending: false })
+          if (e3) throw e3
+          logs.push(...(ls || []))
+        }
+        for (const l of logs) (byJ[l.journey_id] ||= []).push(l)
+        const actorIds = [...new Set(logs.map((l) => l.logged_by).filter(Boolean))]
+        if (actorIds.length) {
+          const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', actorIds)
+          for (const p of profs || []) actors[p.id] = p.full_name
+        }
       }
 
-      setCampaigns(camps || [])
-      setJourneys(js || [])
+      setJourneys(js)
       setLogsByJourney(byJ)
       setCallerNames(names)
-      setCallerPools(pools)
+      setCallerPool(pool)
       setActorNames(actors)
+      setDetailId(campaignId)
     } catch (e) {
-      setErr(e.message || String(e))
+      setDetailErr(e.message || String(e))
     }
-  }, [])
+  }, [campaigns])
 
   useEffect(() => {
     let alive = true
     load().finally(() => alive)
     return () => { alive = false }
   }, [load])
+
+  // Fetch the open campaign's recipients — and refetch after any reload() that
+  // replaces `campaigns`, which is what the detail mutations below call.
+  useEffect(() => {
+    if (!openId) {
+      setJourneys([]); setLogsByJourney({}); setCallerPool([]); setDetailId(null); setDetailErr(null)
+      return
+    }
+    loadDetail(openId)
+  }, [openId, loadDetail])
 
   // Open a specific campaign when routed here (e.g. from an event-hub row).
   useEffect(() => {
@@ -185,16 +226,39 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
   // campaign's To message/Sent/Responded chips — reset on every campaign switch.
   useEffect(() => { setCallFilter('all') }, [openId])
 
-  // Build per-campaign contact rows + aggregates.
-  const enriched = useMemo(() => {
+  // LIST cards: counts straight from the campaign_stats aggregate — no recipient rows
+  // are loaded for the list at all.
+  const cards = useMemo(() => {
     const map = {}
     for (const c of campaigns || []) {
-      const splitByNumber = Object.fromEntries((splitsByCampaign[c.id] || []).map((s) => [s.split_number, s]))
-      map[c.id] = { ...c, contacts: [], removed: [], callers: {}, callerPool: callerPools[c.id] || [], splitCount: (splitsByCampaign[c.id] || []).length, splitByNumber }
+      const s = stats[c.id] || {}
+      const reach = s.reach || 0
+      const responded = s.responded || 0
+      map[c.id] = {
+        ...c,
+        reach,
+        responded,
+        enrolled: s.enrolled || 0,
+        msgSent: s.msg_sent || 0,
+        msgResponded: s.msg_responded || 0,
+        callerCount: s.caller_count || 0,
+        responsePct: reach ? Math.round((responded / reach) * 100) + '%' : '0%',
+      }
     }
-    for (const j of journeys) {
-      const bucket = map[j.campaign_id]
-      if (!bucket) continue
+    return map
+  }, [campaigns, stats])
+
+  // DETAIL: contact rows + aggregates for the open campaign, from its own journeys.
+  const detail = useMemo(() => {
+    if (!openId) return null
+    const c = (campaigns || []).find((x) => x.id === openId)
+    if (!c) return null
+    const s = stats[c.id] || {}
+    const splitList = splitsByCampaign[c.id] || []
+    const splitByNumber = Object.fromEntries(splitList.map((x) => [x.split_number, x]))
+    const ready = detailId === openId
+    const bucket = { ...c, contacts: [], removed: [], callers: {}, callerPool, splitCount: splitList.length, splitByNumber, ready }
+    for (const j of ready ? journeys : []) {
       const logs = logsByJourney[j.id] || []
       const status = contactStatus(logs)
       const callerKey = j.caller_source && j.caller_id ? `${j.caller_source}:${j.caller_id}` : null
@@ -231,36 +295,36 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
         if (status === 'Replied' || status === 'Enrolled') k.responded += 1
       }
     }
-    for (const c of Object.values(map)) {
-      c.reach = c.contacts.length
-      c.responded = c.contacts.filter((x) => x.status === 'Replied' || x.status === 'Enrolled').length
-      c.enrolled = c.contacts.filter((x) => x.status === 'Enrolled').length
-      c.responsePct = c.reach ? Math.round((c.responded / c.reach) * 100) + '%' : '0%'
-      c.callerList = Object.values(c.callers).map((k) => ({ ...k, rate: k.contacted ? Math.round((k.responded / k.contacted) * 100) + '%' : '—' }))
-      // Messaging-campaign counterpart to reach/responded/enrolled — mutually exclusive
-      // buckets over message_status (no call ever happens for these campaigns).
-      c.msgToMessage = c.contacts.filter((x) => x.messageStatus === 'to_message').length
-      c.msgSent = c.contacts.filter((x) => x.messageStatus === 'sent').length
-      c.msgResponded = c.contacts.filter((x) => x.messageStatus === 'responded').length
-      // Distinct batch-assignee names (+ counts) for the coordinator's "Assigned to"
-      // filter — messaging campaigns only, since that's the only assignment that comes
-      // from campaign_splits. "Unassigned" (null name) sorts last.
-      if (typeOf(c) === 'messaging') {
-        const byName = {}
-        for (const x of c.contacts) {
-          const k = x.assignedTo || '__unassigned__'
-          byName[k] = (byName[k] || 0) + 1
-        }
-        c.assigneeOptions = Object.entries(byName)
-          .map(([k, count]) => ({ name: k === '__unassigned__' ? null : k, count }))
-          .sort((a, b) => (a.name || '￿').localeCompare(b.name || '￿'))
+    // Header/tab counts come from the aggregate until the rows land, so a slow fetch
+    // never renders as "0 recipients" (which is indistinguishable from an empty list).
+    bucket.reach = ready ? bucket.contacts.length : s.reach || 0
+    bucket.responded = ready ? bucket.contacts.filter((x) => x.status === 'Replied' || x.status === 'Enrolled').length : s.responded || 0
+    bucket.enrolled = ready ? bucket.contacts.filter((x) => x.status === 'Enrolled').length : s.enrolled || 0
+    bucket.responsePct = bucket.reach ? Math.round((bucket.responded / bucket.reach) * 100) + '%' : '0%'
+    bucket.callerList = Object.values(bucket.callers).map((k) => ({ ...k, rate: k.contacted ? Math.round((k.responded / k.contacted) * 100) + '%' : '—' }))
+    bucket.callerCount = ready ? bucket.callerList.length : s.caller_count || 0
+    // Messaging-campaign counterpart to reach/responded/enrolled — mutually exclusive
+    // buckets over message_status (no call ever happens for these campaigns).
+    bucket.msgSent = ready ? bucket.contacts.filter((x) => x.messageStatus === 'sent').length : s.msg_sent || 0
+    bucket.msgResponded = ready ? bucket.contacts.filter((x) => x.messageStatus === 'responded').length : s.msg_responded || 0
+    bucket.msgToMessage = ready ? bucket.contacts.filter((x) => x.messageStatus === 'to_message').length : Math.max(0, bucket.reach - bucket.msgSent - bucket.msgResponded)
+    // Distinct batch-assignee names (+ counts) for the coordinator's "Assigned to"
+    // filter — messaging campaigns only, since that's the only assignment that comes
+    // from campaign_splits. "Unassigned" (null name) sorts last.
+    if (typeOf(bucket) === 'messaging') {
+      const byName = {}
+      for (const x of bucket.contacts) {
+        const k = x.assignedTo || '__unassigned__'
+        byName[k] = (byName[k] || 0) + 1
       }
+      bucket.assigneeOptions = Object.entries(byName)
+        .map(([k, count]) => ({ name: k === '__unassigned__' ? null : k, count }))
+        .sort((a, b) => (a.name || '￿').localeCompare(b.name || '￿'))
     }
-    return map
-  }, [campaigns, journeys, logsByJourney, callerNames, callerPools, splitsByCampaign])
+    return bucket
+  }, [openId, campaigns, stats, detailId, journeys, logsByJourney, callerNames, callerPool, splitsByCampaign])
 
   const loading = !campaigns && !err
-  const open = openId ? enriched[openId] : null
 
   if (loading) return <Pad>Loading campaigns…</Pad>
   if (err)
@@ -270,16 +334,18 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
       </Pad>
     )
 
-  if (open)
+  if (detail)
     return (
       <Detail
-        c={open}
+        c={detail}
         me={me}
         isCoordinator={isCoordinator}
         logsByJourney={logsByJourney}
         actorNames={actorNames}
         eventNames={eventNames}
         splits={splitsByCampaign[openId] || []}
+        recipientsLoading={!detail.ready}
+        recipientsErr={detailErr}
         reload={load}
         setJourneys={setJourneys}
         onBack={() => setOpenId(null)}
@@ -297,6 +363,18 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
 
   return (
     <Pad>
+      {/* CampaignForm's "Message template" dropdown reads message_templates, but there
+          was nowhere in the app to CREATE one — the dropdown was permanently empty
+          unless you inserted rows by hand. This tab is that missing half. */}
+      {isCoordinator && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          {[{ k: 'campaigns', l: 'Campaigns' }, { k: 'templates', l: 'Templates' }].map((t) => (
+            <button key={t.k} onClick={() => setPage(t.k)} aria-pressed={page === t.k} className="btn" style={{ padding: '7px 14px', fontSize: 13, borderRadius: 'var(--radius-pill)', background: page === t.k ? 'var(--sb-bg)' : '#fff', color: page === t.k ? 'var(--sb-ink)' : 'var(--ink-soft)', border: page === t.k ? 'none' : '1px solid var(--border)' }}>{t.l}</button>
+          ))}
+        </div>
+      )}
+      {page === 'templates' ? <TemplatesManager onToast={onToast} /> : (
+      <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
         <p className="mobile-hide" style={{ margin: 0, fontSize: 13.5, color: 'var(--muted)', maxWidth: 560 }}>
           Pinpointed campaigns for volunteers and meditators — matched to insights so the right programme reaches the right cohort at the right time.
@@ -337,7 +415,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(330px,1fr))', gap: 16 }}>
         {visibleCamps.map((c) => {
-          const e = enriched[c.id]
+          const e = cards[c.id]
           return (
             <div key={c.id} className="rowhover card" style={{ padding: 21, display: 'flex', flexDirection: 'column', cursor: 'pointer', ...(c.is_test ? { borderColor: '#E7C9B8', background: '#FDF7EF' } : {}) }} onClick={() => setOpenId(c.id)}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 13 }}>
@@ -371,16 +449,99 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
               </div>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 12.5, lineHeight: 1.45, color: '#B0601E', background: '#FBF1E4', padding: '10px 12px', borderRadius: 10 }}>
                 {Icon.campaigns(15)}
-                <span>{c.goal || `${e.reach} contacts · ${e.callerList.length} caller(s) assigned.`}</span>
+                <span>{c.goal || `${e.reach} contacts · ${e.callerCount} caller(s) assigned.`}</span>
               </div>
             </div>
           )
         })}
       </div>
-      {editId && enriched[editId] && (
-        <EditCampaignDialog campaign={enriched[editId]} me={me} onClose={() => setEditId(null)} onSaved={load} onToast={onToast} />
+      {editId && cards[editId] && (
+        <EditCampaignDialog campaign={cards[editId]} me={me} onClose={() => setEditId(null)} onSaved={load} onToast={onToast} />
+      )}
+      </>
       )}
     </Pad>
+  )
+}
+
+// Message templates — reusable WhatsApp/SMS/message bodies selectable in the campaign
+// form's "Message template" dropdown. CRUD on message_templates (id, name, body).
+function TemplatesManager({ onToast }) {
+  const [rows, setRows] = useState(null)
+  const [name, setName] = useState('')
+  const [body, setBody] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    const { data } = await supabase.from('message_templates').select('id, name, body').order('name')
+    setRows(data || [])
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  async function add() {
+    if (!name.trim() || !body.trim()) return onToast('Give the template a name and a message body.')
+    setBusy(true)
+    const { error } = await supabase.from('message_templates').insert({ name: name.trim(), body: body.trim() })
+    setBusy(false)
+    if (error) return onToast('Could not save template: ' + error.message)
+    setName(''); setBody(''); onToast('Template saved.'); load()
+  }
+  async function save(id, patch) {
+    const { error } = await supabase.from('message_templates').update(patch).eq('id', id)
+    if (error) return onToast('Could not update: ' + error.message)
+    onToast('Template updated.'); load()
+  }
+  async function del(t) {
+    if (!window.confirm(`Delete template “${t.name}”?`)) return
+    const { error } = await supabase.from('message_templates').delete().eq('id', t.id)
+    if (error) return onToast('Could not delete: ' + error.message)
+    onToast('Template deleted.'); load()
+  }
+
+  const field = { width: '100%', padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 13.5, fontFamily: 'inherit', background: '#fff', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }
+  const label = { fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)', marginBottom: 5, display: 'block' }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 640 }}>
+      <div style={{ fontSize: 13, color: 'var(--muted)' }}>Save reusable message bodies here — they appear in the “Message template” dropdown when creating a campaign.</div>
+
+      <div className="card" style={{ padding: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>New template</div>
+        <label style={label}>Name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Shoonya invite" style={{ ...field, marginBottom: 10 }} />
+        <label style={label}>Message body</label>
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3} placeholder="Hi {name}, …" style={{ ...field, resize: 'vertical' }} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+          <button className="btn btn-primary" disabled={busy} onClick={add} style={{ fontSize: 13, padding: '8px 16px' }}>{busy ? 'Saving…' : '＋ Add template'}</button>
+        </div>
+      </div>
+
+      {rows === null ? <Loading label="Loading templates…" /> : rows.length === 0 ? (
+        <Empty label="No templates yet — add your first above." />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {rows.map((t) => <TemplateRow key={t.id} t={t} field={field} label={label} onSave={save} onDelete={del} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TemplateRow({ t, field, label, onSave, onDelete }) {
+  const [name, setName] = useState(t.name || '')
+  const [body, setBody] = useState(t.body || '')
+  const dirty = name.trim() !== (t.name || '') || body.trim() !== (t.body || '')
+  return (
+    <div className="card" style={{ padding: 14 }}>
+      <label style={label}>Name</label>
+      <input value={name} onChange={(e) => setName(e.target.value)} style={{ ...field, marginBottom: 10 }} />
+      <label style={label}>Message body</label>
+      <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3} style={{ ...field, resize: 'vertical' }} />
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+        <button onClick={() => onDelete(t)} style={{ fontSize: 12, fontWeight: 600, padding: '7px 12px', borderRadius: 8, border: '1px solid #E7C9B8', background: '#fff', color: 'var(--red)', cursor: 'pointer' }}>Delete</button>
+        <button className="btn btn-primary" disabled={!dirty} onClick={() => onSave(t.id, { name: name.trim(), body: body.trim() })} style={{ fontSize: 12, padding: '7px 14px', opacity: dirty ? 1 : 0.5 }}>Save</button>
+      </div>
+    </div>
   )
 }
 
@@ -453,9 +614,10 @@ const VERIFIED_LABEL = { phone: 'phone', email: 'email', coordinator: 'coordinat
 // live campaign would silently reshuffle recipients out from under volunteers
 // already mid-way through their batch.
 function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
-  const [n, setN] = useState(2)
+  const [perBatch, setPerBatch] = useState(30) // batch SIZE (people per batch), default 30
   const [busy, setBusy] = useState(false)
   const [sessions, setSessions] = useState([])
+  const [showBatches, setShowBatches] = useState(false) // accordion: batch rows hidden by default
 
   const portalLink = `${window.location.origin}${window.location.pathname}#volunteer-portal/${campaign.portal_token}`
   async function copyLink() {
@@ -524,9 +686,13 @@ function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
     } catch (e) { onToast('Could not extend: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
+  // Batch by SIZE: fixed people-per-batch (default 30), so the number of batches
+  // scales with the list. The last batch takes the remainder.
   async function createSplits() {
     const total = contacts.length
-    if (n < 2 || n > total) return onToast(`Enter a number between 2 and ${total}.`)
+    const size = Math.max(1, Math.floor(perBatch))
+    const n = Math.ceil(total / size)
+    if (total < 2) return onToast('Need at least 2 people to split.')
     setBusy(true)
     try {
       const shuffled = [...contacts]
@@ -534,36 +700,38 @@ function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
         const j = Math.floor(Math.random() * (i + 1))
         ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
       }
-      const base = Math.floor(total / n)
-      const remainder = total % n
       const { data: rows, error: e1 } = await supabase
         .from('campaign_splits')
         .insert(Array.from({ length: n }, (_, i) => ({ campaign_id: campaign.id, split_number: i + 1 })))
         .select('id, split_number')
       if (e1) throw e1
-      let cursor = 0
       for (let s = 1; s <= n; s++) {
-        const size = base + (s <= remainder ? 1 : 0)
-        const chunk = shuffled.slice(cursor, cursor + size)
-        cursor += size
+        const chunk = shuffled.slice((s - 1) * size, s * size)
         if (chunk.length) {
           const { error: e2 } = await supabase.from('journeys').update({ split_number: s }).in('id', chunk.map((r) => r.journeyId))
           if (e2) throw e2
         }
       }
-      onToast(`Split into ${n} groups.`)
+      onToast(`Split into ${n} batch${n === 1 ? '' : 'es'} of up to ${size}.`)
       reload()
     } catch (e) { onToast('Could not split: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
+  // Messaging campaigns are auto-split into batches of 30 at creation, so this manual
+  // control simply never appears for them — splits.length is already > 0 by the time
+  // the coordinator sees the campaign. It is deliberately NOT gated on campaign_type:
+  // messaging campaigns created before auto-split existed have no batches, and hiding
+  // the control would leave them permanently unsplittable.
   if (splits.length === 0) {
+    const size = Math.max(1, Math.floor(perBatch))
+    const batchCount = contacts.length ? Math.ceil(contacts.length / size) : 0
     return (
       <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-soft)' }}>
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Split the call list into batches. Volunteers self-assign to one via a single shared link — no per-batch link to hand out.</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Split the list into batches of a set size (default 30 each). Volunteers self-assign to one via a single shared link — no per-batch link to hand out.</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <input type="number" min={2} max={contacts.length} value={n} onChange={(e) => setN(Number(e.target.value))}
+          <input type="number" min={1} max={contacts.length} value={perBatch} onChange={(e) => setPerBatch(Number(e.target.value))}
             style={{ width: 70, padding: '7px 9px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 14, fontFamily: 'inherit' }} />
-          <span style={{ fontSize: 12, color: 'var(--muted)' }}>batches from {contacts.length} people</span>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>people per batch{batchCount ? ` → ${batchCount} batch${batchCount === 1 ? '' : 'es'} from ${contacts.length}` : ''}</span>
           <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }} disabled={busy || contacts.length < 2} onClick={createSplits}>{busy ? 'Splitting…' : 'Split into batches'}</button>
         </div>
       </div>
@@ -593,9 +761,13 @@ function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>Batches</div>
+        <button onClick={() => setShowBatches((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>
+          <span style={{ display: 'inline-block', transition: 'transform .15s', transform: showBatches ? 'rotate(90deg)' : 'none', fontSize: 10 }}>▶</span>
+          Batches ({splits.length})
+        </button>
         <button className="btn btn-ghost" style={{ height: 28, padding: '0 10px', fontSize: 12, marginLeft: 'auto' }} disabled={busy} onClick={copyLink}>Copy portal link</button>
       </div>
+      {showBatches && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {splits.map((s) => {
           const rows = contacts.filter((c) => c.splitNumber === s.split_number)
@@ -636,6 +808,7 @@ function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
           )
         })}
       </div>
+      )}
     </div>
   )
 }
@@ -687,7 +860,7 @@ function SentButton({ status, onToggle, compact = false }) {
   )
 }
 
-function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = {}, splits = [], reload, setJourneys, onBack, callFilter, setCallFilter, onAddRecipients, onToast }) {
+function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = {}, splits = [], recipientsLoading = false, recipientsErr = null, reload, setJourneys, onBack, callFilter, setCallFilter, onAddRecipients, onToast }) {
   const { isPhone } = useBreakpoint()
   const [logFor, setLogFor] = useState(null) // {journeyId, personId, name, phone}
   const [assignFor, setAssignFor] = useState(null) // recipient row being reassigned (kebab → Assign caller)
@@ -890,7 +1063,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
         <div style={{ display: 'flex', gap: 26, marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-soft)', flexWrap: 'wrap' }}>
           {messaging ? (
             <>
-              <Metric v={c.contacts.length} label="recipients" />
+              <Metric v={c.reach} label="recipients" />
               <Metric v={c.msgSent} label="sent" color="#8A6D1B" />
               <Metric v={c.msgResponded} label="responded" color="#4E7C3F" />
               <Metric v={0} label="confirmed" />
@@ -900,7 +1073,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
               <Metric v={c.reach} label="recipients" />
               <Metric v={c.responsePct} label="responded" color="#4E7C3F" />
               <Metric v={c.enrolled} label="enrolled" />
-              <Metric v={c.callerList.length} label="callers" />
+              <Metric v={c.callerCount} label="callers" />
             </>
           )}
         </div>
@@ -919,8 +1092,8 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           content, just behind a tab now). */}
       <div className="scroll-tabs" style={{ display: 'flex', gap: 18, marginBottom: 16, borderBottom: '1px solid var(--border)' }}>
         {[
-          { k: 'calls', label: `Call List (${c.contacts.length})` },
-          { k: 'callers', label: `Callers (${c.callerList.length})` },
+          { k: 'calls', label: `Call List (${c.reach})` },
+          { k: 'callers', label: `Callers (${c.callerCount})` },
           { k: 'script', label: 'Script & Templates' },
         ].map((t) => (
           <button key={t.k} onClick={() => setDetailTab(t.k)}
@@ -964,7 +1137,7 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
       <div className="scroll-tabs" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', gap: 8, marginBottom: 14 }}>
         {chips.map((f) => {
           const on = callFilter === f.key
-          const n = f.key === 'all' ? c.contacts.length : counts[f.key] || 0
+          const n = f.key === 'all' ? c.reach : counts[f.key] || 0
           return (
             <button key={f.key} onClick={() => setCallFilter(f.key)} aria-pressed={on} className="btn" style={{ padding: '7px 13px', fontSize: 'var(--fs-caption)', borderRadius: 'var(--radius-pill)', background: on ? 'var(--sb-bg)' : '#fff', color: on ? 'var(--sb-ink)' : 'var(--ink-soft)', border: on ? 'none' : '1px solid var(--border)', flexShrink: 0 }}>
               {f.label}{n > 0 && <span style={{ opacity: 0.6 }}> {n}</span>}
@@ -991,7 +1164,15 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             {isCoordinator && <span>Actions</span>}
           </div>
         )}
-        {shown.length === 0 && <Empty label="No contacts in this status." />}
+        {/* An in-flight or failed fetch must never look like an empty campaign — that
+            ambiguity is exactly what hid missing recipients before. */}
+        {recipientsErr ? (
+          <div style={{ padding: 20 }}><ErrorCard>Couldn't load recipients: {recipientsErr}</ErrorCard></div>
+        ) : recipientsLoading ? (
+          <Loading label="Loading recipients…" />
+        ) : shown.length === 0 ? (
+          <Empty label="No contacts in this status." />
+        ) : null}
 
         {isPhone && pageShown.map((p, i) => (
           <div key={p.journeyId} className="rowhover" onClick={() => setDetailFor(p)} style={{ padding: '8px 14px', borderBottom: '1px solid var(--border-soft)', cursor: 'pointer' }}>
@@ -1109,7 +1290,9 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
             {isCoordinator && <span></span>}
           </div>
         )}
-        {c.callerList.length === 0 && <div style={{ padding: 26, textAlign: 'center', fontSize: 14, color: 'var(--muted-2)' }}>No callers assigned yet.</div>}
+        {recipientsLoading ? <Loading label="Loading callers…" /> : c.callerList.length === 0 ? (
+          <Empty label="No callers assigned yet." />
+        ) : null}
 
         {isPhone && c.callerList.map((k, i) => (
           <div key={k.name} className="rowhover" style={{ padding: 14, borderBottom: '1px solid var(--border-soft)' }}>
