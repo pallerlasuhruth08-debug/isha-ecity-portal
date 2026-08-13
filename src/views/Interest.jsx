@@ -9,6 +9,8 @@ import CampaignForm from '../components/CampaignForm'
 import SidePanel, { PanelHeader } from '../components/SidePanel'
 import { EI_STATUS, EI_STATUS_MAP } from '../components/EventInterestPanel'
 import KebabMenu from '../components/KebabMenu'
+import MobileFilterSheet from '../components/MobileFilterSheet'
+import { PROGRAMS } from '../lib/programCatalog'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import { multiFieldOr } from '../lib/searchFilter'
 import { useTableSelection } from '../lib/useTableSelection'
@@ -55,12 +57,22 @@ const waNum = (p) => (p || '').replace(/\D/g, '').replace(/^0+/, '').slice(-10)
 
 // A labelled filter dimension. The label is what turns three pill strips from
 // "which of these fifteen buttons am I on?" into three independent questions.
-function FilterRow({ label, children }) {
+// A labelled control inside the Filters sheet. Replaces FilterRow, whose job was
+// to caption a horizontally-scrolling strip of chips per dimension.
+function FilterSelect({ label, value, onChange, options }) {
+  const on = value !== 'all'
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-      <span style={{ fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, width: 46, flexShrink: 0 }}>{label}</span>
-      <div className="scroll-tabs" style={{ display: 'flex', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', alignItems: 'center', minWidth: 0 }}>{children}</div>
-    </div>
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 168, flex: '1 1 168px' }}>
+      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ minHeight: 40, fontSize: 13.5, fontFamily: 'inherit', padding: '8px 10px', borderRadius: 9, background: '#fff', cursor: 'pointer',
+          border: on ? '1.5px solid var(--orange)' : '1px solid var(--border)', color: on ? 'var(--ink)' : 'var(--ink-soft)' }}
+      >
+        {options.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+      </select>
+    </label>
   )
 }
 
@@ -101,6 +113,9 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
   const [statusFilter, setStatusFilter] = useState('interested')
   const [eventFilter, setEventFilter] = useState('all')
   const [evList, setEvList] = useState([])
+  const [programFilter, setProgramFilter] = useState('all')
+  const [areaFilter, setAreaFilter] = useState('all')
+  const [areaOpts, setAreaOpts] = useState([]) // settings.volunteer_interest_areas
 
   const sel = useTableSelection()
 
@@ -159,14 +174,28 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       })
   }, [evKey])
 
+  // Same vocabulary the public form offers, so the filter can never list an area
+  // nobody can have been recorded against.
+  useEffect(() => {
+    supabase.from('settings').select('value').eq('key', 'volunteer_interest_areas').maybeSingle()
+      .then(({ data }) => setAreaOpts(Array.isArray(data?.value) ? data.value : []))
+  }, [])
+
   const applyFilters = useCallback((q) => {
     if (typeFilter !== 'all') q = q.eq('interest_type', typeFilter)
     if (statusFilter !== 'all') q = q.eq('status_bucket', statusFilter)
     if (eventFilter !== 'all') q = q.eq('event_id', eventFilter)
-    const searchOr = multiFieldOr(debounced, ['full_name', 'phone'])
-    if (searchOr) q = q.or(searchOr)
+    if (programFilter !== 'all') q = q.eq('program', programFilter)
+    if (areaFilter !== 'all') q = q.contains('interests', [areaFilter])
+    // One haystack column instead of name-OR-phone: typing "shoonya",
+    // "online calling" or an event name used to return nothing, which is exactly
+    // what people came to the Inbox to look up. Terms are ANDed, so "priya
+    // shoonya" narrows rather than widens.
+    for (const term of (debounced || '').trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+      q = q.ilike('search_text', `%${term}%`)
+    }
     return q
-  }, [typeFilter, statusFilter, eventFilter, debounced])
+  }, [typeFilter, statusFilter, eventFilter, programFilter, areaFilter, debounced])
 
   const fetchAllKeys = useCallback(
     () => fetchAllMatchingIds(() => applyFilters(supabase.from('interest_inbox_list').select('key')), 'key'),
@@ -187,7 +216,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
 
   // A new filter is a new list: back to page 1, selection dropped. (Rows-per-page
   // resets the page inside usePagedQuery, so it is not repeated here.)
-  useEffect(() => { setPage(0); sel.clear() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [debounced, typeFilter, statusFilter, eventFilter, setPage])
+  useEffect(() => { setPage(0); sel.clear() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [debounced, typeFilter, statusFilter, eventFilter, programFilter, areaFilter, setPage])
 
   const patchRow = (key, fields) => {
     setRows((prev) => (prev || []).map((r) => (r.key === key ? { ...r, ...fields } : r)))
@@ -483,7 +512,6 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
   ].filter(Boolean).join(' · ')
 
   const btn = { padding: '9px 13px', fontSize: 12 }
-  const filterChip = (on) => ({ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 20, cursor: 'pointer', border: on ? 'none' : '1px solid var(--border)', background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', whiteSpace: 'nowrap', flexShrink: 0 })
   // Actions get a column of their own — the disposition is the point of the screen,
   // not a detail hidden behind a row click.
   const grid = '34px 2fr 0.9fr 1.1fr 1fr 1.5fr'
@@ -531,32 +559,37 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
         )}
       </div>
 
-      {/* Three filter DIMENSIONS, each labelled and on its own line.
-          They used to share one horizontally-scrolling strip with only a thin
-          divider between them, so "All" (interest type) and "All Events" were
-          active simultaneously with nothing saying they controlled different
-          things — and the status pills sat in the middle looking like more
-          types. You could not tell what you were filtered to without clicking. */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-        <FilterRow label="Kind">
-          <button className="tap44" onClick={() => setTypeFilter('all')} style={filterChip(typeFilter === 'all')}>All kinds</button>
-          {TYPE_PILLS.map((t) => (
-            <button key={t.v} className="tap44" onClick={() => setTypeFilter(t.v)} style={filterChip(typeFilter === t.v)}>{t.label}</button>
-          ))}
-        </FilterRow>
-        <FilterRow label="Stage">
-          <button className="tap44" onClick={() => setStatusFilter('all')} style={filterChip(statusFilter === 'all')}>Any stage</button>
-          {EI_STATUS.map((s) => (
-            <button key={s.v} className="tap44" onClick={() => setStatusFilter((cur) => (cur === s.v ? 'all' : s.v))} style={filterChip(statusFilter === s.v)}>{s.label}</button>
-          ))}
-        </FilterRow>
-        {evList.length > 0 && (
-          <FilterRow label="Event">
-            <button className="tap44" onClick={() => setEventFilter('all')} style={filterChip(eventFilter === 'all')}>Any event</button>
-            {evList.map((e) => (
-              <button key={e.id} className="tap44" onClick={() => setEventFilter((cur) => (cur === e.id ? 'all' : e.id))} style={filterChip(eventFilter === e.id)}>{e.name}</button>
-            ))}
-          </FilterRow>
+      {/* Was three stacked rows of pills — 17 chips above the list, and the Event
+          row grew by one every time an event was created. Worse, none of them
+          covered the two things this inbox now collects (programme, volunteering
+          area), so the questions people actually came to ask were the ones they
+          could not ask. Everything is behind one Filters button now; the smart
+          search box below carries the common case. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+        <MobileFilterSheet
+          always
+          count={(typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (eventFilter !== 'all' ? 1 : 0) + (programFilter !== 'all' ? 1 : 0) + (areaFilter !== 'all' ? 1 : 0)}
+        >
+          <FilterSelect label="Kind" value={typeFilter} onChange={setTypeFilter}
+            options={[{ v: 'all', label: 'All kinds' }, ...TYPE_PILLS]} />
+          <FilterSelect label="Stage" value={statusFilter} onChange={setStatusFilter}
+            options={[{ v: 'all', label: 'Any stage' }, ...EI_STATUS]} />
+          <FilterSelect label="Programme" value={programFilter} onChange={setProgramFilter}
+            options={[{ v: 'all', label: 'Any programme' }, ...PROGRAMS.map((p) => ({ v: p.key, label: p.label }))]} />
+          {areaOpts.length > 0 && (
+            <FilterSelect label="Volunteering" value={areaFilter} onChange={setAreaFilter}
+              options={[{ v: 'all', label: 'Any area' }, ...areaOpts.map((a) => ({ v: a, label: a }))]} />
+          )}
+          {evList.length > 0 && (
+            <FilterSelect label="Event" value={eventFilter} onChange={setEventFilter}
+              options={[{ v: 'all', label: 'Any event' }, ...evList.map((e) => ({ v: e.id, label: e.name }))]} />
+          )}
+        </MobileFilterSheet>
+        {(typeFilter !== 'all' || statusFilter !== 'all' || eventFilter !== 'all' || programFilter !== 'all' || areaFilter !== 'all') && (
+          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 11px' }}
+            onClick={() => { setTypeFilter('all'); setStatusFilter('all'); setEventFilter('all'); setProgramFilter('all'); setAreaFilter('all') }}>
+            Clear filters
+          </button>
         )}
       </div>
 
