@@ -152,6 +152,7 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
         .single()
       if (e1) throw e1
 
+      const journeyIds = []
       if (personIds.length) {
         const BATCH = 500
         for (let i = 0; i < personIds.length; i += BATCH) {
@@ -168,8 +169,33 @@ export default function CampaignForm({ audience = 'volunteer', personIds = [], s
               assigned_to: c && c.source === 'nurturing_team' && c.profileId ? c.profileId : null,
             }
           })
-          const { error: e2 } = await supabase.from('journeys').insert(rows)
+          const { data: ins, error: e2 } = await supabase.from('journeys').insert(rows).select('id')
           if (e2) throw e2
+          journeyIds.push(...(ins || []).map((r) => r.id))
+        }
+      }
+
+      // Messaging campaigns are split into batches of 30 automatically at creation —
+      // no manual "Split" step for the coordinator. Volunteers self-claim a batch via
+      // the shared portal link. (Calling campaigns are still split manually if wanted.)
+      const AUTO_BATCH = 30
+      if (campaignType === 'messaging' && journeyIds.length >= 2) {
+        const nSplits = Math.ceil(journeyIds.length / AUTO_BATCH)
+        const { data: splitRows, error: e3 } = await supabase
+          .from('campaign_splits')
+          .insert(Array.from({ length: nSplits }, (_, i) => ({ campaign_id: camp.id, split_number: i + 1 })))
+          .select('id, split_number')
+        if (e3) throw e3
+        if (splitRows?.length) {
+          const shuffled = [...journeyIds]
+          for (let i = shuffled.length - 1; i > 0; i--) { const k = Math.floor(Math.random() * (i + 1)); [shuffled[i], shuffled[k]] = [shuffled[k], shuffled[i]] }
+          for (let s = 1; s <= nSplits; s++) {
+            const chunk = shuffled.slice((s - 1) * AUTO_BATCH, s * AUTO_BATCH)
+            if (chunk.length) {
+              const { error: e4 } = await supabase.from('journeys').update({ split_number: s }).in('id', chunk)
+              if (e4) throw e4
+            }
+          }
         }
       }
 
