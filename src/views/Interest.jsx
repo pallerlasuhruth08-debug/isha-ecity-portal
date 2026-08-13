@@ -10,7 +10,6 @@ import SidePanel, { PanelHeader } from '../components/SidePanel'
 import { EI_STATUS, EI_STATUS_MAP } from '../components/EventInterestPanel'
 import KebabMenu from '../components/KebabMenu'
 import MobileFilterSheet from '../components/MobileFilterSheet'
-import { PROGRAMS } from '../lib/programCatalog'
 import { useBreakpoint } from '../lib/useBreakpoint'
 import { multiFieldOr } from '../lib/searchFilter'
 import { useTableSelection } from '../lib/useTableSelection'
@@ -59,7 +58,7 @@ const waNum = (p) => (p || '').replace(/\D/g, '').replace(/^0+/, '').slice(-10)
 // "which of these fifteen buttons am I on?" into three independent questions.
 // A labelled control inside the Filters sheet. Replaces FilterRow, whose job was
 // to caption a horizontally-scrolling strip of chips per dimension.
-function FilterSelect({ label, value, onChange, options }) {
+function FilterSelect({ label, value, onChange, options, groups = [] }) {
   const on = value !== 'all'
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 168, flex: '1 1 168px' }}>
@@ -71,6 +70,11 @@ function FilterSelect({ label, value, onChange, options }) {
           border: on ? '1.5px solid var(--orange)' : '1px solid var(--border)', color: on ? 'var(--ink)' : 'var(--ink-soft)' }}
       >
         {options.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+        {groups.map((g) => (
+          <optgroup key={g.label} label={g.label}>
+            {g.options.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+          </optgroup>
+        ))}
       </select>
     </label>
   )
@@ -113,9 +117,9 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
   const [statusFilter, setStatusFilter] = useState('interested')
   const [eventFilter, setEventFilter] = useState('all')
   const [evList, setEvList] = useState([])
-  const [programFilter, setProgramFilter] = useState('all')
   const [areaFilter, setAreaFilter] = useState('all')
   const [areaOpts, setAreaOpts] = useState([]) // settings.volunteer_interest_areas
+  const [progOpts, setProgOpts] = useState([]) // [{v,label}] programmes actually present
 
   const sel = useTableSelection()
 
@@ -181,11 +185,30 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       .then(({ data }) => setAreaOpts(Array.isArray(data?.value) ? data.value : []))
   }, [])
 
+  // Programme options come from the rows that EXIST, not from the catalogue.
+  // Offering all eleven when only two are present meant nine options that
+  // silently returned nothing — the same dead-option trap as the old "Ashram
+  // Volunteering" pill, which keys off a column that is empty for every row.
+  useEffect(() => {
+    supabase.from('interest_inbox_list').select('program, program_label')
+      .eq('interest_type', 'advanced').not('program', 'is', null).limit(2000)
+      .then(({ data }) => {
+        const m = new Map()
+        for (const r of data || []) if (!m.has(r.program)) m.set(r.program, r.program_label || r.program)
+        setProgOpts([...m].map(([v, label]) => ({ v, label })).sort((a, b) => a.label.localeCompare(b.label)))
+      })
+  }, [])
+
   const applyFilters = useCallback((q) => {
-    if (typeFilter !== 'all') q = q.eq('interest_type', typeFilter)
+    // One control, two shapes. Kind and Programme used to be separate dropdowns,
+    // but "Kind = Advanced Program" and "Programme = anything" select the very
+    // same rows — only advanced_interest rows carry a catalogue programme. Two
+    // controls asking one question is how you end up filtered to nothing and not
+    // knowing why.
+    if (typeFilter.startsWith('prog:')) q = q.eq('program', typeFilter.slice(5))
+    else if (typeFilter !== 'all') q = q.eq('interest_type', typeFilter)
     if (statusFilter !== 'all') q = q.eq('status_bucket', statusFilter)
     if (eventFilter !== 'all') q = q.eq('event_id', eventFilter)
-    if (programFilter !== 'all') q = q.eq('program', programFilter)
     if (areaFilter !== 'all') q = q.contains('interests', [areaFilter])
     // One haystack column instead of name-OR-phone: typing "shoonya",
     // "online calling" or an event name used to return nothing, which is exactly
@@ -195,7 +218,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       q = q.ilike('search_text', `%${term}%`)
     }
     return q
-  }, [typeFilter, statusFilter, eventFilter, programFilter, areaFilter, debounced])
+  }, [typeFilter, statusFilter, eventFilter, areaFilter, debounced])
 
   const fetchAllKeys = useCallback(
     () => fetchAllMatchingIds(() => applyFilters(supabase.from('interest_inbox_list').select('key')), 'key'),
@@ -216,7 +239,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
 
   // A new filter is a new list: back to page 1, selection dropped. (Rows-per-page
   // resets the page inside usePagedQuery, so it is not repeated here.)
-  useEffect(() => { setPage(0); sel.clear() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [debounced, typeFilter, statusFilter, eventFilter, programFilter, areaFilter, setPage])
+  useEffect(() => { setPage(0); sel.clear() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [debounced, typeFilter, statusFilter, eventFilter, areaFilter, setPage])
 
   const patchRow = (key, fields) => {
     setRows((prev) => (prev || []).map((r) => (r.key === key ? { ...r, ...fields } : r)))
@@ -568,14 +591,13 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
         <MobileFilterSheet
           always
-          count={(typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (eventFilter !== 'all' ? 1 : 0) + (programFilter !== 'all' ? 1 : 0) + (areaFilter !== 'all' ? 1 : 0)}
+          count={(typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (eventFilter !== 'all' ? 1 : 0) + (areaFilter !== 'all' ? 1 : 0)}
         >
-          <FilterSelect label="Kind" value={typeFilter} onChange={setTypeFilter}
-            options={[{ v: 'all', label: 'All kinds' }, ...TYPE_PILLS]} />
+          <FilterSelect label="Interest" value={typeFilter} onChange={setTypeFilter}
+            options={[{ v: 'all', label: 'Any interest' }, ...TYPE_PILLS]}
+            groups={progOpts.length ? [{ label: 'Specific programme', options: progOpts.map((p) => ({ v: `prog:${p.v}`, label: p.label })) }] : []} />
           <FilterSelect label="Stage" value={statusFilter} onChange={setStatusFilter}
             options={[{ v: 'all', label: 'Any stage' }, ...EI_STATUS]} />
-          <FilterSelect label="Programme" value={programFilter} onChange={setProgramFilter}
-            options={[{ v: 'all', label: 'Any programme' }, ...PROGRAMS.map((p) => ({ v: p.key, label: p.label }))]} />
           {areaOpts.length > 0 && (
             <FilterSelect label="Volunteering" value={areaFilter} onChange={setAreaFilter}
               options={[{ v: 'all', label: 'Any area' }, ...areaOpts.map((a) => ({ v: a, label: a }))]} />
@@ -585,9 +607,9 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
               options={[{ v: 'all', label: 'Any event' }, ...evList.map((e) => ({ v: e.id, label: e.name }))]} />
           )}
         </MobileFilterSheet>
-        {(typeFilter !== 'all' || statusFilter !== 'all' || eventFilter !== 'all' || programFilter !== 'all' || areaFilter !== 'all') && (
+        {(typeFilter !== 'all' || statusFilter !== 'all' || eventFilter !== 'all' || areaFilter !== 'all') && (
           <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 11px' }}
-            onClick={() => { setTypeFilter('all'); setStatusFilter('all'); setEventFilter('all'); setProgramFilter('all'); setAreaFilter('all') }}>
+            onClick={() => { setTypeFilter('all'); setStatusFilter('all'); setEventFilter('all'); setAreaFilter('all') }}>
             Clear filters
           </button>
         )}
