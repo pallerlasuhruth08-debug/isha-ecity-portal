@@ -448,6 +448,18 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
     try { const pid = await ensurePersonFor(selRow); setCampaignPid(pid) } catch (e) { onToast('Could not prepare: ' + (e.message || e)) } finally { setBusy(false) }
   }
 
+  // The public interest form is a standing link (no per-event token), so this is
+  // just the app's own URL with the route on it — works from any deploy path.
+  async function copyPublicFormLink() {
+    const link = `${window.location.origin}${window.location.pathname}#programmes`
+    try {
+      await navigator.clipboard.writeText(link)
+      onToast('Public form link copied — share it or turn it into a QR code.')
+    } catch {
+      onToast('Link: ' + link)
+    }
+  }
+
   function exportCsv() {
     const header = ['Name', 'Phone', 'Interest type', 'Status', 'Event']
     const csvRows = (rows || []).map((r) => [r.full_name, r.phone, TYPE_PILLS.find((t) => t.v === r.interest_type)?.label || r.interest_type, EI_STATUS_MAP[r.status_bucket]?.label || r.status_bucket, r.event_name || '—'])
@@ -485,18 +497,23 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
         </div>
       )}
 
+      {/* The public form writes straight into the two tables this inbox already
+          unions, so there is nothing to "open" — the only thing a coordinator
+          needs from it is the link to hand out. */}
       <div className="interest-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: isPhone ? '11px 12px' : '8px 12px', minWidth: 190, flexBasis: isPhone ? '100%' : undefined }}>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or phone…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
         {isPhone ? (
           <KebabMenu items={[
+            { label: 'Copy public form link', onClick: copyPublicFormLink },
             { label: 'Scan / match form', onClick: () => setScanOpen(true) },
             { label: 'Add / import', onClick: () => setAddOpen(true) },
             { label: 'Export', onClick: exportCsv },
           ]} />
         ) : (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost" style={btn} onClick={copyPublicFormLink}>Copy public form link</button>
             <button className="btn btn-ghost" style={btn} onClick={() => setScanOpen(true)}>Scan / match form</button>
             <button className="btn btn-ghost" style={btn} onClick={() => setAddOpen(true)}>Add / import</button>
             <button className="btn btn-ghost" style={btn} onClick={exportCsv}>Export</button>
