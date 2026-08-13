@@ -40,6 +40,14 @@ export const Icon = {
       <path d="M9 5v14" />
     </svg>
   ),
+  // Oil lamp — poojas hosted in people's homes.
+  poojas: (s) => (
+    <svg {...base(s)}>
+      <path d="M12 2.5c0 1.6-1.4 2.2-1.4 3.6a1.4 1.4 0 0 0 2.8 0c0-1.4-1.4-2-1.4-3.6Z" />
+      <path d="M4 13h16a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4Z" />
+      <path d="M12 17v3M8.5 20h7" />
+    </svg>
+  ),
   hub: (s) => (
     <svg {...base(s)}>
       <circle cx="12" cy="12" r="3" />
