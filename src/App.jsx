@@ -21,6 +21,7 @@ const Unresolved = lazy(() => import('./views/Unresolved'))
 const Admin = lazy(() => import('./views/Admin'))
 const PublicAccept = lazy(() => import('./views/PublicAccept'))
 const PublicInterest = lazy(() => import('./views/PublicInterest'))
+const PublicProgramInterest = lazy(() => import('./views/PublicProgramInterest'))
 const PublicVolunteerPortal = lazy(() => import('./views/PublicVolunteerPortal'))
 const AttendancePortal = lazy(() => import('./views/AttendancePortal'))
 const VolunteerPortalClaim = lazy(() => import('./views/VolunteerPortalClaim'))
@@ -70,6 +71,9 @@ function readAttendRoute() {
 // App must reach its own return without calling a hook conditionally, so the
 // route decision has to happen outside any hook's scope.
 function publicRoute() {
+  // Standing link, no id in it: one form for programme + volunteering interest,
+  // shareable as a QR on a noticeboard rather than minted per event.
+  if (/(^|#|&|\/)programmes?\b/i.test(typeof window !== 'undefined' ? window.location.hash || '' : '')) return <PublicProgramInterest />
   const acceptId = readHashId('accept')
   if (acceptId) return <PublicAccept blockId={acceptId} />
   const interestId = readHashId('interest')
