@@ -530,7 +530,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
           needs from it is the link to hand out. */}
       <div className="interest-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 9, padding: isPhone ? '11px 12px' : '8px 12px', minWidth: 190, flexBasis: isPhone ? '100%' : undefined }}>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or phone…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, phone, programme, area…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
         {isPhone ? (
           <KebabMenu items={[
