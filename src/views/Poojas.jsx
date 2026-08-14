@@ -63,28 +63,36 @@ const WhatsAppIcon = () => (
  * approval, by pooja_my_request(). Pasting this into a group of 200 people is
  * exactly the case that rule exists for.
  */
-function poojaMessage(p, { origin = '' } = {}) {
-  const when = new Date(p.starts_at).toLocaleString('en-IN', {
-    weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata',
-  })
-  const where = p.lat && p.lng
-    ? `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`
-    : [p.area, p.landmark && `near ${p.landmark}`].filter(Boolean).join(', ')
+function poojasMessage(list, { origin = '' } = {}) {
   const link = `${origin || ''}/#poojas`
+  const one = (p) => {
+    const when = new Date(p.starts_at).toLocaleString('en-IN', {
+      weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata',
+    })
+    const where = p.lat && p.lng
+      ? `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`
+      : [p.area, p.landmark && `near ${p.landmark}`].filter(Boolean).join(', ')
+    return [
+      `🪔 *${p.title}*`,
+      `🗓 ${when}`,
+      where && `📍 ${where}`,
+      `🪑 ${p.seats_left} of ${p.seats} seats still open`,
+      p.bring_note && `🌼 Do bring: ${p.bring_note}`,
+    ].filter(Boolean).join('\n')
+  }
 
+  const many = list.length > 1
   return [
-    `🪔 *${p.title}*`,
+    many ? '🪔 *Poojas at homes near you*' : null,
+    many
+      ? 'Families in our sector are opening their homes for the pooja, and there is room for you.'
+      : 'A family in our sector is opening their home for the pooja, and there is room for you.',
     '',
-    'A family in our sector is opening their home for the pooja, and there is room for you.',
-    '',
-    `🗓 ${when}`,
-    where && `📍 ${where}`,
-    `🪑 ${p.seats_left} of ${p.seats} seats still open`,
-    p.bring_note && `🌼 Do bring: ${p.bring_note}`,
+    list.map(one).join('\n\n'),
     '',
     `Come and sit with us — say you'd like to join here: ${link}`,
     'They will send you the address once your place is saved. 🙏',
-  ].filter(Boolean).join('\n')
+  ].filter((x) => x !== null).join('\n')
 }
 // Same shape as the filter row on Meditators and Volunteers, so this screen
 // reads as part of the set rather than a pill experiment of its own.
@@ -144,13 +152,20 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
     return soon.length ? soon.map(([k, v]) => `${POOJA_TYPES[k]?.short || k} has ${v.count} left (last ${fmtDate(v.last)})`).join('; ') : null
   }, [remaining])
 
-  // Dates that actually carry the chosen pooja type. Sannidhi falls on every
-  // Monday plus purnima and amavasya; Yantra only on purnima — so an unfiltered
-  // list is mostly sannidhi and the yantra dates are easy to miss.
-  const shownDates = useMemo(
-    () => (ptype === 'all' ? (dates || []) : (dates || []).filter((d) => d.types.includes(ptype))),
-    [dates, ptype],
-  )
+  // Dates that carry what you asked for. Sannidhi falls on every Monday plus
+  // purnima and amavasya; Yantra only on purnima — so an unfiltered list is
+  // mostly sannidhi and the yantra dates are easy to miss.
+  //
+  // 'both' is a different question from 'all': all = everyone to ring today,
+  // both = the people who have a Sannidhi AND a yantra, who can take the two
+  // together. That only arises on a day carrying both, so the date list narrows
+  // to those days too.
+  const shownDates = useMemo(() => {
+    const all = dates || []
+    if (ptype === 'all') return all
+    if (ptype === 'both') return all.filter((d) => d.types.length > 1)
+    return all.filter((d) => d.types.includes(ptype))
+  }, [dates, ptype])
 
   // Keep the selection honest when the filter narrows past it.
   useEffect(() => {
@@ -158,26 +173,19 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
     if (!selected || !shownDates.some((d) => d.date === selected.date)) setSelected(shownDates[0] || null)
   }, [shownDates, selected, dates])
 
-  const shownTypes = useMemo(
-    () => (!selected ? [] : ptype === 'all' ? selected.types : selected.types.filter((t) => t === ptype)),
-    [selected, ptype],
-  )
+  // 'both' still calls for both poojas — it narrows WHO, not WHICH.
+  const shownTypes = useMemo(() => {
+    if (!selected) return []
+    if (ptype === 'all' || ptype === 'both') return selected.types
+    return selected.types.filter((t) => t === ptype)
+  }, [selected, ptype])
 
   if (err) return <Pad><ErrorCard>{err}</ErrorCard></Pad>
   if (!dates) return <Loading />
 
   return (
     <Pad>
-      {/* No page title here — the Topbar already says "Consecrated spaces", and
-          repeating it pushed the actual work a heading further down. */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
-        {isCoordinator && (
-          <button className="btn btn-ghost tap44" style={smallBtn} onClick={() => setCreating(true)}
-            title="Add a pooja somebody already agreed to, without going through the call list">
-            ＋ Add a pooja already agreed
-          </button>
-        )}
-      </div>
+      {/* No page title here — the Topbar already says "Consecrated spaces". */}
 
       {runningOut && (
         <div className="card" style={{ padding: '10px 13px', marginBottom: 14, borderColor: 'var(--border-strong)', background: 'var(--warning-bg)', color: 'var(--warning-fg)', fontSize: 12.5, fontWeight: 600 }}>
@@ -192,32 +200,45 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
           {/* Tabs, not a dropdown: these are three different jobs, not three
               filters on one list — and a dropdown hides the guests-waiting count
               behind a click. Same underline pattern as the Event Hub. */}
-          <div className="scroll-tabs" role="tablist" aria-label="Pooja views"
-            style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
-            {[
-              { k: 'calls', label: 'Hosts to call' },
-              { k: 'posted', label: 'Poojas posted', n: waiting },
-              { k: 'map', label: 'Map' },
-            ].map((t) => (
-              <button key={t.k} className="tap44" role="tab" aria-selected={tab === t.k} onClick={() => setTab(t.k)}
-                style={{ padding: '9px 14px', fontSize: 14, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', color: tab === t.k ? 'var(--ink)' : 'var(--muted)', borderBottom: tab === t.k ? '2px solid var(--orange)' : '2px solid transparent', marginBottom: -1, whiteSpace: 'nowrap' }}>
-                {t.label}
-                {t.n > 0 && (
-                  <span title={`${t.n} guest${t.n === 1 ? '' : 's'} asking for a seat`}
-                    style={{ marginLeft: 6, fontSize: 12, fontWeight: 700, color: tab === t.k ? 'var(--orange)' : 'var(--muted-2)' }}>
-                    {t.n} waiting
-                  </span>
-                )}
+          {/* Tabs and the one page-level action share a row and a rule. The
+              action had its own band above, which bought nothing and pushed the
+              work down a line on every screen. */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
+            <div className="scroll-tabs" role="tablist" aria-label="Pooja views"
+              style={{ display: 'flex', gap: 8, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
+              {[
+                { k: 'calls', label: 'Hosts to call' },
+                { k: 'posted', label: 'Poojas posted', n: waiting },
+                { k: 'map', label: 'Map' },
+              ].map((t) => (
+                <button key={t.k} className="tap44" role="tab" aria-selected={tab === t.k} onClick={() => setTab(t.k)}
+                  style={{ padding: '9px 14px', fontSize: 14, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', color: tab === t.k ? 'var(--ink)' : 'var(--muted)', borderBottom: tab === t.k ? '2px solid var(--orange)' : '2px solid transparent', marginBottom: -1, whiteSpace: 'nowrap' }}>
+                  {t.label}
+                  {t.n > 0 && (
+                    <span title={`${t.n} guest${t.n === 1 ? '' : 's'} asking for a seat`}
+                      style={{ marginLeft: 6, fontSize: 12, fontWeight: 700, color: tab === t.k ? 'var(--orange)' : 'var(--muted-2)' }}>
+                      {t.n} waiting
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+            {isCoordinator && (
+              <button className="btn btn-ghost tap44" style={{ ...smallBtn, marginBottom: 6, flexShrink: 0 }}
+                onClick={() => setCreating(true)}
+                title="Add a pooja somebody already agreed to, without going through the call list">
+                ＋ Add Pooja
               </button>
-            ))}
+            )}
           </div>
 
           {tab === 'calls' && (
             <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
               <select aria-label="Pooja type" style={filterSelect} value={ptype} onChange={(e) => setPtype(e.target.value)}>
-                <option value="all">Both poojas</option>
-                <option value="sannidhi">Sannidhi holders only</option>
-                <option value="yantra">Yantra holders only</option>
+                <option value="all">All holders</option>
+                <option value="sannidhi">Sannidhi holders</option>
+                <option value="yantra">Yantra holders</option>
+                <option value="both">Holds both</option>
               </select>
               <select aria-label="Pooja date" style={filterSelect}
                 value={selected?.date || ''}
@@ -235,7 +256,8 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
             <Empty label={`No upcoming ${POOJA_TYPES[ptype]?.short || ''} date is loaded. Yantra Pooja falls only on purnima, so there are far fewer of them — switch to "Both poojas", or re-import from Isha's lunar calendar.`} />
           )}
           {tab === 'calls' && selected && (
-            <CallList date={selected.date} types={shownTypes} me={me} centre={centre} isCoordinator={isCoordinator} onToast={onToast} />
+            <CallList date={selected.date} types={shownTypes} onlyBoth={ptype === 'both'}
+              me={me} centre={centre} isCoordinator={isCoordinator} onToast={onToast} />
           )}
           {tab === 'posted' && <PostedPoojas me={me} isCoordinator={isCoordinator} onToast={onToast} onCountsChanged={refreshWaiting} />}
           {tab === 'map' && <MapTab onToast={onToast} />}
@@ -251,22 +273,25 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
 
 // ── Hosts to call ──────────────────────────────────────────────────────────
 
-function CallList({ date, types, me, centre, isCoordinator, onToast }) {
-  const [rows, setRows] = useState(null)
+function CallList({ date, types, onlyBoth = false, me, centre, isCoordinator, onToast }) {
+  const [all, setAll] = useState(null)
   const [err, setErr] = useState(null)
   // types is a fresh array each render; key on its content or the load loops.
   const typeKey = types.join(',')
 
   const load = useCallback(async () => {
-    try { setErr(null); setRows(await listHostsForDate(date, typeKey.split(','))) }
+    try { setErr(null); setAll(await listHostsForDate(date, typeKey.split(','))) }
     catch (e) { setErr(e.message || String(e)) }
   }, [date, typeKey])
 
   useEffect(() => { load() }, [load])
 
   if (err) return <ErrorCard>{err}</ErrorCard>
-  if (!rows) return <Loading label="Loading holders…" />
+  if (!all) return <Loading label="Loading holders…" />
 
+  // "Holds both" is a filter on people, applied after the fetch — the query is
+  // per pooja type and cannot express "has two of them".
+  const rows = onlyBoth ? all.filter((r) => r.types.length > 1) : all
   const total = rows.length
   const answered = rows.filter((r) => r.answered).length
 
@@ -616,6 +641,11 @@ function PostedPoojas({ me, isCoordinator, onToast, onCountsChanged }) {
         </select>
       </div>
 
+      {/* One share for the whole list. A group gets told about the poojas that
+          are on, not pooja-by-pooja — five separate messages is spam, and the
+          volunteer would have to send them one at a time. */}
+      {rows.length > 0 && <ShareAll rows={rows} onToast={onToast} />}
+
       {/* Guests only ever appear inside a pooja, so say plainly whether any are
           waiting rather than making someone expand rows to find out. */}
       {rows.length > 0 && (
@@ -644,6 +674,71 @@ function PostedPoojas({ me, isCoordinator, onToast, onCountsChanged }) {
   )
 }
 
+/**
+ * Share every pooja on screen, in one message.
+ *
+ * Whatever the "Upcoming / All" filter is showing is what gets shared — what you
+ * see is what the group gets. Cancelled poojas are dropped: nobody should be
+ * invited to one.
+ */
+function ShareAll({ rows, onToast }) {
+  const [text, setText] = useState(null)
+  const live = rows.filter((p) => p.status !== 'cancelled')
+  if (!live.length) return null
+
+  const message = () => poojasMessage(live, {
+    origin: window.location.origin + window.location.pathname.replace(/\/$/, ''),
+  })
+
+  const copy = async () => {
+    const t = message()
+    try {
+      await navigator.clipboard.writeText(t)
+      onToast?.('Copied — paste it into the group.')
+      return
+    } catch { /* fall through */ }
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = t
+      ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0'
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+      if (ok) { onToast?.('Copied — paste it into the group.'); return }
+    } catch { /* fall through */ }
+    setText(t)
+    onToast?.('Could not reach the clipboard — copy the message below.')
+  }
+
+  return (
+    <div className="card" style={{ padding: '10px 13px', marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 180, fontSize: 13, color: 'var(--ink-soft)' }}>
+          Share {live.length === 1 ? 'this pooja' : `all ${live.length} poojas`} with a group
+        </div>
+        <a className="btn btn-primary tap44" style={{ ...smallBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+          href={`https://wa.me/?text=${encodeURIComponent(message())}`}
+          target="_blank" rel="noreferrer" aria-label="Share to WhatsApp">
+          <WhatsAppIcon />
+          <span>Share on WhatsApp</span>
+        </a>
+        <button className="btn btn-ghost tap44" style={smallBtn} onClick={copy}
+          title="Copy the message to paste anywhere">Copy</button>
+      </div>
+      {text && (
+        <div style={{ marginTop: 10 }}>
+          <textarea readOnly value={text} rows={10} onFocus={(e) => e.target.select()}
+            aria-label="Message for the group" style={{ ...input, resize: 'vertical', fontSize: 12.5, lineHeight: 1.5 }} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+            <button className="btn btn-ghost tap44" style={smallBtn} onClick={() => setText(null)}>Done</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MapTab({ onToast }) {
   const [holders, setHolders] = useState(null)
   useEffect(() => {
@@ -663,7 +758,6 @@ function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onT
   const [seatsDraft, setSeatsDraft] = useState(String(pooja.seats))
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [adding, setAdding] = useState(false)
-  const [shareText, setShareText] = useState(null) // only set when the clipboard refuses
 
   const loadReqs = useCallback(async () => {
     try { setReqs(await listRequests(pooja.activity_id)) }
@@ -681,36 +775,6 @@ function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onT
 
   const pill = STATUS_PILL[pooja.status] || STATUS_PILL.closed
   const waiting = pooja.pending_count || 0
-
-  // The clipboard can refuse — it needs a secure context AND the document to be
-  // focused, and a phone browser can decline for its own reasons. So: try the
-  // real API, fall back to the old execCommand trick, and only then put the text
-  // on screen to be copied by hand. Never window.prompt() — a modal dialog
-  // freezes the whole page and reads as a crash.
-  const shareMessage = () => poojaMessage(pooja, {
-    origin: window.location.origin + window.location.pathname.replace(/\/$/, ''),
-  })
-
-  const copyForWhatsApp = async () => {
-    const text = shareMessage()
-    try {
-      await navigator.clipboard.writeText(text)
-      onToast?.('Copied — paste it into the WhatsApp group.')
-      return
-    } catch { /* fall through */ }
-    try {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0'
-      document.body.appendChild(ta)
-      ta.select()
-      const ok = document.execCommand('copy')
-      document.body.removeChild(ta)
-      if (ok) { onToast?.('Copied — paste it into the WhatsApp group.'); return }
-    } catch { /* fall through */ }
-    setShareText(text)
-    onToast?.('Could not reach the clipboard — copy the message below.')
-  }
 
   return (
     <div className="card" style={{ padding: 16 }}>
@@ -735,18 +799,9 @@ function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onT
         </div>
 
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-          {/* Straight into WhatsApp's share sheet with the message already
-              written — no clipboard, no app switching, no chance of pasting the
-              wrong thing. The Copy button stays for Telegram, SMS and email. */}
-          <a className="btn btn-ghost tap44" style={{ ...smallBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 5 }}
-            href={`https://wa.me/?text=${encodeURIComponent(shareMessage())}`}
-            target="_blank" rel="noreferrer"
-            title="Share this pooja to a WhatsApp group" aria-label="Share to WhatsApp">
-            <WhatsAppIcon />
-            <span>Share</span>
-          </a>
-          <button className="btn btn-ghost tap44" style={smallBtn} onClick={copyForWhatsApp}
-            title="Copy the message to paste anywhere">Copy</button>
+          {/* No per-pooja share here — sharing is a list-level action (ShareAll),
+              because a group is told about the poojas that are on, not one at a
+              time. */}
           <span aria-hidden="true" style={{
             display: 'inline-block', fontSize: 12, color: 'var(--muted)', padding: '0 4px',
             transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform var(--dur-fast) ease',
@@ -754,16 +809,6 @@ function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onT
         </div>
       </div>
 
-      {shareText && (
-        <div style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
-          <textarea readOnly value={shareText} rows={9} onFocus={(e) => e.target.select()}
-            aria-label="Message for the WhatsApp group"
-            style={{ ...input, resize: 'vertical', fontSize: 12.5, lineHeight: 1.5 }} />
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
-            <button className="btn btn-ghost tap44" style={smallBtn} onClick={() => setShareText(null)}>Done</button>
-          </div>
-        </div>
-      )}
 
       {expanded && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
