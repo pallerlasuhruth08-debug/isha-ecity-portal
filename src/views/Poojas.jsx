@@ -111,16 +111,30 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
   }, [])
   useEffect(() => { refreshWaiting() }, [refreshWaiting])
 
+  // The dates load ONCE. This used to sit in the same effect as the centre
+  // lookup, keyed on the whole `me` object — so any re-render that handed down a
+  // fresh profile reloaded the dates and reset the selection to the first one.
+  // A volunteer half way through calling for a purnima would silently be moved
+  // to next Monday, and the next "They said yes" would post against the wrong
+  // date. Selection is only seeded when nothing is chosen yet.
   useEffect(() => {
     Promise.all([listPoojaDates({ limit: 10 }), datesRemaining()])
-      .then(([d, rem]) => { setDates(d); setRemaining(rem); setSelected(d[0] || null) })
+      .then(([d, rem]) => {
+        setDates(d)
+        setRemaining(rem)
+        setSelected((cur) => cur || d[0] || null)
+      })
       .catch((e) => setErr(e.message || String(e)))
+  }, [])
+
+  const myCentre = me?.center_id
+  useEffect(() => {
     supabase.from('centers').select('id, name').eq('active', true).then(({ data }) => {
       const real = (data || []).filter((c) => !['all', 'unassigned'].includes(c.id))
-      const mine = me?.center_id && !['all', 'unassigned'].includes(me.center_id) ? me.center_id : ''
+      const mine = myCentre && !['all', 'unassigned'].includes(myCentre) ? myCentre : ''
       setCentre(mine || real[0]?.id || '')
     })
-  }, [me])
+  }, [myCentre])
 
   // The dates were imported by hand and will run out. Say so before they do,
   // rather than letting the page quietly go empty one week.
