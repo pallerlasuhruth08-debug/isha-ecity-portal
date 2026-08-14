@@ -592,6 +592,7 @@ function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onT
   const [seatsDraft, setSeatsDraft] = useState(String(pooja.seats))
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [shareText, setShareText] = useState(null) // only set when the clipboard refuses
 
   const loadReqs = useCallback(async () => {
     try { setReqs(await listRequests(pooja.activity_id)) }
@@ -610,16 +611,30 @@ function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onT
   const pill = STATUS_PILL[pooja.status] || STATUS_PILL.closed
   const waiting = pooja.pending_count || 0
 
+  // The clipboard can refuse — it needs a secure context AND the document to be
+  // focused, and a phone browser can decline for its own reasons. So: try the
+  // real API, fall back to the old execCommand trick, and only then put the text
+  // on screen to be copied by hand. Never window.prompt() — a modal dialog
+  // freezes the whole page and reads as a crash.
   const copyForWhatsApp = async () => {
     const text = poojaMessage(pooja, { origin: window.location.origin + window.location.pathname.replace(/\/$/, '') })
     try {
       await navigator.clipboard.writeText(text)
       onToast?.('Copied — paste it into the WhatsApp group.')
-    } catch {
-      // Clipboard needs a secure context and can still be refused. Never lose the
-      // message: show it so it can be selected by hand.
-      window.prompt('Copy this message:', text)
-    }
+      return
+    } catch { /* fall through */ }
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0'
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+      if (ok) { onToast?.('Copied — paste it into the WhatsApp group.'); return }
+    } catch { /* fall through */ }
+    setShareText(text)
+    onToast?.('Could not reach the clipboard — copy the message below.')
   }
 
   return (
@@ -653,6 +668,17 @@ function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onT
           }}>▾</span>
         </div>
       </div>
+
+      {shareText && (
+        <div style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
+          <textarea readOnly value={shareText} rows={9} onFocus={(e) => e.target.select()}
+            aria-label="Message for the WhatsApp group"
+            style={{ ...input, resize: 'vertical', fontSize: 12.5, lineHeight: 1.5 }} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+            <button className="btn btn-ghost tap44" style={smallBtn} onClick={() => setShareText(null)}>Done</button>
+          </div>
+        </div>
+      )}
 
       {expanded && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
