@@ -84,7 +84,7 @@ export const TAB_TITLES = {
   planning: ['Planning', 'Calendar & the things that need to get done'],
   events: ['Attendance', 'Mark show / no-show and capture walk-ins'],
   hub: ['Event Hub', 'Everything linked to one event — a read-through view'],
-  poojas: ['Poojas at homes', 'Posted for hosts — approve each guest before they get the address'],
+  poojas: ['Consecrated spaces', 'Ring the holders for a date — a yes becomes a pooja at their home'],
   nurturing: ['Nurturing & Care', 'Volunteer core groups & nurturers'],
   meditators: ['Meditators', 'Nurturing those who have completed programmes'],
   advance: ['Advance Programmes', 'Bhava Spandana, Shoonya, Samyama & Guru Puja'],

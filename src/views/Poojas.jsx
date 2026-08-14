@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { telHref, smsHref, waHref } from '../lib/phone'
-import { Pad, ErrorCard, Loading, Empty, SectionTitle, Pager } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, Pager } from '../components/View'
 import HolderMap from '../components/HolderMap'
 import {
   createPooja, listPoojas, listRequests, approveRequest, declineRequest,
   setSeats, closePooja, reopenPooja, cancelPooja, istIso, countWaitingGuests,
 } from '../lib/poojaWrites'
 import {
-  POOJA_TYPES, fmtDate, listPoojaDates, datesRemaining, listHoldersFor,
-  searchPeopleForHost, recordOutreach, confirmHost, updatePersonAddress, addGuestByPhone,
+  POOJA_TYPES, fmtDate, listPoojaDates, datesRemaining, listHostsForDate,
+  searchHostsForDate, recordOutreach, confirmHost, updatePersonAddress, addGuestByPhone,
 } from '../lib/poojaHosts'
 
 // Volunteer side of pooja hosting. Hosts have no logins: a volunteer rings each
@@ -45,6 +45,15 @@ const linkBtn = { padding: '5px 11px', fontSize: 12, textDecoration: 'none' }
 // paint is small.
 const smallBtn = { padding: '5px 10px', fontSize: 12, fontWeight: 600 }
 
+// WhatsApp's glyph. Inline rather than in lib/icons.jsx because that set is the
+// app's own nav language; this is somebody else's mark and belongs with the one
+// button that uses it.
+const WhatsAppIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M12.04 2A9.9 9.9 0 0 0 2.1 11.9c0 1.75.46 3.46 1.34 4.97L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01a9.9 9.9 0 0 0 9.9-9.9A9.9 9.9 0 0 0 12.04 2Zm0 18.13h-.01a8.2 8.2 0 0 1-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.22 8.22 0 1 1 6.99 3.86Zm4.5-6.16c-.25-.12-1.46-.72-1.68-.8-.23-.09-.39-.13-.56.12s-.64.8-.79.97c-.14.16-.29.18-.54.06a6.72 6.72 0 0 1-1.98-1.22 7.42 7.42 0 0 1-1.37-1.7c-.14-.25-.01-.38.11-.5.11-.11.25-.29.37-.44.12-.15.16-.25.25-.42.08-.16.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.4-.41-.56-.42h-.47c-.16 0-.43.06-.65.31-.22.25-.85.83-.85 2.03s.87 2.35.99 2.51c.12.16 1.71 2.61 4.15 3.66.58.25 1.03.4 1.39.51.58.19 1.11.16 1.53.1.47-.07 1.46-.6 1.66-1.18.21-.58.21-1.07.15-1.18-.06-.1-.22-.16-.47-.28Z" />
+  </svg>
+)
+
 /**
  * The pooja as a message a volunteer can paste into a WhatsApp group.
  *
@@ -65,13 +74,16 @@ function poojaMessage(p, { origin = '' } = {}) {
 
   return [
     `🪔 *${p.title}*`,
+    '',
+    'A family in our sector is opening their home for the pooja, and there is room for you.',
+    '',
     `🗓 ${when}`,
     where && `📍 ${where}`,
-    `🪑 ${p.seats_left} of ${p.seats} seats left`,
-    p.bring_note && `🌼 Please bring: ${p.bring_note}`,
+    `🪑 ${p.seats_left} of ${p.seats} seats still open`,
+    p.bring_note && `🌼 Do bring: ${p.bring_note}`,
     '',
-    `Ask for a seat here: ${link}`,
-    'The exact address is sent to you once your seat is confirmed.',
+    `Come and sit with us — say you'd like to join here: ${link}`,
+    'They will send you the address once your place is saved. 🙏',
   ].filter(Boolean).join('\n')
 }
 // Same shape as the filter row on Meditators and Volunteers, so this screen
@@ -142,11 +154,16 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
 
   return (
     <Pad>
-      <SectionTitle
-        title="Poojas at homes"
-        subtitle="Ring each holder for the date. A yes becomes a pooja at their home."
-        right={isCoordinator && <button className="btn btn-ghost" onClick={() => setCreating(true)}>＋ Post one by hand</button>}
-      />
+      {/* No page title here — the Topbar already says "Consecrated spaces", and
+          repeating it pushed the actual work a heading further down. */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        {isCoordinator && (
+          <button className="btn btn-ghost tap44" style={smallBtn} onClick={() => setCreating(true)}
+            title="Add a pooja somebody already agreed to, without going through the call list">
+            ＋ Add a pooja already agreed
+          </button>
+        )}
+      </div>
 
       {runningOut && (
         <div className="card" style={{ padding: '10px 13px', marginBottom: 14, borderColor: 'var(--border-strong)', background: 'var(--warning-bg)', color: 'var(--warning-fg)', fontSize: 12.5, fontWeight: 600 }}>
@@ -221,26 +238,23 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
 // ── Hosts to call ──────────────────────────────────────────────────────────
 
 function CallList({ date, types, me, centre, isCoordinator, onToast }) {
-  const [byType, setByType] = useState(null)
+  const [rows, setRows] = useState(null)
   const [err, setErr] = useState(null)
+  // types is a fresh array each render; key on its content or the load loops.
+  const typeKey = types.join(',')
 
   const load = useCallback(async () => {
-    try {
-      setErr(null)
-      const out = {}
-      for (const t of types) out[t] = await listHoldersFor(date, t)
-      setByType(out)
-    } catch (e) { setErr(e.message || String(e)) }
-  }, [date, types])
+    try { setErr(null); setRows(await listHostsForDate(date, typeKey.split(','))) }
+    catch (e) { setErr(e.message || String(e)) }
+  }, [date, typeKey])
 
   useEffect(() => { load() }, [load])
 
   if (err) return <ErrorCard>{err}</ErrorCard>
-  if (!byType) return <Loading label="Loading holders…" />
+  if (!rows) return <Loading label="Loading holders…" />
 
-  const total = Object.values(byType).reduce((n, r) => n + r.length, 0)
-  const answered = Object.values(byType)
-    .reduce((n, rows) => n + rows.filter((r) => r.outreach || r.listing).length, 0)
+  const total = rows.length
+  const answered = rows.filter((r) => r.answered).length
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
@@ -265,10 +279,8 @@ function CallList({ date, types, me, centre, isCoordinator, onToast }) {
       {!total && (
         <Empty label="No Sannidhi or Yantra holders are on record yet — run the Ishangam holder extract, or find a host by name below." />
       )}
-      {types.map((t) => (
-        <HolderSection key={t} type={t} rows={byType[t] || []} date={date} me={me} centre={centre}
-          isCoordinator={isCoordinator} onChanged={load} onToast={onToast} />
-      ))}
+      <HolderSection rows={rows} types={typeKey.split(',')} date={date} me={me} centre={centre}
+        isCoordinator={isCoordinator} onChanged={load} onToast={onToast} />
     </div>
   )
 }
@@ -282,36 +294,30 @@ function CallList({ date, types, me, centre, isCoordinator, onToast }) {
  * rows and scatter the people who still need calling across every page, which is
  * the opposite of what this screen is for. Sixty holders is one small request.
  */
-function HolderSection({ type: t, rows, date, me, centre, isCoordinator, onChanged, onToast }) {
+function HolderSection({ rows, types, date, me, centre, isCoordinator, onChanged, onToast }) {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(25)
 
   // A new date or a new filter is a new list; page 3 of the old one is nonsense.
-  useEffect(() => { setPage(0) }, [date, t, rows.length])
+  useEffect(() => { setPage(0) }, [date, types.join(','), rows.length])
 
-  const done = rows.filter((r) => r.outreach || r.listing).length
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize))
   const shown = rows.slice(page * pageSize, page * pageSize + pageSize)
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-        <h3 style={{ fontSize: 15.5, fontWeight: 600, margin: 0 }}>{POOJA_TYPES[t]?.label || t}</h3>
-        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{done} of {rows.length} answered</span>
-      </div>
-
       {/* Above the list, not below it. Sixty holders deep, a search box at the
           bottom is a search box nobody finds. */}
-      <HostSearch date={date} type={t} me={me} centre={centre}
+      <HostSearch date={date} types={types} me={me} centre={centre}
         isCoordinator={isCoordinator} onChanged={onChanged} onToast={onToast} />
 
       {rows.length === 0
-        ? <Empty label={`Nobody is marked as a ${POOJA_TYPES[t]?.short} holder yet.`} />
+        ? <Empty label="Nobody is marked as a holder for this pooja yet." />
         : (
           <>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {shown.map((h) => (
-                <HolderRow key={h.id} holder={h} date={date} type={t} me={me} centre={centre}
+                <HolderRow key={h.id} holder={h} date={date} me={me} centre={centre}
                   isCoordinator={isCoordinator} onChanged={onChanged} onToast={onToast} />
               ))}
             </div>
@@ -328,10 +334,11 @@ function HolderSection({ type: t, rows, date, me, centre, isCoordinator, onChang
 // Holders are the shortlist, not the only possible host. A home can host without
 // the Sannidhi being recorded in Ishangam — and until the extract has been run,
 // the shortlist is empty and this is the only way in.
-function HostSearch({ date, type, me, centre, isCoordinator, onChanged, onToast }) {
+function HostSearch({ date, types, me, centre, isCoordinator, onChanged, onToast }) {
   const [q, setQ] = useState('')
   const [rows, setRows] = useState(null)
   const [busy, setBusy] = useState(false)
+  const typeKey = types.join(',')
 
   useEffect(() => {
     const term = q.trim()
@@ -339,20 +346,20 @@ function HostSearch({ date, type, me, centre, isCoordinator, onChanged, onToast 
     let alive = true
     setBusy(true)
     const h = setTimeout(() => {
-      searchPeopleForHost(date, type, term)
+      searchHostsForDate(date, typeKey.split(','), term)
         .then((r) => { if (alive) setRows(r) })
         .catch((e) => onToast?.(e.message || String(e)))
         .finally(() => { if (alive) setBusy(false) })
     }, 300)
     return () => { alive = false; clearTimeout(h) }
-  }, [q, date, type, onToast])
+  }, [q, date, typeKey, onToast])
 
   return (
     <div style={{ marginBottom: 12 }}>
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder={`Find another host for ${POOJA_TYPES[type]?.short} — name or phone`}
+        placeholder="Find another host — name or phone"
         aria-label="Find a host by name or phone"
         style={{ ...input, maxWidth: 420 }}
       />
@@ -363,7 +370,7 @@ function HostSearch({ date, type, me, centre, isCoordinator, onChanged, onToast 
       {rows && rows.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
           {rows.map((h) => (
-            <HolderRow key={h.id} holder={h} date={date} type={type} me={me} centre={centre}
+            <HolderRow key={h.id} holder={h} date={date} me={me} centre={centre}
               isCoordinator={isCoordinator} onChanged={onChanged} onToast={onToast} />
           ))}
         </div>
@@ -372,11 +379,22 @@ function HostSearch({ date, type, me, centre, isCoordinator, onChanged, onToast 
   )
 }
 
-function HolderRow({ holder: h, date, type, me, centre, isCoordinator, onChanged, onToast }) {
+/**
+ * One person, one row — however many poojas fall that day.
+ *
+ * `h.types` is what THIS person could host on THIS date. When it holds both, the
+ * row offers them together: that is one evening at one house, and it is the
+ * question a volunteer actually asks on the phone.
+ */
+function HolderRow({ holder: h, date, me, centre, isCoordinator, onChanged, onToast }) {
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState(null) // 'confirm' | 'address'
-  const out = h.outreach?.outcome
-  const pill = out ? OUTCOME_PILL[out] : null
+  const types = h.types?.length ? h.types : ['sannidhi']
+  const both = types.length > 1
+
+  // Which poojas the yes covers. Defaults to all of them: if someone holds both
+  // and the day carries both, doing them together is the normal answer.
+  const [picked, setPicked] = useState(types)
 
   const act = async (fn, msg) => {
     setBusy(true)
@@ -386,7 +404,13 @@ function HolderRow({ holder: h, date, type, me, centre, isCoordinator, onChanged
   }
 
   const first = (h.full_name || '').split(' ')[0]
-  const ask = `Namaskaram ${first}, this is Isha Electronic City. Would you be able to host the ${POOJA_TYPES[type]?.label} at your home on ${fmtDate(date)}?`
+  const poojaWords = types.map((t) => POOJA_TYPES[t]?.label || t).join(' and the ')
+  const ask = `Namaskaram ${first}, this is Isha Electronic City. Would you be able to host the ${poojaWords} at your home on ${fmtDate(date)}?`
+
+  const listing = types.map((t) => h.listingByType?.[t]).find(Boolean) || h.listing
+  const answers = types.map((t) => h.outreachByType?.[t]?.outcome).filter(Boolean)
+  const allSame = answers.length === types.length && new Set(answers).size === 1
+  const pill = allSame ? OUTCOME_PILL[answers[0]] : null
 
   return (
     <div className="card" style={{ padding: 13 }}>
@@ -394,8 +418,15 @@ function HolderRow({ holder: h, date, type, me, centre, isCoordinator, onChanged
         <div style={{ flex: 1, minWidth: 210 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 14.5, fontWeight: 600 }}>{h.full_name || '(no name)'}</span>
-            {h.listing && <span className="pill" style={STATUS_PILL[h.listing.status] || STATUS_PILL.open}>pooja posted</span>}
-            {!h.listing && pill && <span className="pill" style={{ background: pill.background, color: pill.color }}>{pill.label}</span>}
+            {/* What they hold — the only way to tell, now that the two lists are one. */}
+            {both
+              ? <span className="pill" style={{ background: 'var(--info-bg)', color: 'var(--info-fg)' }}>Sannidhi + Yantra</span>
+              : <span className="pill" style={{ background: 'var(--neutral-bg)', color: 'var(--neutral-fg)' }}>{POOJA_TYPES[types[0]]?.short}</span>}
+            {listing && <span className="pill" style={STATUS_PILL[listing.status] || STATUS_PILL.open}>pooja posted</span>}
+            {!listing && pill && <span className="pill" style={{ background: pill.background, color: pill.color }}>{pill.label}</span>}
+            {!listing && !pill && answers.length > 0 && (
+              <span className="pill" style={{ background: 'var(--warning-bg)', color: 'var(--warning-fg)' }}>part answered</span>
+            )}
             {!h.hasAddress && <span className="pill" style={{ background: 'var(--danger-bg)', color: 'var(--danger-fg)' }}>no address</span>}
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
@@ -404,25 +435,29 @@ function HolderRow({ holder: h, date, type, me, centre, isCoordinator, onChanged
         </div>
 
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {telHref(h.phone) && <a className="btn btn-ghost" style={linkBtn} href={telHref(h.phone)}>Call</a>}
-          {smsHref(h.phone) && <a className="btn btn-ghost" style={linkBtn} href={smsHref(h.phone, ask)}>SMS</a>}
-          {waHref(h.phone) && <a className="btn btn-ghost" style={linkBtn} href={waHref(h.phone, ask)} target="_blank" rel="noreferrer">WhatsApp</a>}
+          {telHref(h.phone) && <a className="btn btn-ghost tap44" style={linkBtn} href={telHref(h.phone)}>Call</a>}
+          {smsHref(h.phone) && <a className="btn btn-ghost tap44" style={linkBtn} href={smsHref(h.phone, ask)}>SMS</a>}
+          {waHref(h.phone) && <a className="btn btn-ghost tap44" style={linkBtn} href={waHref(h.phone, ask)} target="_blank" rel="noreferrer">WhatsApp</a>}
         </div>
       </div>
 
-      {isCoordinator && !h.listing && (
+      {isCoordinator && !listing && (
         <div style={{ display: 'flex', gap: 7, marginTop: 11, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn btn-primary" disabled={busy} style={{ padding: '6px 13px', fontSize: 12.5 }}
+          <button className="btn btn-primary tap44" disabled={busy} style={smallBtn}
             onClick={() => setMode(mode === 'confirm' ? null : 'confirm')}>They said yes</button>
-          <button className="btn btn-ghost" disabled={busy} style={{ padding: '6px 13px', fontSize: 12.5 }}
-            onClick={() => act(() => recordOutreach({ date, type, personId: h.id, outcome: 'declined', by: me?.id }), 'Marked: not this time.')}>
+          <button className="btn btn-ghost tap44" disabled={busy} style={smallBtn}
+            onClick={() => act(async () => {
+              for (const t of types) await recordOutreach({ date, type: t, personId: h.id, outcome: 'declined', by: me?.id })
+            }, 'Marked: not this time.')}>
             Not this time
           </button>
-          <button className="btn btn-ghost" disabled={busy} style={{ padding: '6px 13px', fontSize: 12.5 }}
-            onClick={() => act(() => recordOutreach({ date, type, personId: h.id, outcome: 'no_answer', by: me?.id }), 'Marked: no answer.')}>
+          <button className="btn btn-ghost tap44" disabled={busy} style={smallBtn}
+            onClick={() => act(async () => {
+              for (const t of types) await recordOutreach({ date, type: t, personId: h.id, outcome: 'no_answer', by: me?.id })
+            }, 'Marked: no answer.')}>
             No answer
           </button>
-          <button className="btn btn-ghost" disabled={busy} style={{ padding: '6px 13px', fontSize: 12.5 }}
+          <button className="btn btn-ghost tap44" disabled={busy} style={smallBtn}
             onClick={() => setMode(mode === 'address' ? null : 'address')}>
             {h.hasAddress ? 'Edit address' : 'Add address'}
           </button>
@@ -436,12 +471,34 @@ function HolderRow({ holder: h, date, type, me, centre, isCoordinator, onChanged
       )}
 
       {mode === 'confirm' && (
-        <ConfirmPanel holder={h} date={date} type={type} centre={centre} busy={busy}
-          onCancel={() => setMode(null)}
-          onConfirm={(vals) => act(async () => {
-            await confirmHost({ date, type, person: h, ...vals, centerId: centre, by: me?.id })
-            setMode(null)
-          }, `Pooja posted at ${first}'s home.`)} />
+        <>
+          {both && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+              <span style={label}>Both poojas fall on this day — which did they agree to?</span>
+              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                {[types, [types[0]], [types[1]]].map((opt) => {
+                  const on = opt.join(',') === picked.join(',')
+                  const text = opt.length > 1 ? 'Both, together' : POOJA_TYPES[opt[0]]?.label
+                  return (
+                    <button key={opt.join(',')} className={`btn ${on ? 'btn-primary' : 'btn-ghost'} tap44`} style={smallBtn}
+                      disabled={busy} onClick={() => setPicked(opt)}>{text}</button>
+                  )
+                })}
+              </div>
+              {picked.length > 1 && (
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 7 }}>
+                  One evening, one listing at their home — guests see a single pooja, not two.
+                </div>
+              )}
+            </div>
+          )}
+          <ConfirmPanel holder={h} date={date} types={picked} centre={centre} busy={busy}
+            onCancel={() => setMode(null)}
+            onConfirm={(vals) => act(async () => {
+              await confirmHost({ date, types: picked, person: h, ...vals, centerId: centre, by: me?.id })
+              setMode(null)
+            }, `Pooja posted at ${first}'s home.`)} />
+        </>
       )}
     </div>
   )
@@ -472,7 +529,7 @@ function AddressEditor({ person, busy, onSave, onCancel }) {
   )
 }
 
-function ConfirmPanel({ holder, date, type, centre, busy, onConfirm, onCancel }) {
+function ConfirmPanel({ holder, date, types, centre, busy, onConfirm, onCancel }) {
   // Area is typed, never inherited from people.area: that column is free text and
   // some rows hold a full street address, which would publish a home on the guest
   // page. Seats default to 8 — a living room, not a hall.
@@ -492,7 +549,7 @@ function ConfirmPanel({ holder, date, type, centre, busy, onConfirm, onCancel })
       ) : (
         <>
           <div style={{ fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700, marginBottom: 8 }}>
-            {POOJA_TYPES[type]?.label} · {fmtDate(date)}
+            {types.map((t) => POOJA_TYPES[t]?.label).join(" + ")} · {fmtDate(date)}
           </div>
           <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 180 }}><span style={label}>Area guests will see</span>
@@ -616,8 +673,12 @@ function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onT
   // real API, fall back to the old execCommand trick, and only then put the text
   // on screen to be copied by hand. Never window.prompt() — a modal dialog
   // freezes the whole page and reads as a crash.
+  const shareMessage = () => poojaMessage(pooja, {
+    origin: window.location.origin + window.location.pathname.replace(/\/$/, ''),
+  })
+
   const copyForWhatsApp = async () => {
-    const text = poojaMessage(pooja, { origin: window.location.origin + window.location.pathname.replace(/\/$/, '') })
+    const text = shareMessage()
     try {
       await navigator.clipboard.writeText(text)
       onToast?.('Copied — paste it into the WhatsApp group.')
@@ -660,8 +721,18 @@ function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onT
         </div>
 
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+          {/* Straight into WhatsApp's share sheet with the message already
+              written — no clipboard, no app switching, no chance of pasting the
+              wrong thing. The Copy button stays for Telegram, SMS and email. */}
+          <a className="btn btn-ghost tap44" style={{ ...smallBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+            href={`https://wa.me/?text=${encodeURIComponent(shareMessage())}`}
+            target="_blank" rel="noreferrer"
+            title="Share this pooja to a WhatsApp group" aria-label="Share to WhatsApp">
+            <WhatsAppIcon />
+            <span>Share</span>
+          </a>
           <button className="btn btn-ghost tap44" style={smallBtn} onClick={copyForWhatsApp}
-            title="Copy a message for the WhatsApp group">Copy</button>
+            title="Copy the message to paste anywhere">Copy</button>
           <span aria-hidden="true" style={{
             display: 'inline-block', fontSize: 12, color: 'var(--muted)', padding: '0 4px',
             transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform var(--dur-fast) ease',

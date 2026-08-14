@@ -75,6 +75,49 @@ export async function listHoldersFor(date, type) {
 }
 
 /**
+ * Everyone to ring for a date — ONE row per person, whatever falls that day.
+ *
+ * On a purnima both poojas land together. Listing them as two stacked sections
+ * meant a person who holds a Sannidhi AND a yantra appeared twice, so a
+ * volunteer rang the same home twice for the same evening. Merging by person
+ * fixes that and makes "would you do both together?" askable in one call —
+ * which is what actually happens on the phone.
+ *
+ * Each row carries `types`: the poojas THIS person could host on THIS date.
+ */
+export async function listHostsForDate(date, types) {
+  return mergeByPerson(types, await Promise.all(types.map((t) => listHoldersFor(date, t))))
+}
+
+/** The same merge for the find-a-host box, so a search result behaves like a row. */
+export async function searchHostsForDate(date, types, term) {
+  return mergeByPerson(types, await Promise.all(types.map((t) => searchPeopleForHost(date, t, term))))
+}
+
+function mergeByPerson(types, lists) {
+  const byId = new Map()
+  types.forEach((t, i) => {
+    for (const h of lists[i]) {
+      const e = byId.get(h.id) || { ...h, types: [], outreachByType: {}, listingByType: {} }
+      e.types.push(t)
+      if (h.outreach) e.outreachByType[t] = h.outreach
+      if (h.listing) e.listingByType[t] = h.listing
+      byId.set(h.id, e)
+    }
+  })
+
+  return [...byId.values()].map((e) => ({
+    ...e,
+    // Answered only when every pooja they could host that day has an answer.
+    answered: e.types.every((t) => e.outreachByType[t] || e.listingByType[t]),
+    posted: e.types.some((t) => e.listingByType[t]),
+  })).sort((a, b) => {
+    const rank = (x) => (x.posted ? 3 : x.answered ? 2 : x.hasAddress ? 1 : 0)
+    return rank(a) - rank(b) || (a.full_name || '').localeCompare(b.full_name || '')
+  })
+}
+
+/**
  * Find anyone by name or phone and treat them as a possible host.
  *
  * Holders are the shortlist, not the whole world: a home can host without the
@@ -149,12 +192,21 @@ export async function recordOutreach({ date, type, personId, outcome, note = nul
  * and some rows hold a full street address, which would publish someone's home
  * on the guest page.
  */
-export async function confirmHost({ date, type, person, area, seats, time, centerId, by }) {
+export async function confirmHost({ date, type, types, person, area, seats, time, centerId, by }) {
+  // One host can take both poojas on a purnima. That is ONE evening at ONE
+  // house, so it is one activity and one listing — posting it twice would put
+  // the same home on the guest page twice and split its seats in half. The
+  // outreach row is still written per type, because the calendar counts each
+  // pooja separately and "who still needs a Yantra host" must stay answerable.
+  const kinds = (types && types.length ? types : [type]).filter((t) => POOJA_TYPES[t])
+  if (!kinds.length) throw new Error('Pick which pooja they said yes to.')
   if (!area?.trim()) throw new Error('Area is required — it is what guests see instead of the address.')
   if (!(seats >= 1 && seats <= 200)) throw new Error('Seats must be between 1 and 200.')
   if (!person?.street?.trim()) throw new Error('No address on record for this host. Add the address first.')
 
-  const label = POOJA_TYPES[type].label
+  const label = kinds.length > 1
+    ? kinds.map((t) => POOJA_TYPES[t].short).join(' & ') + ' Pooja'
+    : POOJA_TYPES[kinds[0]].label
   const first = (person.full_name || '').trim().split(/\s+/)[0] || 'a home'
   const startsAt = istIso(date, time || '18:00')
 
@@ -190,7 +242,10 @@ export async function confirmHost({ date, type, person, area, seats, time, cente
     throw lErr
   }
 
-  await recordOutreach({ date, type, personId: person.id, outcome: 'confirmed', activityId: activity.id, by })
+  // Every pooja they agreed to points at the same activity.
+  for (const t of kinds) {
+    await recordOutreach({ date, type: t, personId: person.id, outcome: 'confirmed', activityId: activity.id, by })
+  }
   return activity.id
 }
 
