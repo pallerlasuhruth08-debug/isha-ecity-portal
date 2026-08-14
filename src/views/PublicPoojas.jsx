@@ -179,7 +179,7 @@ export default function PublicPoojas() {
           </>
         )}
 
-        <div style={sectionLabel}>Poojas at homes near you</div>
+        <div style={sectionLabel}>Consecrated spaces near you</div>
 
         {list === undefined && <div style={{ color: 'var(--muted)', fontSize: 14 }}>Loading…</div>}
 

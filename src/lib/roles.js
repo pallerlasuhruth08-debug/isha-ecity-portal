@@ -100,7 +100,7 @@ export const TAB_LABELS = {
   planning: 'Planning',
   events: 'Attendance',
   hub: 'Event Hub',
-  poojas: 'Poojas at homes',
+  poojas: 'Consecrated spaces',
   nurturing: 'Nurturing & Care',
   meditators: 'Meditators',
   advance: 'Advance Programmes',
