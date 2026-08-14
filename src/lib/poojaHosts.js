@@ -71,9 +71,35 @@ export async function listHoldersFor(date, type) {
     .eq(flag, true)
     .order('full_name', { ascending: true })
   if (error) throw error
-  const rows = people || []
-  if (!rows.length) return []
+  return decorate(people || [], date, type)
+}
 
+/**
+ * Find anyone by name or phone and treat them as a possible host.
+ *
+ * Holders are the shortlist, not the whole world: a home can host without the
+ * Sannidhi being recorded in Ishangam, and until the holder extract has been run
+ * the shortlist is empty. This keeps the screen usable in both cases.
+ */
+export async function searchPeopleForHost(date, type, term) {
+  const q = (term || '').trim()
+  if (q.length < 2) return []
+  const digits = q.replace(/\D/g, '')
+  const filter = digits.length >= 3
+    ? `phone.ilike.%${digits}%,full_name.ilike.%${q}%`
+    : `full_name.ilike.%${q}%`
+  const { data, error } = await supabase.from('people')
+    .select('id, full_name, phone, area, street, city, pincode')
+    .or(filter)
+    .order('full_name', { ascending: true })
+    .limit(20)
+  if (error) throw error
+  return decorate(data || [], date, type)
+}
+
+// Attach this date's call outcome and any pooja already posted at that home.
+async function decorate(rows, date, type) {
+  if (!rows.length) return []
   const ids = rows.map((p) => p.id)
   const [{ data: outreach }, { data: listings }] = await Promise.all([
     supabase.from('pooja_host_outreach')
