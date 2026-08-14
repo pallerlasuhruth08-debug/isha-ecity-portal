@@ -175,12 +175,17 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
   // on their Odoo contact, or a record filed under another centre) could only be
   // tracked outside the portal. The weekly sync only ever writes TRUE, so a
   // correction made here survives the next run.
+  // Removing writes NULL, not false. false would be the app asserting "this
+  // person does not have a Sannidhi" — which nobody checked; the coordinator only
+  // said they hadn't meant to mark it. NULL is "not on record", which is the
+  // truth, and it is also what the row read before anyone touched it.
   async function setHolderFlag(field, next, label) {
     setBusy(true)
     try {
-      const { error } = await supabase.from('people').update({ [field]: next }).eq('id', personId)
+      const value = next ? true : null
+      const { error } = await supabase.from('people').update({ [field]: value }).eq('id', personId)
       if (error) throw error
-      setP((x) => ({ ...x, [field]: next }))
+      setP((x) => ({ ...x, [field]: value }))
       onToast(`${p.full_name}: ${label} ${next ? 'marked' : 'removed'}.`)
       onChanged?.()
     } catch (e) { onToast('Could not update: ' + (e.message || e)) } finally { setBusy(false) }
