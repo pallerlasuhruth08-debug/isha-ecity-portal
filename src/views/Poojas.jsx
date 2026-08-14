@@ -10,6 +10,7 @@ import {
 import {
   POOJA_TYPES, fmtDate, listPoojaDates, datesRemaining, listHostsForDate,
   searchHostsForDate, recordOutreach, confirmHost, updatePersonAddress, addGuestByPhone,
+  optOutOfHosting,
 } from '../lib/poojaHosts'
 
 // Volunteer side of pooja hosting. Hosts have no logins: a volunteer rings each
@@ -500,6 +501,30 @@ function HolderRow({ holder: h, date, me, centre, isCoordinator, onChanged, onTo
             onClick={() => setMode(mode === 'address' ? null : 'address')}>
             {h.hasAddress ? 'Edit address' : 'Add address'}
           </button>
+
+          {/* "Not this time" answers about one evening. This answers about being
+              asked at all, and is why people were being rung again a fortnight
+              later. Confirmed before it takes effect — it is a quiet button to
+              press by accident and it removes them from every future list. */}
+          {mode === 'optout' ? (
+            <>
+              <button className="btn btn-ghost tap44" disabled={busy} style={{ ...smallBtn, color: 'var(--danger-fg)' }}
+                onClick={() => act(async () => {
+                  await optOutOfHosting(h.id, { by: me?.id })
+                  setMode(null)
+                }, `Noted — we won't ask ${first} again.`)}>
+                Yes, take them off the list
+              </button>
+              <button className="btn btn-ghost tap44" disabled={busy} style={smallBtn}
+                onClick={() => setMode(null)}>Keep them</button>
+            </>
+          ) : (
+            <button className="btn btn-ghost tap44" disabled={busy} style={smallBtn}
+              title="They do not want to host at all — takes them off every future date, not just this one"
+              onClick={() => setMode('optout')}>
+              Rather not host
+            </button>
+          )}
         </div>
       )}
 

@@ -66,12 +66,44 @@ export async function listHoldersFor(date, type) {
   const flag = POOJA_TYPES[type]?.flag
   if (!flag) throw new Error(`Unknown pooja type: ${type}`)
 
-  const { data: people, error } = await supabase.from('people')
-    .select('id, full_name, phone, area, street, city, pincode')
-    .eq(flag, true)
-    .order('full_name', { ascending: true })
+  const [{ data: people, error }, optedOut] = await Promise.all([
+    supabase.from('people')
+      .select('id, full_name, phone, area, street, city, pincode')
+      .eq(flag, true)
+      .order('full_name', { ascending: true }),
+    listOptOuts(),
+  ])
   if (error) throw error
-  return decorate(people || [], date, type)
+  // Someone who asked not to be invited is off every future list — that is the
+  // whole point of them having said so.
+  return decorate((people || []).filter((p) => !optedOut.has(p.id)), date, type)
+}
+
+/** Everyone who asked not to be invited to host. */
+export async function listOptOuts() {
+  const { data, error } = await supabase.from('pooja_host_optout').select('person_id')
+  if (error) throw error
+  return new Set((data || []).map((r) => r.person_id))
+}
+
+/**
+ * They would rather not host at all — ever, not just this date.
+ *
+ * Distinct from a "not this time" outcome on purpose: that is an answer about
+ * one evening, this is an answer about being asked. Recording it as the former
+ * is why people were being rung again a fortnight later.
+ */
+export async function optOutOfHosting(personId, { note = null, by = null } = {}) {
+  const { error } = await supabase.from('pooja_host_optout').upsert({
+    person_id: personId, note, decided_by: by, decided_at: new Date().toISOString(),
+  }, { onConflict: 'person_id' })
+  if (error) throw error
+}
+
+/** Put them back on the list — asked in error, or they changed their mind. */
+export async function undoOptOut(personId) {
+  const { error } = await supabase.from('pooja_host_optout').delete().eq('person_id', personId)
+  if (error) throw error
 }
 
 /**
