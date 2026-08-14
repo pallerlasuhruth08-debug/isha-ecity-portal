@@ -124,6 +124,36 @@ export async function listPoojas({ includePast = false } = {}) {
   }))
 }
 
+/**
+ * How many guests are waiting on a decision, across every pooja that is still
+ * ahead of us.
+ *
+ * This is the "is anyone asking to come?" number. Without it a guest request sits
+ * invisible until somebody thinks to open the right pooja and expand it — and a
+ * guest who asked for a seat and heard nothing is the one failure this feature
+ * cannot afford.
+ *
+ * Deliberately two round trips instead of one embedded filter: filtering a
+ * PostgREST embed (`listing.starts_at=gte…`) only works on an inner join and
+ * fails quietly in ways that would under-report. Volumes here are tiny.
+ */
+export async function countWaitingGuests() {
+  const { data: reqs, error } = await supabase.from('pooja_requests')
+    .select('activity_id').eq('status', 'requested')
+  if (error) throw error
+  if (!reqs?.length) return 0
+
+  const { data: live, error: lErr } = await supabase.from('pooja_listings')
+    .select('activity_id')
+    .in('activity_id', [...new Set(reqs.map((r) => r.activity_id))])
+    .neq('status', 'cancelled')
+    .gte('starts_at', new Date().toISOString())
+  if (lErr) throw lErr
+
+  const open = new Set((live || []).map((l) => l.activity_id))
+  return reqs.filter((r) => open.has(r.activity_id)).length
+}
+
 /** Requests for one pooja. Coordinators see name and phone — that IS the decision. */
 export async function listRequests(activityId, { status = null } = {}) {
   let q = supabase.from('pooja_requests')
