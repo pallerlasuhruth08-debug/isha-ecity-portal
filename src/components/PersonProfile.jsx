@@ -170,6 +170,22 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
     try { const { error } = await supabase.from('people').update({ is_meditator: true }).eq('id', personId); if (error) throw error; setP((x) => ({ ...x, is_meditator: true })); onToast(`${p.full_name} added as meditator.`); onChanged && onChanged() }
     catch (e) { onToast('Could not add as meditator: ' + (e.message || e)) } finally { setBusy(false) }
   }
+  // Yantra / Sannidhi were display-only: the profile showed them but nothing in
+  // the app could set them, so a holder the Ishangam extract can't see (no phone
+  // on their Odoo contact, or a record filed under another centre) could only be
+  // tracked outside the portal. The weekly sync only ever writes TRUE, so a
+  // correction made here survives the next run.
+  async function setHolderFlag(field, next, label) {
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('people').update({ [field]: next }).eq('id', personId)
+      if (error) throw error
+      setP((x) => ({ ...x, [field]: next }))
+      onToast(`${p.full_name}: ${label} ${next ? 'marked' : 'removed'}.`)
+      onChanged?.()
+    } catch (e) { onToast('Could not update: ' + (e.message || e)) } finally { setBusy(false) }
+  }
+
   async function saveLog() {
     setBusy(true)
     try {
@@ -321,8 +337,10 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
             <Row label="Occupation" value={p.occupation || vp?.occupation} />
             <Row label="Any other remarks" value={vp?.remarks} wrap />
             <Row label="Has Bond of Grace" value={boolOf(p.has_bond_of_grace)} />
-            <Row label="Has Devi Yantra" value={boolOf(p.has_devi_yantra)} />
-            <Row label="Has Sadhguru Sannidhi" value={boolOf(p.has_sadhguru_sannidhi)} />
+            <Row label="Has Devi Yantra" value={boolOf(p.has_devi_yantra)} keepEmpty
+              action={<HolderToggle on={!!p.has_devi_yantra} busy={busy} onClick={() => setHolderFlag('has_devi_yantra', !p.has_devi_yantra, 'Devi Yantra')} />} />
+            <Row label="Has Sadhguru Sannidhi" value={boolOf(p.has_sadhguru_sannidhi)} keepEmpty
+              action={<HolderToggle on={!!p.has_sadhguru_sannidhi} busy={busy} onClick={() => setHolderFlag('has_sadhguru_sannidhi', !p.has_sadhguru_sannidhi, 'Sadhguru Sannidhi')} />} />
             <Row label="Is Donor" value={boolOf(p.is_donor)} />
             <Row label="Nurturer" value={nurturer} />
           </Section>
@@ -497,6 +515,20 @@ function explainBlockers(r) {
 // actually shape a call. Empty rows now collapse and Section reports the count
 // once, quietly, so nothing is hidden without being acknowledged.
 const isBlank = (v) => v == null || v === '' || v === false
+
+// Marks or clears one holder fact. Deliberately a plain two-state button rather
+// than a checkbox: this is a statement about a person's home, not a preference,
+// and it should take a decision rather than a stray click.
+function HolderToggle({ on, busy, onClick }) {
+  return (
+    <button onClick={onClick} disabled={busy} className="tap44"
+      style={{ fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: busy ? 'default' : 'pointer',
+        border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', padding: '3px 11px',
+        background: on ? 'var(--success-bg)' : '#fff', color: on ? 'var(--success-fg)' : 'var(--muted)', opacity: busy ? 0.6 : 1 }}>
+      {on ? 'Remove' : 'Mark'}
+    </button>
+  )
+}
 
 function Row({ label, value, empty = 'Not on record', strong, wrap, action, keepEmpty }) {
   const isEmpty = isBlank(value)
