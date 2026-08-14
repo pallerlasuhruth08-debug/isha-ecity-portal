@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { telHref, smsHref, waHref } from '../lib/phone'
-import { Pad, ErrorCard, Loading, Empty, SectionTitle, Chip } from '../components/View'
+import { Pad, ErrorCard, Loading, Empty, SectionTitle } from '../components/View'
 import HolderMap from '../components/HolderMap'
 import {
   createPooja, listPoojas, listRequests, approveRequest, declineRequest,
@@ -9,7 +9,7 @@ import {
 } from '../lib/poojaWrites'
 import {
   POOJA_TYPES, fmtDate, listPoojaDates, datesRemaining, listHoldersFor,
-  recordOutreach, confirmHost, updatePersonAddress, addGuestByPhone,
+  searchPeopleForHost, recordOutreach, confirmHost, updatePersonAddress, addGuestByPhone,
 } from '../lib/poojaHosts'
 
 // Volunteer side of pooja hosting. Hosts have no logins: a volunteer rings each
@@ -39,6 +39,9 @@ const OUTCOME_PILL = {
 const input = { width: '100%', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 11px', fontSize: 13.5, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', background: '#fff', color: 'var(--ink)' }
 const label = { display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', marginBottom: 5 }
 const linkBtn = { padding: '5px 11px', fontSize: 12, textDecoration: 'none' }
+// Same shape as the filter row on Meditators and Volunteers, so this screen
+// reads as part of the set rather than a pill experiment of its own.
+const filterSelect = { border: '1px solid var(--border)', borderRadius: 10, padding: '9px 12px', fontSize: 13, fontFamily: 'inherit', background: '#fff', color: 'var(--ink)', cursor: 'pointer', minWidth: 190 }
 
 export default function Poojas({ me, isCoordinator = false, onToast }) {
   const [dates, setDates] = useState(null)
@@ -89,21 +92,21 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
         <Empty label="No upcoming pooja dates are loaded. Import them from Isha's lunar calendar." />
       ) : (
         <>
-          <div className="scroll-tabs" style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-            {dates.map((d) => (
-              <Chip
-                key={d.date}
-                on={selected?.date === d.date}
-                label={`${fmtDate(d.date)} · ${d.types.map((t) => POOJA_TYPES[t]?.short || t).join(' + ')}`}
-                onClick={() => setSelected(d)}
-              />
-            ))}
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-            <Chip on={tab === 'calls'} label="Hosts to call" onClick={() => setTab('calls')} />
-            <Chip on={tab === 'posted'} label="Poojas posted" onClick={() => setTab('posted')} />
-            <Chip on={tab === 'map'} label="Map" onClick={() => setTab('map')} />
+          <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <select aria-label="Pooja date" style={filterSelect}
+              value={selected?.date || ''}
+              onChange={(e) => setSelected(dates.find((d) => d.date === e.target.value) || null)}>
+              {dates.map((d) => (
+                <option key={d.date} value={d.date}>
+                  {fmtDate(d.date)} · {d.types.map((t) => POOJA_TYPES[t]?.short || t).join(' + ')}
+                </option>
+              ))}
+            </select>
+            <select aria-label="View" style={filterSelect} value={tab} onChange={(e) => setTab(e.target.value)}>
+              <option value="calls">Hosts to call</option>
+              <option value="posted">Poojas posted</option>
+              <option value="map">Map</option>
+            </select>
           </div>
 
           {tab === 'calls' && selected && (
@@ -142,10 +145,12 @@ function CallList({ date, types, me, centre, isCoordinator, onToast }) {
   if (!byType) return <Loading label="Loading holders…" />
 
   const total = Object.values(byType).reduce((n, r) => n + r.length, 0)
-  if (!total) return <Empty label="No holders on record yet. Run the Ishangam holder extract, or mark someone a holder on their profile." />
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+      {!total && (
+        <Empty label="No Sannidhi or Yantra holders are on record yet — run the Ishangam holder extract, or find a host by name below." />
+      )}
       {types.map((t) => {
         const rows = byType[t] || []
         const done = rows.filter((r) => r.outreach || r.listing).length
@@ -165,9 +170,59 @@ function CallList({ date, types, me, centre, isCoordinator, onToast }) {
                   ))}
                 </div>
               )}
+
+            <HostSearch date={date} type={t} me={me} centre={centre}
+              isCoordinator={isCoordinator} onChanged={load} onToast={onToast} />
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// Holders are the shortlist, not the only possible host. A home can host without
+// the Sannidhi being recorded in Ishangam — and until the extract has been run,
+// the shortlist is empty and this is the only way in.
+function HostSearch({ date, type, me, centre, isCoordinator, onChanged, onToast }) {
+  const [q, setQ] = useState('')
+  const [rows, setRows] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    const term = q.trim()
+    if (term.length < 2) { setRows(null); return }
+    let alive = true
+    setBusy(true)
+    const h = setTimeout(() => {
+      searchPeopleForHost(date, type, term)
+        .then((r) => { if (alive) setRows(r) })
+        .catch((e) => onToast?.(e.message || String(e)))
+        .finally(() => { if (alive) setBusy(false) })
+    }, 300)
+    return () => { alive = false; clearTimeout(h) }
+  }, [q, date, type, onToast])
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder={`Find another host for ${POOJA_TYPES[type]?.short} — name or phone`}
+        aria-label="Find a host by name or phone"
+        style={{ ...input, maxWidth: 420 }}
+      />
+      {busy && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Searching…</div>}
+      {rows && rows.length === 0 && !busy && (
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Nobody matched that.</div>
+      )}
+      {rows && rows.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+          {rows.map((h) => (
+            <HolderRow key={h.id} holder={h} date={date} type={type} me={me} centre={centre}
+              isCoordinator={isCoordinator} onChanged={onChanged} onToast={onToast} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -335,9 +390,12 @@ function PostedPoojas({ me, isCoordinator, onToast }) {
 
   return (
     <>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-        <Chip on={!includePast} label="Upcoming" onClick={() => setIncludePast(false)} />
-        <Chip on={includePast} label="All, including past" onClick={() => setIncludePast(true)} />
+      <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <select aria-label="Which poojas" style={filterSelect}
+          value={includePast ? 'all' : 'upcoming'} onChange={(e) => setIncludePast(e.target.value === 'all')}>
+          <option value="upcoming">Upcoming</option>
+          <option value="all">All, including past</option>
+        </select>
       </div>
       {rows.length === 0 && <Empty label={includePast ? 'No poojas have been posted yet.' : 'No upcoming poojas.'} />}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

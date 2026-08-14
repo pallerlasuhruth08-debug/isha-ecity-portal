@@ -265,27 +265,32 @@ function PoojaCard({ pooja, onRequest }) {
 function RequestForm({ pooja, onBack, onRequested }) {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
-  const [party, setParty] = useState(1)
+  const [party, setParty] = useState('1')
   const [nameErr, setNameErr] = useState(null)
   const [phoneErr, setPhoneErr] = useState(null)
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
 
-  // The function caps party at 3; a pooja with 2 seats left caps it lower. Offer
-  // only what can actually be granted rather than letting the server refuse.
-  const maxParty = Math.max(1, Math.min(3, Number(pooja.seats_left ?? 1)))
+  // Seats left ARE the cap — a family of six is fine if six are free. Typed
+  // rather than picked from a list, because a list long enough for a family is
+  // worse to use than a number box.
+  const maxParty = Math.max(1, Number(pooja.seats_left ?? 1))
+  const partyNum = Number(party)
+  const partyErr = !party ? null
+    : !Number.isInteger(partyNum) || partyNum < 1 ? 'Enter a number, 1 or more.'
+      : partyNum > maxParty ? `Only ${maxParty} seat${maxParty === 1 ? '' : 's'} left.` : null
 
   async function submit() {
     const nm = name.trim()
     const p = checkMobile(phone)
     setNameErr(nm ? null : 'Please tell us your name.')
     setPhoneErr(p.ok ? null : p.reason)
-    if (!nm || !p.ok) return
+    if (!nm || !p.ok || partyErr || !partyNum) return
 
     setErr(null); setBusy(true)
     try {
       const { data: token, error } = await supabase.rpc('pooja_request_seat', {
-        p_activity_id: pooja.activity_id, p_name: nm, p_phone: p.digits, p_party: party,
+        p_activity_id: pooja.activity_id, p_name: nm, p_phone: p.digits, p_party: partyNum,
       })
       // The function's exception messages are written for the guest (full, already
       // requested, closed). Show them as-is rather than flattening to "failed".
@@ -315,22 +320,16 @@ function RequestForm({ pooja, onBack, onRequested }) {
         onChange={(e) => { setPhone(e.target.value); if (phoneErr) setPhoneErr(null) }}
         placeholder="9XXXXXXXXX" inputMode="numeric" autoComplete="tel" maxLength={15} />
 
-      <Field label="How many of you are coming?" required hint="Including yourself.">
-        {({ id, describedBy }) => (
-          <select id={id} className="field-input" aria-describedby={describedBy}
-            value={party} onChange={(e) => setParty(Number(e.target.value))}>
-            {Array.from({ length: maxParty }, (_, i) => i + 1).map((n) => (
-              <option key={n} value={n}>{n === 1 ? 'Just me' : `${n} of us`}</option>
-            ))}
-          </select>
-        )}
-      </Field>
+      <Field label="How many of you are coming?" required error={partyErr}
+        hint={`Including yourself. ${maxParty} seat${maxParty === 1 ? '' : 's'} left.`}
+        value={party} inputMode="numeric" maxLength={3} placeholder="1"
+        onChange={(e) => setParty(e.target.value.replace(/\D/g, '').slice(0, 3))} />
 
       {err && <div className="field-error" role="alert" style={{ marginBottom: 12 }}>{err}</div>}
 
       <button className="btn btn-primary" disabled={busy} onClick={submit}
         style={{ width: '100%', justifyContent: 'center', padding: 13, fontSize: 15 }}>
-        {busy ? 'Sending…' : 'Request a seat'}
+        {busy ? 'Sending…' : partyNum > 1 ? `Request ${partyNum} seats` : 'Request a seat'}
       </button>
       <div style={{ ...metaRow, marginTop: 12, fontSize: 12.5 }}>
         The host approves each guest. You&apos;ll see the address here once your seat is approved.
