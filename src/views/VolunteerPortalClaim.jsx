@@ -167,7 +167,7 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
       if (error) { setGate({ ok: false, owner_name: null }); return }
       setGate(data)
       if (!data.ok) {
-        setToast(data.owner_name ? `This batch belongs to ${data.owner_name}. Please contact your coordinator.` : "This batch hasn't been assigned yet.")
+        setToast(data.owner_name ? `This batch belongs to ${data.owner_name}. Please contact a volunteer.` : "This batch hasn't been assigned yet.")
         setBatchId(null)
         window.location.hash = `volunteer-portal/${token}`
       }
@@ -230,7 +230,7 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
       {info === null && (
         <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>This link isn't valid</div>
-          <div style={{ fontSize: 14, color: 'var(--muted)' }}>Please ask your coordinator for a fresh link.</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)' }}>Please ask a volunteer for a fresh link.</div>
         </div>
       )}
 
@@ -256,7 +256,7 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
       {info && caller && session && !session.ok && (
         <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Your session has expired</div>
-          <div style={{ fontSize: 14, color: 'var(--muted)' }}>Contact your coordinator for a new link.</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)' }}>Contact a volunteer for a new link.</div>
         </div>
       )}
 
@@ -272,7 +272,7 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
             enterKeyHint="go" onKeyDown={(e) => e.key === 'Enter' && verifyEmail(false)} />
           {emailErr && <div style={{ fontSize: 14, color: 'var(--red)', marginTop: 10 }}>{emailErr}</div>}
           <button className="btn btn-primary" disabled={emailBusy} onClick={() => verifyEmail(false)} style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: 15, minHeight: 48, marginTop: 14 }}>{emailBusy ? 'Verifying…' : 'Verify with email →'}</button>
-          <button disabled={emailBusy} onClick={() => verifyEmail(true)} style={{ width: '100%', textAlign: 'center', marginTop: 10, background: 'none', border: 'none', color: 'var(--muted)', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', minHeight: 44 }}>Skip — request coordinator approval</button>
+          <button disabled={emailBusy} onClick={() => verifyEmail(true)} style={{ width: '100%', textAlign: 'center', marginTop: 10, background: 'none', border: 'none', color: 'var(--muted)', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', minHeight: 44 }}>Skip — request volunteer approval</button>
         </div>
       )}
 
@@ -284,9 +284,9 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
           to do if nothing happens. */}
       {info && caller && session?.ok && session.status === 'pending' && (
         <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
-          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Waiting for your coordinator to approve you</div>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Waiting for a volunteer to approve you</div>
           <div style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.55, marginBottom: 14 }}>
-            We couldn't match your phone or email to our records, so a coordinator is checking by hand.
+            We couldn't match your phone or email to our records, so a volunteer is checking by hand.
             They've been notified. This usually takes a few hours, and often longer at the weekend.
           </div>
           <div style={{ fontSize: 13.5, color: 'var(--ink-soft)', lineHeight: 1.55, marginBottom: 16, textAlign: 'left', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 13px' }}>
@@ -314,7 +314,7 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
       {info && caller && approved && !batchId && !assigning && assignFailed && (
         <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>All outreach lists are currently taken</div>
-          <div style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 16 }}>The coordinator has been notified and will assign you one shortly.</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 16 }}>A volunteer has been notified and will assign you one shortly.</div>
           <button className="btn btn-ghost" onClick={assignBatch} style={{ width: '100%', justifyContent: 'center', minHeight: 44 }}>Try again</button>
         </div>
       )}

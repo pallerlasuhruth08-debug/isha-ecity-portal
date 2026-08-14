@@ -50,11 +50,11 @@ export default function PublicInterest({ eventId }) {
       {info === null && (
         <div className="card public-card" style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>This link isn't valid</div>
-          <div style={{ fontSize: 13.5, color: 'var(--muted)' }}>The event may have been removed. Please ask your coordinator for a fresh link.</div>
+          <div style={{ fontSize: 13.5, color: 'var(--muted)' }}>The event may have been removed. Please ask a volunteer for a fresh link.</div>
         </div>
       )}
       {done && (
-        <PublicDone title={`Namaskaram${done.name ? `, ${done.name.split(' ')[0]}` : ''}!`} next="A coordinator from Isha Electronic City will call you on this number before the event with the timing and venue. If you don't hear from us in a few days, call the centre on 8095963111.">
+        <PublicDone title={`Namaskaram${done.name ? `, ${done.name.split(' ')[0]}` : ''}!`} next="A volunteer from Isha Electronic City will call you on this number before the event with the timing and venue. If you don't hear from us in a few days, call the centre on 8095963111.">
           <div>Your interest in <strong>{info.eventName}</strong> is noted.</div>
           {/* Save the date — the date is all we hold. `activities` has no start time
               and no venue column, so this is an all-day entry and says so, rather
@@ -68,7 +68,7 @@ export default function PublicInterest({ eventId }) {
                   title: info.eventName,
                   dateISO: info.date,
                   uid: `interest-${eventId}@isha-ecity`,
-                  description: 'Isha Electronic City. A coordinator will call you before the event with the timing and venue.',
+                  description: 'Isha Electronic City. A volunteer will call you before the event with the timing and venue.',
                 }),
                 `${safeFilename(info.eventName)}.ics`,
               )}

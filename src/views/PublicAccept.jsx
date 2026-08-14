@@ -59,12 +59,12 @@ export default function PublicAccept({ blockId }) {
       {info === null && (
         <div className="card public-card" style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>This link isn't valid</div>
-          <div style={{ fontSize: 13.5, color: 'var(--muted)' }}>The activity may have been removed. Please ask your coordinator for a fresh link.</div>
+          <div style={{ fontSize: 13.5, color: 'var(--muted)' }}>The activity may have been removed. Please ask a volunteer for a fresh link.</div>
         </div>
       )}
 
       {done && (
-        <PublicDone title={`Namaskaram${done.name ? `, ${done.name.split(' ')[0]}` : ''}!`} next="Your coordinator confirms the roster a few days before and will message you on this number with the reporting time and place. Nothing more is needed from you now.">
+        <PublicDone title={`Namaskaram${done.name ? `, ${done.name.split(' ')[0]}` : ''}!`} next="A volunteer confirms the roster a few days before and will message you on this number with the reporting time and place. Nothing more is needed from you now.">
           You're on the list for <strong>{info.heading}</strong> on {done.days.map(fmtDay).join(', ')}.
         </PublicDone>
       )}
@@ -89,7 +89,7 @@ export default function PublicAccept({ blockId }) {
             placeholder="Full name" autoComplete="name" enterKeyHint="next" />
 
           <Field label="Mobile number" required value={phone} error={phoneErr}
-            hint="10 digits. Your coordinator will confirm on this number."
+            hint="10 digits. A volunteer will confirm on this number."
             onChange={(e) => { setPhone(e.target.value); if (phoneErr) setPhoneErr(null) }}
             placeholder="9XXXXXXXXX" inputMode="numeric" autoComplete="tel" maxLength={15}
             enterKeyHint="send" onKeyDown={(e) => e.key === 'Enter' && submit()} />

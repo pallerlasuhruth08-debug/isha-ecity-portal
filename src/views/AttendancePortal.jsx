@@ -237,7 +237,7 @@ export default function AttendancePortal({ token }) {
       {info === null && (
         <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>This link isn't valid</div>
-          <div style={{ fontSize: 14, color: 'var(--muted)' }}>Please ask your coordinator for a fresh link.</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)' }}>Please ask a volunteer for a fresh link.</div>
         </div>
       )}
 
@@ -265,7 +265,7 @@ export default function AttendancePortal({ token }) {
       {info && caller && session && !session.ok && (
         <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Your session has expired</div>
-          <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 14 }}>Please open the link again or contact your coordinator.</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 14 }}>Please open the link again or contact a volunteer.</div>
           <button className="btn btn-ghost" onClick={signOut} style={{ minHeight: 44 }}>Start over</button>
         </div>
       )}
@@ -281,14 +281,14 @@ export default function AttendancePortal({ token }) {
           </label>
           {emailErr && <div style={{ fontSize: 14, color: 'var(--red)', marginTop: 10 }}>{emailErr}</div>}
           <button className="btn btn-primary" disabled={emailBusy} onClick={() => verifyEmail(false)} style={{ width: '100%', justifyContent: 'center', padding: '13px', fontSize: 15, minHeight: 48, marginTop: 14 }}>{emailBusy ? 'Verifying…' : 'Verify with email →'}</button>
-          <button disabled={emailBusy} onClick={() => verifyEmail(true)} style={{ width: '100%', textAlign: 'center', marginTop: 10, background: 'none', border: 'none', color: 'var(--muted)', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', minHeight: 44 }}>Skip — request coordinator approval</button>
+          <button disabled={emailBusy} onClick={() => verifyEmail(true)} style={{ width: '100%', textAlign: 'center', marginTop: 10, background: 'none', border: 'none', color: 'var(--muted)', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', minHeight: 44 }}>Skip — request volunteer approval</button>
         </div>
       )}
 
       {info && caller && session?.ok && session.status === 'pending' && (
         <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Your access request is pending approval</div>
-          <div style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 16 }}>The coordinator has been notified. Please check back shortly.</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 16 }}>A volunteer has been notified. Please check back shortly.</div>
           <button className="btn btn-ghost" onClick={identify} style={{ width: '100%', justifyContent: 'center', minHeight: 44 }}>Refresh status</button>
         </div>
       )}
@@ -296,7 +296,7 @@ export default function AttendancePortal({ token }) {
       {info && caller && session?.ok && session.status === 'rejected' && (
         <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Your request was not approved</div>
-          <div style={{ fontSize: 14, color: 'var(--muted)' }}>Please contact your coordinator.</div>
+          <div style={{ fontSize: 14, color: 'var(--muted)' }}>Please contact a volunteer.</div>
         </div>
       )}
 

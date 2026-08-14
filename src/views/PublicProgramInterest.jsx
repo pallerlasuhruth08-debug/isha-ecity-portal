@@ -75,7 +75,7 @@ export default function PublicProgramInterest() {
       <PublicShell>
         <PublicDone
           title={`Namaskaram${done.name ? `, ${done.name.split(' ')[0]}` : ''}!`}
-          next="A coordinator from Isha Electronic City will call you on this number. If you don't hear from us in a few days, call the centre on 8095963111."
+          next="A volunteer from Isha Electronic City will call you on this number. If you don't hear from us in a few days, call the centre on 8095963111."
         >
           {done.added?.length > 0 && <div>Your interest in <strong>{list(done.added)}</strong> is noted.</div>}
           {/* Said plainly rather than hidden: someone who fills the form twice
@@ -106,7 +106,7 @@ export default function PublicProgramInterest() {
         <div className="card public-card">
           <h1 style={{ fontSize: 19, fontWeight: 600, margin: '0 0 4px' }}>Register your interest</h1>
           <div style={{ fontSize: 13.5, color: 'var(--muted)', marginBottom: 18 }}>
-            Tell us which programmes you'd like to know about, and whether you'd like to volunteer. A coordinator will call you.
+            Tell us which programmes you'd like to know about, and whether you'd like to volunteer. A volunteer will call you.
           </div>
 
           <Field label="Your name" required value={name} error={fieldErr.name}

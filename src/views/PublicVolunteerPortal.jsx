@@ -23,7 +23,7 @@ export default function PublicVolunteerPortal() {
       <div className="card" style={{ ...box, padding: 16, textAlign: 'center' }}>
         <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>This calling link has been retired</div>
         <div style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.55 }}>
-          We've moved to a new, more secure calling link. Please ask your coordinator
+          We've moved to a new, more secure calling link. Please ask a volunteer
           to send you the current one — your call list and any calls you've already
           logged are safe.
         </div>

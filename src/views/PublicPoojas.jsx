@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { checkMobile } from '../lib/phone'
 import Field, { PublicShell, PublicDone } from '../components/Field'
 
 // Public, no-login pooja listing (#poojas). A guest — meditator or not — browses
 // upcoming poojas, requests seats, and comes back later to see whether a
-// coordinator approved them.
+// volunteer approved them.
+//
+// Nobody reading this page is ever called a coordinator. The people running it
+// are volunteers, and that is the word guests and hosts see.
 //
 // THE RULE (POOJA_INTEGRATION.md): a host's address and phone number reach a
 // guest through pooja_my_request ONLY, and only once that request is approved.
@@ -18,6 +21,7 @@ import Field, { PublicShell, PublicDone } from '../components/Field'
 // design — there are no guest accounts in v1).
 
 const TOKENS_KEY = 'pooja_tokens'
+const PIN_KEY = 'pooja_pincode'
 
 // An array, not a single token: a guest may hold seats at two different poojas,
 // and storing one string would silently drop the first one's address.
@@ -36,9 +40,12 @@ function addToken(t) {
 const fmtWhen = (ts) => (ts
   ? new Date(ts).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
   : '')
+const fmtDay = (ts) => (ts
+  ? new Date(ts).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
+  : '')
 
-// Guest-facing wording, not the database's. "declined" is a host's judgement call
-// about one evening, and should not read like a verdict on the person.
+// Guest-facing wording, not the database's. "declined" is a host's judgement
+// call about one evening, and should not read like a verdict on the person.
 const STATUS = {
   requested: { label: 'Awaiting approval', bg: 'var(--warning-bg)', fg: 'var(--warning-fg)' },
   approved: { label: 'Approved', bg: 'var(--success-bg)', fg: 'var(--success-fg)' },
@@ -46,15 +53,29 @@ const STATUS = {
   cancelled: { label: 'Cancelled', bg: 'var(--neutral-bg)', fg: 'var(--neutral-fg)' },
 }
 
-const stack = { width: '100%', maxWidth: 440, display: 'flex', flexDirection: 'column', gap: 14 }
+const stack = { width: '100%', maxWidth: 460, display: 'flex', flexDirection: 'column', gap: 14 }
 const metaRow = { fontSize: 13, color: 'var(--muted)', lineHeight: 1.55 }
 const sectionLabel = { fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }
+
+// "Nearest" without a map. A pincode is all a guest is asked for and all a
+// listing carries, so closeness is |difference| between the two numbers — crude,
+// but in Bangalore adjacent pincodes really are adjacent places, and it is
+// enough to float the poojas up the page that are worth the guest's attention.
+// Same pincode always wins outright.
+function distanceScore(listingPin, guestPin) {
+  const a = Number(String(listingPin || '').replace(/\D/g, ''))
+  const b = Number(String(guestPin || '').replace(/\D/g, ''))
+  if (!a || !b || String(b).length !== 6) return null
+  if (a === b) return 0
+  return Math.abs(a - b)
+}
 
 export default function PublicPoojas() {
   const [list, setList] = useState(undefined)  // undefined = loading, null = failed, [] = none open
   const [mine, setMine] = useState([])         // [{ token, status, title, ... }]
   const [sel, setSel] = useState(null)         // the pooja being requested
   const [done, setDone] = useState(null)       // { name, title } after a successful request
+  const [pin, setPin] = useState(() => { try { return localStorage.getItem(PIN_KEY) || '' } catch { return '' } })
 
   const loadList = useCallback(async () => {
     const { data, error } = await supabase.rpc('pooja_public_list')
@@ -76,12 +97,45 @@ export default function PublicPoojas() {
 
   useEffect(() => { loadList(); loadMine() }, [loadList, loadMine])
 
+  const setPincode = (v) => {
+    const clean = v.replace(/\D/g, '').slice(0, 6)
+    setPin(clean)
+    try {
+      if (clean) localStorage.setItem(PIN_KEY, clean)
+      else localStorage.removeItem(PIN_KEY)
+    } catch { /* private mode */ }
+  }
+
+  // Sorted, then grouped by area in that order — so the nearest area heads the
+  // page and each area's poojas sit together under one heading.
+  const groups = useMemo(() => {
+    if (!list?.length) return []
+    const scored = list.map((p) => ({ ...p, score: distanceScore(p.pincode, pin) }))
+    const usable = pin.length === 6 && scored.some((p) => p.score != null)
+    scored.sort((a, b) => {
+      if (usable) {
+        const as = a.score == null ? Number.MAX_SAFE_INTEGER : a.score
+        const bs = b.score == null ? Number.MAX_SAFE_INTEGER : b.score
+        if (as !== bs) return as - bs
+      }
+      return String(a.starts_at).localeCompare(String(b.starts_at))
+    })
+    const out = []
+    for (const p of scored) {
+      const key = p.area || 'Nearby'
+      let g = out.find((x) => x.area === key)
+      if (!g) { g = { area: key, items: [], nearest: p.score }; out.push(g) }
+      g.items.push(p)
+    }
+    return out
+  }, [list, pin])
+
   if (done) {
     return (
       <PublicShell>
         <PublicDone
           title={`Namaskaram, ${done.name.split(' ')[0]}!`}
-          next="A coordinator will confirm your seat with the host. Come back to this page to see the address and the host's number — they appear here once your seat is approved. Nothing is sent to you by message."
+          next="A volunteer will confirm your seat with the host. Come back to this page to see the address and the host's number — they appear here once your seat is approved. Nothing is sent to you by message."
         >
           <div>Your seat request for <strong>{done.title}</strong> has been sent.</div>
         </PublicDone>
@@ -131,7 +185,7 @@ export default function PublicPoojas() {
 
         {list === null && (
           <div className="card public-card" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>We couldn't load the poojas</div>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>We couldn&apos;t load the poojas</div>
             <div style={{ fontSize: 13.5, color: 'var(--muted)' }}>Please check your connection and refresh. If it keeps happening, call the centre on 8095963111.</div>
           </div>
         )}
@@ -143,25 +197,47 @@ export default function PublicPoojas() {
           </div>
         )}
 
-        {list && list.map((p) => (
-          <PoojaCard key={p.activity_id} pooja={p} onRequest={() => setSel(p)} />
+        {list && list.length > 1 && (
+          <div className="card public-card" style={{ padding: 14 }}>
+            <Field
+              label="Your pincode"
+              hint="Optional. We'll put the closest poojas first. Nothing is saved to the centre — it stays on your phone."
+              value={pin}
+              onChange={(e) => setPincode(e.target.value)}
+              placeholder="560100"
+              inputMode="numeric"
+              maxLength={6}
+            />
+          </div>
+        )}
+
+        {groups.map((g) => (
+          <div key={g.area} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ ...sectionLabel, color: 'var(--orange)' }}>
+              {g.area}{g.nearest === 0 ? ' · your pincode' : ''}
+            </div>
+            {g.items.map((p) => (
+              <PoojaCard key={p.activity_id} pooja={p} onRequest={() => setSel(p)} />
+            ))}
+          </div>
         ))}
       </div>
     </PublicShell>
   )
 }
 
-// One open pooja. Area and landmark only — the street address is not in this
-// payload at all, so it cannot be leaked by a rendering mistake here.
+// One open pooja. Area, landmark and pincode only — the street address is not in
+// this payload at all, so it cannot be leaked by a rendering mistake here.
 function PoojaCard({ pooja, onRequest }) {
   const left = Number(pooja.seats_left ?? 0)
   const full = left <= 0
   return (
     <div className="card public-card">
       <h2 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 4px' }}>{pooja.title}</h2>
+      <div style={{ ...metaRow, color: 'var(--ink-soft)', fontWeight: 600 }}>{fmtDay(pooja.starts_at)}</div>
       <div style={metaRow}>{fmtWhen(pooja.starts_at)}</div>
       <div style={metaRow}>
-        {pooja.area}{pooja.landmark ? ` · near ${pooja.landmark}` : ''}
+        {pooja.area}{pooja.landmark ? ` · near ${pooja.landmark}` : ''}{pooja.pincode ? ` · ${pooja.pincode}` : ''}
       </div>
       {pooja.bring_note && (
         <div style={{ ...metaRow, marginTop: 8, color: 'var(--ink-soft)' }}>{pooja.bring_note}</div>
@@ -235,7 +311,7 @@ function RequestForm({ pooja, onBack, onRequested }) {
         placeholder="Full name" autoComplete="name" enterKeyHint="next" />
 
       <Field label="Mobile number" required value={phone} error={phoneErr}
-        hint="10 digits. The coordinator will call you on this number."
+        hint="10 digits. A volunteer will call you on this number."
         onChange={(e) => { setPhone(e.target.value); if (phoneErr) setPhoneErr(null) }}
         placeholder="9XXXXXXXXX" inputMode="numeric" autoComplete="tel" maxLength={15} />
 
@@ -257,7 +333,7 @@ function RequestForm({ pooja, onBack, onRequested }) {
         {busy ? 'Sending…' : 'Request a seat'}
       </button>
       <div style={{ ...metaRow, marginTop: 12, fontSize: 12.5 }}>
-        The host approves each guest. You'll see the address here once your seat is approved.
+        The host approves each guest. You&apos;ll see the address here once your seat is approved.
       </div>
     </div>
   )
@@ -326,7 +402,7 @@ function MyRequestCard({ req, onChanged }) {
             </div>
           ) : (
             <button className="btn btn-ghost" onClick={() => setConfirming(true)} style={{ width: '100%', justifyContent: 'center' }}>
-              I can't come
+              I can&apos;t come
             </button>
           )}
         </div>
