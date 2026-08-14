@@ -10,7 +10,7 @@ import { checkMobile } from './phone'
 // released to a guest by pooja_my_request(token) alone, and only once that
 // request is approved. See POOJA_INTEGRATION.md.
 
-const LISTING_COLS = 'activity_id, starts_at, seats, area, landmark, bring_note, address, host_phone, host_person_id, status, center_id, created_at'
+const LISTING_COLS = 'activity_id, starts_at, seats, area, landmark, bring_note, address, host_phone, host_person_id, status, center_id, pincode, created_at'
 
 // The IST calendar date of a moment — NOT `toISOString().slice(0,10)`, which is
 // the UTC date. India is +05:30, so a 4:30am pooja on the 6th is 23:00 UTC on
@@ -31,7 +31,7 @@ export const istIso = (dateStr, timeStr) => `${dateStr}T${(timeStr || '00:00').s
  * knows how to use) plus one `pooja_listings` row (the hosting metadata).
  * Both or neither.
  */
-export async function createPooja({ title, centerId, startsAt, seats, area, landmark, bringNote, address, hostPhone, hostPersonId, createdBy }) {
+export async function createPooja({ title, centerId, startsAt, seats, area, landmark, bringNote, address, hostPhone, hostPersonId, pincode, createdBy }) {
   if (!title?.trim()) throw new Error('The pooja needs a name.')
   if (!centerId) throw new Error('Pick a centre.')
   if (!area?.trim()) throw new Error('Area is required — it is what guests see instead of the address.')
@@ -69,6 +69,7 @@ export async function createPooja({ title, centerId, startsAt, seats, area, land
     landmark: landmark?.trim() || null,
     bring_note: bringNote?.trim() || null,
     address: address?.trim() || null,
+    pincode: pincode?.trim() || null,
     host_phone: phone,
     host_person_id: hostPersonId || null,
     center_id: centerId,
