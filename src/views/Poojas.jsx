@@ -46,6 +46,19 @@ const linkBtn = { padding: '5px 11px', fontSize: 12, textDecoration: 'none' }
 // paint is small.
 const smallBtn = { padding: '5px 10px', fontSize: 12, fontWeight: 600 }
 
+/**
+ * Google Maps, searched for this address — the pin drops on the house.
+ *
+ * A saved lat/lng would be more precise, but this needs nothing stored and no
+ * API key: Maps does the lookup each time from the address we already hold. It
+ * opens in Maps rather than drawing a pin here, so the volunteer lands in the
+ * app that can actually navigate them there.
+ */
+const mapsHref = (parts) => {
+  const q = (Array.isArray(parts) ? parts : [parts]).filter(Boolean).join(', ').trim()
+  return q ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q + ', India')}` : null
+}
+
 // WhatsApp's glyph. Inline rather than in lib/icons.jsx because that set is the
 // app's own nav language; this is somebody else's mark and belongs with the one
 // button that uses it.
@@ -478,6 +491,11 @@ function HolderRow({ holder: h, date, me, centre, isCoordinator, onChanged, onTo
           {telHref(h.phone) && <a className="btn btn-ghost tap44" style={linkBtn} href={telHref(h.phone)}>Call</a>}
           {smsHref(h.phone) && <a className="btn btn-ghost tap44" style={linkBtn} href={smsHref(h.phone, ask)}>SMS</a>}
           {waHref(h.phone) && <a className="btn btn-ghost tap44" style={linkBtn} href={waHref(h.phone, ask)} target="_blank" rel="noreferrer">WhatsApp</a>}
+          {/* Where the house actually is, without leaving to look it up by hand. */}
+          {h.hasAddress && mapsHref([h.street, h.city, h.pincode]) && (
+            <a className="btn btn-ghost tap44" style={linkBtn} target="_blank" rel="noreferrer"
+              href={mapsHref([h.street, h.city, h.pincode])} title="Find this home on Google Maps">Map</a>
+          )}
         </div>
       </div>
 
@@ -737,9 +755,9 @@ function ShareAll({ rows, onToast }) {
   }
 
   return (
-    <div className="card" style={{ padding: '10px 13px', marginBottom: 12 }}>
+    <div style={{ marginBottom: 12 }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 180, fontSize: 13, color: 'var(--ink-soft)' }}>
+        <div style={{ flex: 1, minWidth: 180, fontSize: 13, color: 'var(--muted)' }}>
           Share {live.length === 1 ? 'this pooja' : `all ${live.length} poojas`} with a group
         </div>
         <a className="btn btn-primary tap44" style={{ ...smallBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 5 }}
@@ -838,7 +856,13 @@ function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onT
       {expanded && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
           <div style={{ fontSize: 13, color: 'var(--ink-soft)', lineHeight: 1.6, marginBottom: 14 }}>
-            <div><b>Address</b> (approved guests only): {pooja.address || <span style={{ color: 'var(--muted-2)' }}>not set — approved guests will see nothing</span>}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span><b>Address</b> (approved guests only): {pooja.address || <span style={{ color: 'var(--muted-2)' }}>not set — approved guests will see nothing</span>}</span>
+              {mapsHref(pooja.address) && (
+                <a className="btn btn-ghost tap44" style={linkBtn} target="_blank" rel="noreferrer"
+                  href={mapsHref(pooja.address)}>Map</a>
+              )}
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span><b>Host</b>: {pooja.host_phone || <span style={{ color: 'var(--muted-2)' }}>no number</span>}</span>
               {pooja.host_phone && <a className="btn btn-ghost" style={linkBtn} href={telHref(pooja.host_phone)}>Call</a>}
