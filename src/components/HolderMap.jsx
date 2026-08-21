@@ -27,10 +27,10 @@ const LEAFLET_JS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
 // Electronic City, roughly — where the map opens before any pin is placed.
 const EC = [12.8452, 77.6602]
 
-// How far off a pin can be. A geocoder that only recognised the pincode has put
-// the pin at the middle of a whole postal area, which is not where anybody
+// How far off a pin can be. A lookup that only recognised the locality has put
+// the pin at the middle of a neighbourhood, which is not where anybody
 // lives — drawn as a circle so it never passes for a doorstep.
-const SPREAD = { nominatim: 0, 'nominatim-area': 700, 'nominatim-pincode': 1800 }
+const spreadOf = (source) => (/-pincode$/.test(source) ? 1800 : /-area$/.test(source) ? 700 : 0)
 
 function loadLeaflet() {
   if (window.L) return Promise.resolve(window.L)
@@ -104,13 +104,13 @@ export default function HolderMap({ holders }) {
       const pts = []
       for (const spot of spots.values()) {
         pts.push([spot.lat, spot.lng])
-        const spread = SPREAD[spot.source] ?? 0
+        const spread = spreadOf(spot.source)
         // Name and number only. No address line — see the note at the top.
         const lines = spot.people
           .map((h) => `<b>${safe(h.full_name)}</b> · ${safe(h.phone || 'no number')}`)
           .join('<br/>')
         const note = spread
-          ? `<br/><i>Somewhere in this circle — the address was only precise enough for the ${spot.source === 'nominatim-pincode' ? 'pincode' : 'locality'}.</i>`
+          ? `<br/><i>Somewhere in this circle — the address was only precise enough for the ${spread > 1000 ? 'pincode' : 'locality'}.</i>`
           : ''
         if (spread) {
           L.circle([spot.lat, spot.lng], {
@@ -128,8 +128,8 @@ export default function HolderMap({ holders }) {
   useEffect(() => () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null } }, [])
 
   const all = holders || []
-  const exact = geo ? all.filter((h) => geo[h.id] && !SPREAD[geo[h.id].source]).length : 0
-  const rough = geo ? all.filter((h) => geo[h.id] && SPREAD[geo[h.id].source]).length : 0
+  const exact = geo ? all.filter((h) => geo[h.id] && !spreadOf(geo[h.id].source)).length : 0
+  const rough = geo ? all.filter((h) => geo[h.id] && spreadOf(geo[h.id].source)).length : 0
   const noAddress = all.filter((h) => !h.hasAddress).length
   const unplaced = all.length - exact - rough - noAddress
 
