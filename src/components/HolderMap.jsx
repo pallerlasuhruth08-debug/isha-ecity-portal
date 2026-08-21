@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
 // Where the holders are. VOLUNTEER-ONLY — this screen is never reachable
@@ -14,22 +14,28 @@ import { supabase } from '../lib/supabase'
 // on a query that reaches a guest, and turning the map off means dropping one
 // table.
 //
-// THIS COMPONENT DOES NOT GEOCODE. It used to: it walked every holder without a
-// pin and called Nominatim once a second from the browser. That failed twice
-// over — the RLS policy on `person_geo` only let a full-access account write, so
-// for an ordinary volunteer every result was silently discarded, and even where
-// it worked it needed somebody to sit on this tab for two minutes. Addresses are
-// now geocoded once, at the moment they are saved (see updatePersonAddress), so
-// by the time the map opens the pins already exist. Drawing is all that is left.
+// THIS COMPONENT DOES NOT GEOCODE IN BULK. It used to: it walked every holder
+// without a pin and called a geocoder once a second from the browser. That
+// failed twice over — the RLS policy on `person_geo` only let a full-access
+// account write, so for an ordinary volunteer every result was silently
+// discarded, and even where it worked it needed somebody to sit on this tab for
+// two minutes. Addresses are geocoded once now, when they are saved (see
+// updatePersonAddress), so the pins exist before the map opens.
+//
+// What remains here is the part no geocoder can do: a volunteer who knows the
+// area putting a pin where the house actually is. Search by name of the
+// apartment or layout, or just click the roof.
 
 const LEAFLET_CSS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
 const LEAFLET_JS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-// Electronic City, roughly — where the map opens before any pin is placed.
+// Electronic City, roughly — where the map opens before any pin is placed, and
+// the point every search is biased towards.
 const EC = [12.8452, 77.6602]
 
 // How far off a pin can be. A lookup that only recognised the locality has put
-// the pin at the middle of a neighbourhood, which is not where anybody
-// lives — drawn as a circle so it never passes for a doorstep.
+// the pin at the middle of a neighbourhood, which is not where anybody lives —
+// drawn as a circle so it never passes for a doorstep. A pin a volunteer placed
+// by hand ('manual') is the most trustworthy thing on this map.
 const spreadOf = (source) => (/-pincode$/.test(source) ? 1800 : /-area$/.test(source) ? 700 : 0)
 
 function loadLeaflet() {
@@ -54,12 +60,39 @@ function loadLeaflet() {
 
 const safe = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]))
 
-export default function HolderMap({ holders }) {
+// Photon: OpenStreetMap data behind a search-as-you-type engine, no API key.
+// The lat/lon bias is why it is here rather than Nominatim — a bare name like
+// "Sobha Silicon Oasis" has to resolve to the one near this centre.
+async function searchPlaces(q) {
+  const url = `https://photon.komoot.io/api/?limit=6&lat=${EC[0]}&lon=${EC[1]}&q=${encodeURIComponent(q)}`
+  const r = await fetch(url, { headers: { Accept: 'application/json' } })
+  if (!r.ok) throw new Error('Search is not answering right now.')
+  return ((await r.json())?.features || []).map((f) => {
+    const [lng, lat] = f.geometry.coordinates
+    const p = f.properties || {}
+    return {
+      lat, lng,
+      label: [p.name, p.street, p.district, p.city, p.state].filter(Boolean).join(', '),
+    }
+  })
+}
+
+export default function HolderMap({ holders, onToast }) {
   const boxRef = useRef(null)
   const mapRef = useRef(null)
   const layerRef = useRef(null)
+  const draftRef = useRef(null)
+  const fixingRef = useRef(null)
   const [geo, setGeo] = useState(null)
   const [err, setErr] = useState(null)
+  const [fixing, setFixing] = useState(null)   // the holder whose pin is being set
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState(null)
+  const [searching, setSearching] = useState(false)
+  const [draft, setDraft] = useState(null)     // {lat,lng} not yet saved
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { fixingRef.current = fixing }, [fixing])
 
   useEffect(() => {
     let alive = true
@@ -81,15 +114,20 @@ export default function HolderMap({ holders }) {
       if (!mapRef.current) {
         mapRef.current = L.map(boxRef.current).setView(EC, 12)
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 18, attribution: '© OpenStreetMap contributors',
+          maxZoom: 19, attribution: '© OpenStreetMap contributors',
         }).addTo(mapRef.current)
+        // Clicking the map only means anything while a pin is being set.
+        mapRef.current.on('click', (e) => {
+          if (!fixingRef.current) return
+          setDraft({ lat: e.latlng.lat, lng: e.latlng.lng })
+        })
       }
       const map = mapRef.current
       if (layerRef.current) layerRef.current.remove()
       layerRef.current = L.layerGroup().addTo(map)
 
-      // Several holders share one apartment complex, and everyone who could only
-      // be placed by pincode shares one point exactly. Stacked markers hide each
+      // Several holders share one apartment complex, and everyone placed by
+      // locality alone shares one point exactly. Stacked markers hide each
       // other, so a point is drawn once and its popup names everybody on it.
       const spots = new Map()
       for (const h of holders || []) {
@@ -109,23 +147,77 @@ export default function HolderMap({ holders }) {
         const lines = spot.people
           .map((h) => `<b>${safe(h.full_name)}</b> · ${safe(h.phone || 'no number')}`)
           .join('<br/>')
-        const note = spread
-          ? `<br/><i>Somewhere in this circle — the address was only precise enough for the ${spread > 1000 ? 'pincode' : 'locality'}.</i>`
-          : ''
         if (spread) {
           L.circle([spot.lat, spot.lng], {
             radius: spread, color: '#b06a1f', weight: 1, fillColor: '#e8a04a', fillOpacity: 0.15,
-          }).addTo(layerRef.current).bindPopup(lines + note)
+          }).addTo(layerRef.current)
+            .bindPopup(`${lines}<br/><i>Somewhere in this circle — nobody has placed the pin yet.</i>`)
         } else {
           L.marker([spot.lat, spot.lng]).addTo(layerRef.current).bindPopup(lines)
         }
       }
-      if (pts.length) map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 })
+      if (pts.length && !fixingRef.current) map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 })
     }).catch((e) => setErr(e.message))
     return () => { alive = false }
   }, [geo, holders])
 
+  // The pin being dragged into place. Separate from the drawn layer so that
+  // moving it does not redraw ninety other markers.
+  useEffect(() => {
+    const L = window.L
+    const map = mapRef.current
+    if (!L || !map) return
+    if (draftRef.current) { draftRef.current.remove(); draftRef.current = null }
+    if (!draft) return
+    draftRef.current = L.marker([draft.lat, draft.lng], { draggable: true, opacity: 0.85 })
+      .addTo(map)
+      .bindPopup('Drag me onto the house, then save.')
+      .openPopup()
+    draftRef.current.on('dragend', (e) => {
+      const p = e.target.getLatLng()
+      setDraft({ lat: p.lat, lng: p.lng })
+    })
+    map.setView([draft.lat, draft.lng], Math.max(map.getZoom(), 16))
+  }, [draft])
+
   useEffect(() => () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null } }, [])
+
+  const runSearch = useCallback(async (e) => {
+    e?.preventDefault?.()
+    const q = query.trim()
+    if (q.length < 3) { setResults([]); return }
+    setSearching(true); setErr(null)
+    try { setResults(await searchPlaces(q)) }
+    catch (ex) { setErr(ex.message) }
+    finally { setSearching(false) }
+  }, [query])
+
+  const startFixing = useCallback((h) => {
+    setFixing(h)
+    setResults(null)
+    setDraft(geo?.[h.id] ? { lat: geo[h.id].lat, lng: geo[h.id].lng } : null)
+    // The address is the best possible search, and it is already on the record.
+    setQuery([h.street, h.city].filter(Boolean).join(', ').slice(0, 120))
+  }, [geo])
+
+  const stopFixing = useCallback(() => {
+    setFixing(null); setDraft(null); setResults(null); setQuery('')
+  }, [])
+
+  const savePin = useCallback(async () => {
+    if (!fixing || !draft) return
+    setSaving(true)
+    const row = {
+      person_id: fixing.id, lat: draft.lat, lng: draft.lng,
+      source: 'manual', geocoded_at: new Date().toISOString(),
+    }
+    const { error } = await supabase.from('person_geo').upsert(row, { onConflict: 'person_id' })
+    setSaving(false)
+    if (error) { setErr('Could not save the pin: ' + error.message); return }
+    setGeo((g) => ({ ...(g || {}), [fixing.id]: row }))
+    onToast?.(`${fixing.full_name} is on the map.`)
+    stopFixing()
+  }, [fixing, draft, onToast, stopFixing])
 
   const all = holders || []
   const exact = geo ? all.filter((h) => geo[h.id] && !spreadOf(geo[h.id].source)).length : 0
@@ -133,22 +225,96 @@ export default function HolderMap({ holders }) {
   const noAddress = all.filter((h) => !h.hasAddress).length
   const unplaced = all.length - exact - rough - noAddress
 
+  // Who is worth a volunteer's minute: nobody has a pin, or the pin is only a
+  // neighbourhood. Someone with no address at all needs a phone call, not a map.
+  const needsPin = geo
+    ? all.filter((h) => h.hasAddress && (!geo[h.id] || spreadOf(geo[h.id].source)))
+      .sort((a, b) => (geo[a.id] ? 1 : 0) - (geo[b.id] ? 1 : 0) || String(a.full_name).localeCompare(String(b.full_name)))
+    : []
+
   return (
     <div className="card" style={{ padding: 16 }}>
       <div style={{ marginBottom: 12 }}>
         <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 3px' }}>Where the holders are</h3>
         <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          {geo ? `${exact} placed at the building` : 'Loading pins…'}
+          {geo ? `${exact} placed exactly` : 'Loading pins…'}
           {rough > 0 && ` · ${rough} only to the neighbourhood`}
-          {unplaced > 0 && ` · ${unplaced} the map could not find`}
+          {unplaced > 0 && ` · ${unplaced} not found`}
           {noAddress > 0 && ` · ${noAddress} with no address yet`}
         </div>
       </div>
+
       {err && <div className="field-error" role="alert" style={{ marginBottom: 10 }}>{err}</div>}
+
+      {fixing && (
+        <div style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 12, marginBottom: 12, background: 'var(--surface-2, #fafafa)' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 8 }}>
+            <strong style={{ fontSize: 14 }}>Placing {fixing.full_name}</strong>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+              Search the apartment or layout, or click the roof on the map.
+            </span>
+          </div>
+          <form onSubmit={runSearch} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="e.g. Sobha Silicon Oasis, Electronic City"
+              style={{ flex: 1, minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, padding: '9px 12px', fontSize: 13, fontFamily: 'inherit' }}
+            />
+            <button type="submit" className="btn btn-ghost" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button>
+          </form>
+          {results && !results.length && (
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>
+              Nothing found by that name. Click the house on the map instead — that works everywhere.
+            </div>
+          )}
+          {results?.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8, maxHeight: 150, overflowY: 'auto' }}>
+              {results.map((r, i) => (
+                <button key={i} type="button" className="btn btn-ghost"
+                  onClick={() => setDraft({ lat: r.lat, lng: r.lng })}
+                  style={{ justifyContent: 'flex-start', textAlign: 'left', fontSize: 12.5, padding: '7px 10px' }}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" disabled={!draft || saving} onClick={savePin}>
+              {saving ? 'Saving…' : draft ? 'Save this spot' : 'Pick a spot first'}
+            </button>
+            <button className="btn btn-ghost" onClick={stopFixing}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       <div ref={boxRef} style={{ height: 420, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }} />
+
+      {!fixing && needsPin.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 }}>
+            {needsPin.length} {needsPin.length === 1 ? 'holder is' : 'holders are'} not placed properly.
+            No geocoder knows these buildings — someone who has been there does.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 190, overflowY: 'auto' }}>
+            {needsPin.map((h) => (
+              <div key={h.id} style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', padding: '6px 2px', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{h.full_name}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--muted-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {geo?.[h.id] ? 'neighbourhood only' : 'no pin'} · {[h.street, h.city].filter(Boolean).join(', ')}
+                  </div>
+                </div>
+                <button className="btn btn-ghost" onClick={() => startFixing(h)}>Place</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginTop: 8, lineHeight: 1.5 }}>
         Volunteers only — guests never see this. Pins show a name and number; the address stays on the person's record.
-        A shaded circle means the address was too vague to place exactly — the person is somewhere inside it, not at its centre.
+        A shaded circle means nobody has placed that pin yet — the person is somewhere inside it, not at its centre.
       </div>
     </div>
   )
