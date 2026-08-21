@@ -57,6 +57,8 @@ export default function HolderMap({ holders, onToast }) {
   const layerRef = useRef(null)
   const [geo, setGeo] = useState(null)
   const [placing, setPlacing] = useState(false)
+  const [progress, setProgress] = useState(null) // {done,total} while placing
+  const autoRan = useRef(false)
   const [err, setErr] = useState(null)
 
   const withAddress = (holders || []).filter((h) => h.hasAddress)
@@ -105,11 +107,20 @@ export default function HolderMap({ holders, onToast }) {
 
   useEffect(() => () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null } }, [])
 
+  // Place every holder that has an address but no pin yet.
+  //
+  // This runs on its own when the map opens. It used to sit behind a "Place N
+  // on the map" button, and the result was a map showing 3 pins while 94
+  // holders had a perfectly good address on record — nobody had pressed it, and
+  // an address you must press a button to see is one the map is lying about.
+  // Nominatim allows one request a second, so this is slow by obligation, not
+  // by accident; the count says where it has got to.
   const placeMissing = useCallback(async () => {
     const missing = withAddress.filter((h) => !geo?.[h.id])
     if (!missing.length) { onToast?.('Every holder with an address is already on the map.'); return }
     setPlacing(true)
-    let done = 0
+    setProgress({ done: 0, total: missing.length })
+    let placedNow = 0
     try {
       for (const h of missing) {
         const hit = await geocodeOne(h)
@@ -117,16 +128,25 @@ export default function HolderMap({ holders, onToast }) {
           const { error } = await supabase.from('person_geo').upsert({
             person_id: h.id, lat: hit.lat, lng: hit.lng, source: 'nominatim', geocoded_at: new Date().toISOString(),
           }, { onConflict: 'person_id' })
-          if (!error) { setGeo((g) => ({ ...(g || {}), [h.id]: hit })); done++ }
+          if (!error) { setGeo((g) => ({ ...(g || {}), [h.id]: hit })); placedNow++ }
         }
+        setProgress((p) => (p ? { ...p, done: p.done + 1 } : p))
         // Nominatim asks for no more than one request a second. Honour it.
         await new Promise((res) => setTimeout(res, 1100))
       }
-      onToast?.(`${done} of ${missing.length} placed on the map.`)
+      onToast?.(`${placedNow} of ${missing.length} placed on the map.`)
     } catch (e) {
       onToast?.('Could not finish placing: ' + (e.message || e))
-    } finally { setPlacing(false) }
+    } finally { setPlacing(false); setProgress(null) }
   }, [withAddress, geo, onToast])
+
+  // Kick it off once, as soon as we know who is missing.
+  useEffect(() => {
+    if (!geo || autoRan.current) return
+    if (!withAddress.some((h) => !geo[h.id])) return
+    autoRan.current = true
+    placeMissing()
+  }, [geo, withAddress, placeMissing])
 
   const placed = geo ? Object.keys(geo).length : 0
   const missing = withAddress.filter((h) => !geo?.[h.id]).length
@@ -138,12 +158,17 @@ export default function HolderMap({ holders, onToast }) {
         <div style={{ flex: 1, minWidth: 220 }}>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 3px' }}>Where the holders are</h3>
           <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-            {placed} on the map · {missing} with an address still to place
+            {placed} on the map
+            {progress
+              ? ` · placing ${progress.done} of ${progress.total}…`
+              : missing ? ` · ${missing} still to place` : ''}
             {noAddress > 0 && ` · ${noAddress} with no address yet`}
           </div>
         </div>
         <button className="btn btn-ghost" disabled={placing || !missing} onClick={placeMissing}>
-          {placing ? 'Placing…' : `Place ${missing} on the map`}
+          {placing
+            ? `Placing ${progress ? `${progress.done} of ${progress.total}` : ''}…`
+            : `Place ${missing} on the map`}
         </button>
       </div>
       {err && <div className="field-error" role="alert" style={{ marginBottom: 10 }}>{err}</div>}
