@@ -294,6 +294,47 @@ export async function updatePersonAddress(personId, { street, city, pincode }) {
   if (!Object.keys(patch).length) return
   const { error } = await supabase.from('people').update(patch).eq('id', personId)
   if (error) throw error
+  // Put them on the map now, while there is exactly one address to look up.
+  // The map used to do this itself for everybody at once, which meant a
+  // volunteer had to sit on the map tab for two minutes and watch pins appear.
+  // One address, one lookup, here, is the whole job.
+  await placeOnMap(personId, patch)
+}
+
+// OpenStreetMap's geocoder: no API key, and it is the only third party any of
+// this touches. It is also poor at Indian door numbers, so the lookup walks
+// from the full address down to the pincode and records how far it got —
+// `source` is what tells the map to draw a circle instead of a pin.
+const GEO_STEPS = [
+  (a) => [[a.street, a.city, a.pincode, 'Karnataka, India'].filter(Boolean).join(', '), 'nominatim'],
+  (a) => [[a.street?.split(',')[0], 'Bengaluru, Karnataka, India'].filter(Boolean).join(', '), 'nominatim'],
+  (a) => [[a.city, a.pincode, 'Karnataka, India'].filter(Boolean).join(' '), 'nominatim-area'],
+  (a) => [a.pincode ? a.pincode + ', Karnataka, India' : null, 'nominatim-pincode'],
+]
+
+export async function placeOnMap(personId, address) {
+  if (!address?.street?.trim() && !address?.pincode?.trim()) return null
+  for (const step of GEO_STEPS) {
+    const [q, source] = step(address)
+    if (!q) continue
+    let hit = null
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=in&q=' + encodeURIComponent(q)
+      const r = await fetch(url, { headers: { Accept: 'application/json' } })
+      if (r.ok) hit = (await r.json())?.[0] || null
+    } catch { /* offline, or the geocoder is down — the address is still saved */ }
+    if (!hit) continue
+    const lat = Number(hit.lat), lng = Number(hit.lon)
+    // Anything outside greater Bengaluru is the geocoder guessing at a
+    // same-named place in another state. Better no pin than a wrong one.
+    if (!(lat > 12.55 && lat < 13.3 && lng > 77.25 && lng < 78)) continue
+    const { error } = await supabase.from('person_geo').upsert({
+      person_id: personId, lat, lng, source, geocoded_at: new Date().toISOString(),
+    }, { onConflict: 'person_id' })
+    if (error) return null
+    return { lat, lng, source }
+  }
+  return null
 }
 
 // A guest's private handle. Same shape the public RPC issues (32 hex), so a
