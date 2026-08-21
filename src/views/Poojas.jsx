@@ -274,7 +274,7 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
               me={me} centre={centre} isCoordinator={isCoordinator} onToast={onToast} />
           )}
           {tab === 'posted' && <PostedPoojas me={me} isCoordinator={isCoordinator} onToast={onToast} onCountsChanged={refreshWaiting} />}
-          {tab === 'map' && <MapTab />}
+          {tab === 'map' && <MapTab onToast={onToast} />}
         </>
       )}
 
@@ -782,7 +782,7 @@ function ShareAll({ rows, onToast }) {
   )
 }
 
-function MapTab() {
+function MapTab({ onToast }) {
   const [holders, setHolders] = useState(null)
   useEffect(() => {
     supabase.from('people')
@@ -792,7 +792,7 @@ function MapTab() {
   }, [])
   if (!holders) return <Loading label="Loading holders…" />
   if (!holders.length) return <Empty label="No holders on record yet — nothing to map." />
-  return <HolderMap holders={holders} />
+  return <HolderMap holders={holders} onToast={onToast} />
 }
 
 function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onToast }) {
