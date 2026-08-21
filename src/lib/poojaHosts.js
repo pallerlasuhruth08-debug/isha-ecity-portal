@@ -301,38 +301,54 @@ export async function updatePersonAddress(personId, { street, city, pincode }) {
   await placeOnMap(personId, patch)
 }
 
-// OpenStreetMap's geocoder: no API key, and it is the only third party any of
-// this touches. It is also poor at Indian door numbers, so the lookup walks
-// from the full address down to the pincode and records how far it got —
-// `source` is what tells the map to draw a circle instead of a pin.
-const GEO_STEPS = [
-  (a) => [[a.street, a.city, a.pincode, 'Karnataka, India'].filter(Boolean).join(', '), 'nominatim'],
-  (a) => [[a.street?.split(',')[0], 'Bengaluru, Karnataka, India'].filter(Boolean).join(', '), 'nominatim'],
-  (a) => [[a.city, a.pincode, 'Karnataka, India'].filter(Boolean).join(' '), 'nominatim-area'],
-  (a) => [a.pincode ? a.pincode + ', Karnataka, India' : null, 'nominatim-pincode'],
-]
+// Photon (photon.komoot.io) — OpenStreetMap data, no API key, and the only
+// third party any of this touches. Nominatim was tried first and is the wrong
+// tool here: it could not match Bengaluru apartment names, has no Indian
+// postcode data at all, answered several addresses with a street of the same
+// name ten kilometres away, and rate-limited a one-off backfill of 96 addresses
+// with a 429. Photon fuzzy-matches the complex name and takes a lat/lon bias,
+// which is what these addresses actually need.
+//
+// It still cannot find every building, so the lookup falls back to the locality
+// and records how far it got — `source` ending in `-area` is what tells the map
+// to draw a circle instead of a pin.
+const PHOTON = 'https://photon.komoot.io/api/?limit=1&lat=12.8452&lon=77.6602&q='
+
+// Greater Bengaluru south. A hit outside this is the geocoder reaching for a
+// same-named place elsewhere; better no pin than a wrong one.
+const inBengaluru = (lat, lng) => lat > 12.55 && lat < 13.05 && lng > 77.4 && lng < 78
+
+async function photonOne(q) {
+  try {
+    const r = await fetch(PHOTON + encodeURIComponent(q), { headers: { Accept: 'application/json' } })
+    if (!r.ok) return null
+    const f = (await r.json())?.features?.[0]
+    if (!f) return null
+    const [lng, lat] = f.geometry.coordinates
+    return inBengaluru(lat, lng) ? { lat, lng } : null
+  } catch { return null } // offline, or the geocoder is down — the address is still saved
+}
 
 export async function placeOnMap(personId, address) {
-  if (!address?.street?.trim() && !address?.pincode?.trim()) return null
-  for (const step of GEO_STEPS) {
-    const [q, source] = step(address)
+  const street = address?.street?.trim()
+  const city = address?.city?.trim()
+  if (!street && !city) return null
+  const seg = (street || '').split(',').map((x) => x.trim()).filter(Boolean)
+  const tries = [
+    [[street, city, 'Bengaluru'].filter(Boolean).join(', '), 'photon'],
+    [seg.length > 1 ? seg.slice(0, 2).join(', ') + ', Bengaluru' : null, 'photon'],
+    [seg[0] ? seg[0] + ', Bengaluru' : null, 'photon'],
+    [city ? city + ', Bengaluru' : null, 'photon-area'],
+  ]
+  for (const [q, source] of tries) {
     if (!q) continue
-    let hit = null
-    try {
-      const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=in&q=' + encodeURIComponent(q)
-      const r = await fetch(url, { headers: { Accept: 'application/json' } })
-      if (r.ok) hit = (await r.json())?.[0] || null
-    } catch { /* offline, or the geocoder is down — the address is still saved */ }
+    const hit = await photonOne(q)
     if (!hit) continue
-    const lat = Number(hit.lat), lng = Number(hit.lon)
-    // Anything outside greater Bengaluru is the geocoder guessing at a
-    // same-named place in another state. Better no pin than a wrong one.
-    if (!(lat > 12.55 && lat < 13.3 && lng > 77.25 && lng < 78)) continue
     const { error } = await supabase.from('person_geo').upsert({
-      person_id: personId, lat, lng, source, geocoded_at: new Date().toISOString(),
+      person_id: personId, lat: hit.lat, lng: hit.lng, source, geocoded_at: new Date().toISOString(),
     }, { onConflict: 'person_id' })
     if (error) return null
-    return { lat, lng, source }
+    return { ...hit, source }
   }
   return null
 }
