@@ -230,9 +230,16 @@ export default function PersonProfile({ personId, me, onClose, onToast, onChange
               <h2 style={{ fontSize: 21, fontWeight: 600, margin: '0 0 2px' }}>{p.full_name}</h2>
               <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{[p.city, p.pincode].filter(Boolean).join(' · ') || center}</div>
             </div>
-            <div style={{ display: 'flex', gap: 5 }}>
+            {/* Who they are, in one line. A Sannidhi or a yantra in the house is
+                part of that — it belonged in the header next to Volunteer and
+                Meditator, not filed under "Other Information" three sections
+                down, which made a holder look like a different kind of record
+                from the person you opened. Same person, one profile. */}
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               {p.is_volunteer && <span className="pill" style={pill('var(--pill-orange-bg)', 'var(--pill-orange-fg)')}>Volunteer</span>}
               {p.is_meditator && <span className="pill" style={pill('var(--pill-rust-bg)', 'var(--pill-rust-fg)')}>Meditator</span>}
+              {p.has_sadhguru_sannidhi && <span className="pill" style={pill('var(--success-bg)', 'var(--success-fg)')} title="Has Sadhguru Sannidhi — can host a Sannidhi Pooja at home">Sadhguru Sannidhi</span>}
+              {p.has_devi_yantra && <span className="pill" style={pill('var(--pill-yellow-bg)', 'var(--pill-yellow-fg)')} title="Has Devi Yantra — can host a Yantra Pooja at home">Devi Yantra</span>}
             </div>
           </div>
         )}
