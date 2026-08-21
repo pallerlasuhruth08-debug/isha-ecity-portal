@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
 // Where the holders are. VOLUNTEER-ONLY — this screen is never reachable
@@ -13,11 +13,24 @@ import { supabase } from '../lib/supabase'
 // Coordinates live in `person_geo`, not in `people`, so they cannot ride along
 // on a query that reaches a guest, and turning the map off means dropping one
 // table.
+//
+// THIS COMPONENT DOES NOT GEOCODE. It used to: it walked every holder without a
+// pin and called Nominatim once a second from the browser. That failed twice
+// over — the RLS policy on `person_geo` only let a full-access account write, so
+// for an ordinary volunteer every result was silently discarded, and even where
+// it worked it needed somebody to sit on this tab for two minutes. Addresses are
+// now geocoded once, at the moment they are saved (see updatePersonAddress), so
+// by the time the map opens the pins already exist. Drawing is all that is left.
 
 const LEAFLET_CSS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
 const LEAFLET_JS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
 // Electronic City, roughly — where the map opens before any pin is placed.
 const EC = [12.8452, 77.6602]
+
+// How far off a pin can be. A geocoder that only recognised the pincode has put
+// the pin at the middle of a whole postal area, which is not where anybody
+// lives — drawn as a circle so it never passes for a doorstep.
+const SPREAD = { nominatim: 0, 'nominatim-area': 700, 'nominatim-pincode': 1800 }
 
 function loadLeaflet() {
   if (window.L) return Promise.resolve(window.L)
@@ -39,33 +52,18 @@ function loadLeaflet() {
   })
 }
 
-// OpenStreetMap's geocoder: no API key, and it is the only third party any of
-// this touches. One request per second is its published limit, hence the wait.
-async function geocodeOne(person) {
-  const q = [person.street, person.city, person.pincode, 'India'].filter(Boolean).join(', ')
-  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q)
-  const r = await fetch(url, { headers: { Accept: 'application/json' } })
-  if (!r.ok) return null
-  const j = await r.json()
-  if (!j?.length) return null
-  return { lat: Number(j[0].lat), lng: Number(j[0].lon) }
-}
+const safe = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]))
 
-export default function HolderMap({ holders, onToast }) {
+export default function HolderMap({ holders }) {
   const boxRef = useRef(null)
   const mapRef = useRef(null)
   const layerRef = useRef(null)
   const [geo, setGeo] = useState(null)
-  const [placing, setPlacing] = useState(false)
-  const [progress, setProgress] = useState(null) // {done,total} while placing
-  const autoRan = useRef(false)
   const [err, setErr] = useState(null)
-
-  const withAddress = (holders || []).filter((h) => h.hasAddress)
 
   useEffect(() => {
     let alive = true
-    supabase.from('person_geo').select('person_id, lat, lng').then(({ data, error }) => {
+    supabase.from('person_geo').select('person_id, lat, lng, source').then(({ data, error }) => {
       if (!alive) return
       if (error) { setErr(error.message); return }
       const m = {}
@@ -90,15 +88,37 @@ export default function HolderMap({ holders, onToast }) {
       if (layerRef.current) layerRef.current.remove()
       layerRef.current = L.layerGroup().addTo(map)
 
-      const pts = []
+      // Several holders share one apartment complex, and everyone who could only
+      // be placed by pincode shares one point exactly. Stacked markers hide each
+      // other, so a point is drawn once and its popup names everybody on it.
+      const spots = new Map()
       for (const h of holders || []) {
         const g = geo[h.id]
         if (!g) continue
-        pts.push([g.lat, g.lng])
+        const key = `${g.lat.toFixed(5)},${g.lng.toFixed(5)},${g.source}`
+        const spot = spots.get(key) || { lat: g.lat, lng: g.lng, source: g.source, people: [] }
+        spot.people.push(h)
+        spots.set(key, spot)
+      }
+
+      const pts = []
+      for (const spot of spots.values()) {
+        pts.push([spot.lat, spot.lng])
+        const spread = SPREAD[spot.source] ?? 0
         // Name and number only. No address line — see the note at the top.
-        const safe = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]))
-        L.marker([g.lat, g.lng]).addTo(layerRef.current)
-          .bindPopup(`<b>${safe(h.full_name)}</b><br/>${safe(h.phone || 'no number')}`)
+        const lines = spot.people
+          .map((h) => `<b>${safe(h.full_name)}</b> · ${safe(h.phone || 'no number')}`)
+          .join('<br/>')
+        const note = spread
+          ? `<br/><i>Somewhere in this circle — the address was only precise enough for the ${spot.source === 'nominatim-pincode' ? 'pincode' : 'locality'}.</i>`
+          : ''
+        if (spread) {
+          L.circle([spot.lat, spot.lng], {
+            radius: spread, color: '#b06a1f', weight: 1, fillColor: '#e8a04a', fillOpacity: 0.15,
+          }).addTo(layerRef.current).bindPopup(lines + note)
+        } else {
+          L.marker([spot.lat, spot.lng]).addTo(layerRef.current).bindPopup(lines)
+        }
       }
       if (pts.length) map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 })
     }).catch((e) => setErr(e.message))
@@ -107,75 +127,28 @@ export default function HolderMap({ holders, onToast }) {
 
   useEffect(() => () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null } }, [])
 
-  // Place every holder that has an address but no pin yet.
-  //
-  // This runs on its own when the map opens. It used to sit behind a "Place N
-  // on the map" button, and the result was a map showing 3 pins while 94
-  // holders had a perfectly good address on record — nobody had pressed it, and
-  // an address you must press a button to see is one the map is lying about.
-  // Nominatim allows one request a second, so this is slow by obligation, not
-  // by accident; the count says where it has got to.
-  const placeMissing = useCallback(async () => {
-    const missing = withAddress.filter((h) => !geo?.[h.id])
-    if (!missing.length) { onToast?.('Every holder with an address is already on the map.'); return }
-    setPlacing(true)
-    setProgress({ done: 0, total: missing.length })
-    let placedNow = 0
-    try {
-      for (const h of missing) {
-        const hit = await geocodeOne(h)
-        if (hit) {
-          const { error } = await supabase.from('person_geo').upsert({
-            person_id: h.id, lat: hit.lat, lng: hit.lng, source: 'nominatim', geocoded_at: new Date().toISOString(),
-          }, { onConflict: 'person_id' })
-          if (!error) { setGeo((g) => ({ ...(g || {}), [h.id]: hit })); placedNow++ }
-        }
-        setProgress((p) => (p ? { ...p, done: p.done + 1 } : p))
-        // Nominatim asks for no more than one request a second. Honour it.
-        await new Promise((res) => setTimeout(res, 1100))
-      }
-      onToast?.(`${placedNow} of ${missing.length} placed on the map.`)
-    } catch (e) {
-      onToast?.('Could not finish placing: ' + (e.message || e))
-    } finally { setPlacing(false); setProgress(null) }
-  }, [withAddress, geo, onToast])
-
-  // Kick it off once, as soon as we know who is missing.
-  useEffect(() => {
-    if (!geo || autoRan.current) return
-    if (!withAddress.some((h) => !geo[h.id])) return
-    autoRan.current = true
-    placeMissing()
-  }, [geo, withAddress, placeMissing])
-
-  const placed = geo ? Object.keys(geo).length : 0
-  const missing = withAddress.filter((h) => !geo?.[h.id]).length
-  const noAddress = (holders || []).length - withAddress.length
+  const all = holders || []
+  const exact = geo ? all.filter((h) => geo[h.id] && !SPREAD[geo[h.id].source]).length : 0
+  const rough = geo ? all.filter((h) => geo[h.id] && SPREAD[geo[h.id].source]).length : 0
+  const noAddress = all.filter((h) => !h.hasAddress).length
+  const unplaced = all.length - exact - rough - noAddress
 
   return (
     <div className="card" style={{ padding: 16 }}>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 3px' }}>Where the holders are</h3>
-          <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-            {placed} on the map
-            {progress
-              ? ` · placing ${progress.done} of ${progress.total}…`
-              : missing ? ` · ${missing} still to place` : ''}
-            {noAddress > 0 && ` · ${noAddress} with no address yet`}
-          </div>
+      <div style={{ marginBottom: 12 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 3px' }}>Where the holders are</h3>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          {geo ? `${exact} placed at the building` : 'Loading pins…'}
+          {rough > 0 && ` · ${rough} only to the neighbourhood`}
+          {unplaced > 0 && ` · ${unplaced} the map could not find`}
+          {noAddress > 0 && ` · ${noAddress} with no address yet`}
         </div>
-        <button className="btn btn-ghost" disabled={placing || !missing} onClick={placeMissing}>
-          {placing
-            ? `Placing ${progress ? `${progress.done} of ${progress.total}` : ''}…`
-            : `Place ${missing} on the map`}
-        </button>
       </div>
       {err && <div className="field-error" role="alert" style={{ marginBottom: 10 }}>{err}</div>}
       <div ref={boxRef} style={{ height: 420, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }} />
       <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginTop: 8, lineHeight: 1.5 }}>
         Volunteers only — guests never see this. Pins show a name and number; the address stays on the person's record.
-        Placing sends the address to OpenStreetMap's geocoder once, then it is remembered.
+        A shaded circle means the address was too vague to place exactly — the person is somewhere inside it, not at its centre.
       </div>
     </div>
   )
