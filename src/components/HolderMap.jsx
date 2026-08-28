@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { placeMissing } from '../lib/poojaHosts'
 
 // Where the holders are. VOLUNTEER-ONLY — this screen is never reachable
 // without a login, and no guest-facing page imports it.
@@ -101,6 +102,9 @@ export default function HolderMap({ holders, onToast }) {
   const [searching, setSearching] = useState(false)
   const [draft, setDraft] = useState(null)     // {lat,lng} not yet saved
   const [saving, setSaving] = useState(false)
+  const [bulk, setBulk] = useState(null)      // {done,total,placed} while the sweep runs
+  const aliveRef = useRef(true)
+  useEffect(() => () => { aliveRef.current = false }, [])
 
   useEffect(() => { fixingRef.current = fixing }, [fixing])
 
@@ -320,6 +324,36 @@ export default function HolderMap({ holders, onToast }) {
     stopFixing()
   }, [fixing, draft, onToast, stopFixing])
 
+  // Ask the geocoder about every address that has never been through it. Almost
+  // everyone here is in a ward or postal circle because the street line was
+  // skipped and they were placed from the pincode alone — not because the
+  // address is vague. One request a second, pins appear as they land, and
+  // anything that does not resolve to a building keeps the circle it has.
+  const runSweep = useCallback(async (list) => {
+    setErr(null)
+    setBulk({ done: 0, total: list.length, placed: 0 })
+    try {
+      const placed = await placeMissing(list, {
+        alive: () => aliveRef.current,
+        onProgress: ({ done, total, placed: n, person, hit }) => {
+          if (!aliveRef.current) return
+          setBulk({ done, total, placed: n })
+          if (hit) setGeo((g) => ({ ...(g || {}), [person.id]: { lat: hit.lat, lng: hit.lng, source: hit.source, radius_m: hit.radius_m ?? null } }))
+        },
+      })
+      if (!aliveRef.current) return
+      onToast?.(placed
+        ? `${placed} of ${list.length} placed at the building. The rest kept their circle — those need a person who has been there.`
+        : 'The geocoder could not place any of them. They keep the circles they had.')
+    } catch (e) {
+      // A refused write, not a miss. Say so: an earlier version of this swept
+      // the whole list, had every result discarded by RLS, and looked fine.
+      setErr(e.message || String(e))
+    } finally {
+      if (aliveRef.current) setBulk(null)
+    }
+  }, [onToast])
+
   const all = holders || []
   const exact = geo ? all.filter((h) => geo[h.id] && !spreadOf(geo[h.id])).length : 0
   const rough = geo ? all.filter((h) => geo[h.id] && spreadOf(geo[h.id])).length : 0
@@ -394,9 +428,22 @@ export default function HolderMap({ holders, onToast }) {
 
       {!fixing && needsPin.length > 0 && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 }}>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>
             {needsPin.length} {needsPin.length === 1 ? 'holder is' : 'holders are'} not placed properly.
-            No geocoder knows these buildings — someone who has been there does.
+            Most of them are in a circle because nobody ever looked their address up, not because it is vague —
+            try the geocoder first, and hand-place whatever it cannot find.
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <button className="btn btn-primary" disabled={!!bulk} onClick={() => runSweep(needsPin)}>
+              {bulk
+                ? `Looking up ${bulk.done} of ${bulk.total}… ${bulk.placed} placed`
+                : `Look up ${needsPin.length} ${needsPin.length === 1 ? 'address' : 'addresses'}`}
+            </button>
+            {bulk && (
+              <span style={{ fontSize: 11.5, color: 'var(--muted-2)', marginLeft: 10 }}>
+                One a second — that is the geocoder&apos;s rule. Leaving this screen stops it; what is placed stays placed.
+              </span>
+            )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 190, overflowY: 'auto' }}>
             {needsPin.map((h) => (
