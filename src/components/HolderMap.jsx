@@ -115,6 +115,7 @@ export default function HolderMap({ holders, onToast }) {
   const [bulk, setBulk] = useState(null)      // {done,total,placed} while the sweep runs
   const aliveRef = useRef(true)
   const sweptRef = useRef(false)
+  const fittedRef = useRef(null)
   const geoRef = useRef(null)
   const holdersRef = useRef(null)
   const startFixingRef = useRef(null)
@@ -295,7 +296,15 @@ export default function HolderMap({ holders, onToast }) {
         })
       }
 
-      if (pts.length && !fixingRef.current) map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 })
+      // Frame the pins ONCE for a given set of holders. This used to run on
+      // every redraw, and the redraw runs once per person while the lookup
+      // sweeps — so zooming in was undone a second later, over and over, and
+      // the zoom button looked like it was zooming out. Changing the centre
+      // filter hands down a new array, which is the one time a refit is wanted.
+      if (pts.length && !fixingRef.current && fittedRef.current !== holders) {
+        fittedRef.current = holders
+        map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 })
+      }
     }).catch((e) => setErr(e.message))
     return () => { alive = false }
   }, [geo, holders])
