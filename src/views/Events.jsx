@@ -396,7 +396,7 @@ export function CreateSessionForm({ activity, session = null, attnCount = 0, typ
   const locked = editing && attnCount > 0
   const spanStart = activity.start_date || activity.activity_date
   const spanEnd = activity.end_date || activity.start_date || activity.activity_date
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayISO()
   const [kind, setKind] = useState(session?.type || 'volunteer')
   const [date, setDate] = useState(session?.session_date || (today >= spanStart && today <= spanEnd ? today : spanStart))
   const [centre, setCentre] = useState(session?.center_id || activity.center_id || '')
@@ -570,7 +570,7 @@ function SessionCapture({ session, activity, types = [], me, typeLabel, onBack, 
   const seq = useRef(0)
   // Capture is HARD-gated until the session's own date: creating a session in advance is
   // fine, but people can only be marked present on or after the day.
-  const captureOpen = session.session_date <= new Date().toISOString().slice(0, 10)
+  const captureOpen = session.session_date <= todayISO()
 
   useEffect(() => {
     supabase.from('centers').select('id, name, active').order('name')
