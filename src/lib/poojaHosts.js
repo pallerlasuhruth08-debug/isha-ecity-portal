@@ -387,6 +387,20 @@ export async function placeOnMap(personId, address, { pointsOnly = false } = {})
  * geocoder cannot resolve to a building keeps the circle it already has, which
  * is why a miss is not an error here.
  */
+export async function markAsked(personId) {
+  // A miss, recorded. Only the timestamp moves: the ward or postal circle this
+  // person already sits in is still the best thing known about them.
+  const { error } = await supabase.from('person_geo')
+    .update({ geocoded_at: new Date().toISOString() }).eq('person_id', personId)
+  if (error) throw error
+}
+
+/** Remove a pin. An unplaced person is honest; a pin on the wrong house is not. */
+export async function clearPin(personId) {
+  const { error } = await supabase.from('person_geo').delete().eq('person_id', personId)
+  if (error) throw error
+}
+
 export async function placeMissing(people, { onProgress, alive = () => true, gapMs = 1100 } = {}) {
   let placed = 0
   for (let i = 0; i < people.length; i++) {
