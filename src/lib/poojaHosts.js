@@ -344,8 +344,11 @@ export async function placeOnMap(personId, address) {
     if (!q) continue
     const hit = await photonOne(q)
     if (!hit) continue
+    // A named building is a point; a bare city fallback is a wide guess and has
+    // to carry its width, or the map draws it as somebody's front door.
+    const radius_m = source.endsWith('-area') ? 2500 : null
     const { error } = await supabase.from('person_geo').upsert({
-      person_id: personId, lat: hit.lat, lng: hit.lng, source, geocoded_at: new Date().toISOString(),
+      person_id: personId, lat: hit.lat, lng: hit.lng, source, radius_m, geocoded_at: new Date().toISOString(),
     }, { onConflict: 'person_id' })
     if (error) return null
     return { ...hit, source }
