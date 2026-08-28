@@ -301,8 +301,12 @@ export default function HolderMap({ holders, onToast }) {
       // sweeps — so zooming in was undone a second later, over and over, and
       // the zoom button looked like it was zooming out. Changing the centre
       // filter hands down a new array, which is the one time a refit is wanted.
-      if (pts.length && !fixingRef.current && fittedRef.current !== holders) {
-        fittedRef.current = holders
+      // Keyed on WHO is shown, not on the array's identity: a centre filter
+      // rebuilds that array on every parent render, so comparing identity would
+      // refit constantly for anyone not on "All centres".
+      const fitKey = (holders || []).map((h) => h.id).join('|')
+      if (pts.length && !fixingRef.current && fittedRef.current !== fitKey) {
+        fittedRef.current = fitKey
         map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 })
       }
     }).catch((e) => setErr(e.message))
