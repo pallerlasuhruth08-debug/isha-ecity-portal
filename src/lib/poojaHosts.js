@@ -68,7 +68,7 @@ export async function listHoldersFor(date, type) {
 
   const [{ data: people, error }, optedOut] = await Promise.all([
     supabase.from('people')
-      .select('id, full_name, phone, area, street, city, pincode')
+      .select('id, full_name, phone, area, street, city, pincode, center_id')
       .eq(flag, true)
       .order('full_name', { ascending: true }),
     listOptOuts(),
@@ -164,7 +164,7 @@ export async function searchPeopleForHost(date, type, term) {
     ? `phone.ilike.%${digits}%,full_name.ilike.%${q}%`
     : `full_name.ilike.%${q}%`
   const { data, error } = await supabase.from('people')
-    .select('id, full_name, phone, area, street, city, pincode')
+    .select('id, full_name, phone, area, street, city, pincode, center_id')
     .or(filter)
     .order('full_name', { ascending: true })
     .limit(20)
