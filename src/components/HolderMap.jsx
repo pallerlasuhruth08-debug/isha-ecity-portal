@@ -120,9 +120,29 @@ export default function HolderMap({ holders, onToast }) {
       if (!alive || !boxRef.current) return
       if (!mapRef.current) {
         mapRef.current = L.map(boxRef.current).setView(EC, 12)
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 19, attribution: '© OpenStreetMap contributors',
-        }).addTo(mapRef.current)
+        // Three ways of looking at the same streets, because placing a pin on
+        // the right roof is a different job from seeing where people cluster.
+        // All three are free and keyless; none of them is satellite, because no
+        // sub-metre imagery is free to use without an account.
+        //   Standard   — the most building detail, best for finding a block.
+        //   Humanitarian — heavier on named landmarks and footpaths, which is
+        //                  how these addresses are actually written ("behind
+        //                  the CMC building", "opposite SBI").
+        //   Muted      — labels and little else, for reading the badges when
+        //                three of them overlap.
+        const bases = {
+          Standard: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19, attribution: '© OpenStreetMap contributors',
+          }),
+          Humanitarian: L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+            maxZoom: 19, attribution: '© OpenStreetMap contributors · style by Humanitarian OSM Team, hosted by OSM France',
+          }),
+          Muted: L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19, attribution: '© OpenStreetMap contributors © CARTO',
+          }),
+        }
+        bases.Standard.addTo(mapRef.current)
+        L.control.layers(bases, null, { position: 'topright' }).addTo(mapRef.current)
         // Clicking the map only means anything while a pin is being set.
         mapRef.current.on('click', (e) => {
           if (!fixingRef.current) return
