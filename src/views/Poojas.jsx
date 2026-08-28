@@ -232,7 +232,7 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
             <div className="scroll-tabs" role="tablist" aria-label="Pooja views"
               style={{ display: 'flex', gap: 8, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
               {[
-                { k: 'calls', label: 'Hosts to call' },
+                { k: 'calls', label: 'Space holders' },
                 { k: 'posted', label: 'Poojas posted', n: waiting },
                 { k: 'map', label: 'Map' },
               ].map((t) => (
@@ -305,7 +305,7 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
   )
 }
 
-// ── Hosts to call ──────────────────────────────────────────────────────────
+// ── Space holders ──────────────────────────────────────────────────────────
 
 function CallList({ date, types, onlyBoth = false, me, centre, centreFilter = 'all', isCoordinator, onToast }) {
   const [all, setAll] = useState(null)
