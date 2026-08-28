@@ -298,7 +298,8 @@ export async function updatePersonAddress(personId, { street, city, pincode }) {
   // The map used to do this itself for everybody at once, which meant a
   // volunteer had to sit on the map tab for two minutes and watch pins appear.
   // One address, one lookup, here, is the whole job.
-  await placeOnMap(personId, patch)
+  // A refused pin must not fail the save: the address is the thing worth keeping.
+  try { await placeOnMap(personId, patch) } catch { /* the pin can wait */ }
 }
 
 // Photon (photon.komoot.io) — OpenStreetMap data, no API key, and the only
@@ -329,7 +330,23 @@ async function photonOne(q) {
   } catch { return null } // offline, or the geocoder is down — the address is still saved
 }
 
-export async function placeOnMap(personId, address) {
+// A door number on its own is not an address. "Flat 203, Bengaluru" still
+// fuzzy-matches something within a kilometre, and that gets stored as a point —
+// a pin on a stranger's building, indistinguishable from a real one. One wrong
+// pin was survivable while addresses were placed one at a time; running this
+// over the whole list makes it systematic.
+const UNIT_WORD = /^(?:no|nos|flat|door|plot|site|villa|apt|apartment|house|block|wing|tower|floor|room|unit|sy|survey)$/i
+const isUnitOnly = (t) => !(t || '').split(/[\s,./#-]+/)
+  .some((w) => /^[a-z]{3,}$/i.test(w) && !UNIT_WORD.test(w))
+
+/**
+ * Place one person. `pointsOnly` refuses the city-level fallback: it is a 2.5km
+ * guess, which is WIDER than the postal-area circle most of these people
+ * already carry, so accepting it during a bulk run would make the map worse.
+ * Throws if the write is refused — a silently discarded result is how an
+ * earlier version of this appeared to work while doing nothing.
+ */
+export async function placeOnMap(personId, address, { pointsOnly = false } = {}) {
   const street = address?.street?.trim()
   const city = address?.city?.trim()
   if (!street && !city) return null
@@ -337,11 +354,12 @@ export async function placeOnMap(personId, address) {
   const tries = [
     [[street, city, 'Bengaluru'].filter(Boolean).join(', '), 'photon'],
     [seg.length > 1 ? seg.slice(0, 2).join(', ') + ', Bengaluru' : null, 'photon'],
-    [seg[0] ? seg[0] + ', Bengaluru' : null, 'photon'],
+    [seg[0] && !isUnitOnly(seg[0]) ? seg[0] + ', Bengaluru' : null, 'photon'],
     [city ? city + ', Bengaluru' : null, 'photon-area'],
   ]
   for (const [q, source] of tries) {
     if (!q) continue
+    if (pointsOnly && source.endsWith('-area')) continue
     const hit = await photonOne(q)
     if (!hit) continue
     // A named building is a point; a bare city fallback is a wide guess and has
@@ -350,10 +368,38 @@ export async function placeOnMap(personId, address) {
     const { error } = await supabase.from('person_geo').upsert({
       person_id: personId, lat: hit.lat, lng: hit.lng, source, radius_m, geocoded_at: new Date().toISOString(),
     }, { onConflict: 'person_id' })
-    if (error) return null
-    return { ...hit, source }
+    if (error) throw error
+    return { ...hit, source, radius_m }
   }
   return null
+}
+
+/**
+ * Ask the geocoder about everyone whose address has never been through it.
+ *
+ * Almost every holder on this map sits in a ward or postal-area circle not
+ * because their address is vague but because nothing ever looked it up: the
+ * street line was skipped and they were placed from the pincode. `placeOnMap`
+ * only ever ran when a volunteer typed an address into the app, so every
+ * imported address missed it. This is that missing pass.
+ *
+ * One request a second is Photon's usage policy — do not lower it. Anything the
+ * geocoder cannot resolve to a building keeps the circle it already has, which
+ * is why a miss is not an error here.
+ */
+export async function placeMissing(people, { onProgress, alive = () => true, gapMs = 1100 } = {}) {
+  let placed = 0
+  for (let i = 0; i < people.length; i++) {
+    if (!alive()) break
+    const p = people[i]
+    let hit = null
+    try { hit = await placeOnMap(p.id, p, { pointsOnly: true }) }
+    catch (e) { throw new Error(`Could not save a pin for ${p.full_name}: ${e.message || e}`) }
+    if (hit) placed++
+    onProgress?.({ done: i + 1, total: people.length, placed, person: p, hit })
+    if (i < people.length - 1 && alive()) await new Promise((r) => setTimeout(r, gapMs))
+  }
+  return placed
 }
 
 // A guest's private handle. Same shape the public RPC issues (32 hex), so a
