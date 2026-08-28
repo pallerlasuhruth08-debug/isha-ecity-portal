@@ -31,6 +31,9 @@ const LEAFLET_JS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
 // Electronic City, roughly — where the map opens before any pin is placed, and
 // the point every search is biased towards.
 const EC = [12.8452, 77.6602]
+// How wide "somewhere in Electronic City" is. Not a guess about one person —
+// it is the whole area, and it is drawn that way so nobody mistakes it for one.
+const EC_UNKNOWN = 4000
 
 // How far off a pin can be, in metres. `radius_m` on the row is the real answer
 // where we have it — a BBMP ward is 450m to 1.5km across, a postal area three or
@@ -163,9 +166,10 @@ export default function HolderMap({ holders, onToast }) {
       // locality alone shares one point exactly. Stacked markers hide each
       // other, so a point is drawn once and its popup names everybody on it.
       const spots = new Map()
+      const unplaced = []
       for (const h of holders || []) {
         const g = geo[h.id]
-        if (!g) continue
+        if (!g) { unplaced.push(h); continue }
         const key = `${g.lat.toFixed(5)},${g.lng.toFixed(5)},${g.source}`
         const spot = spots.get(key) || { lat: g.lat, lng: g.lng, source: g.source, spread: spreadOf(g), people: [] }
         spot.people.push(h)
@@ -217,6 +221,40 @@ export default function HolderMap({ holders, onToast }) {
           }).addTo(map)
         })
       }
+      // Everyone with no point at all: an address nothing could place, or no
+      // address to place. They were a number in the caption and nothing on the
+      // map, which let the map look finished while a third of the pool was
+      // missing from it. Grey, not amber, because amber means "we know roughly"
+      // and this means "nobody knows" — and over the whole of Electronic City,
+      // which is honestly the extent of what is known.
+      if (unplaced.length) {
+        pts.push(EC)
+        const n = unplaced.length
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="width:34px;height:34px;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);
+            border:2px dashed #6b7280;background:rgba(156,163,175,.30);
+            display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(30,30,35,.22)">
+            <span style="transform:rotate(45deg);font:700 13px/1 system-ui,sans-serif;color:#374151">${n}</span>
+          </div>`,
+          iconSize: [34, 34], iconAnchor: [17, 32], popupAnchor: [0, -30],
+        })
+        const lines = unplaced
+          .map((h) => `<b>${safe(h.full_name)}</b> · ${safe(h.phone || 'no number')}`
+            + ` — <i>${h.hasAddress ? 'address on record, nothing could place it' : 'no address on record'}</i>`)
+          .join('<br/>')
+        const marker = L.marker(EC, { icon }).addTo(layerRef.current)
+          .bindPopup(`<i>${n} ${n === 1 ? 'holder' : 'holders'} somewhere in Electronic City — nobody knows where.</i>`
+            + `<div style="max-height:170px;overflow:auto;margin-top:6px">${lines}</div>`)
+        marker.on('click', () => {
+          if (highlightRef.current) highlightRef.current.remove()
+          highlightRef.current = L.circle(EC, {
+            radius: EC_UNKNOWN, color: '#6b7280', weight: 1, dashArray: '4 4',
+            fillColor: '#9ca3af', fillOpacity: 0.10,
+          }).addTo(map)
+        })
+      }
+
       if (pts.length && !fixingRef.current) map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 })
     }).catch((e) => setErr(e.message))
     return () => { alive = false }
@@ -303,8 +341,8 @@ export default function HolderMap({ holders, onToast }) {
         <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
           {geo ? `${exact} placed exactly` : 'Loading pins…'}
           {rough > 0 && ` · ${rough} only to the neighbourhood`}
-          {unplaced > 0 && ` · ${unplaced} not found`}
-          {noAddress > 0 && ` · ${noAddress} with no address yet`}
+          {unplaced + noAddress > 0 && ` · ${unplaced + noAddress} only "in Electronic City"`}
+          {noAddress > 0 && ` (${noAddress} with no address at all)`}
         </div>
       </div>
 
@@ -378,8 +416,9 @@ export default function HolderMap({ holders, onToast }) {
 
       <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginTop: 8, lineHeight: 1.5 }}>
         Volunteers only — guests never see this. Pins show a name and number; the address stays on the person's record.
-        A plain pin is a confirmed home. A dashed badge is a count of people whose address is on record but whose
-        location nobody has confirmed — click it to see how wide that guess really is. Those extents are BBMP ward and
+        A plain pin is a confirmed home. An amber dashed badge is a count of people whose address is on record but whose
+        location nobody has confirmed — click it to see how wide that guess really is. A grey badge over Electronic City
+        holds everyone with no location at all; click it for the list, and who among them still needs an address. Those extents are BBMP ward and
         postal-area boundaries from <a href="https://github.com/datameet" target="_blank" rel="noreferrer">DataMeet</a>, CC BY-SA 2.5 IN.
       </div>
     </div>
