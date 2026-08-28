@@ -32,11 +32,17 @@ const LEAFLET_JS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
 // the point every search is biased towards.
 const EC = [12.8452, 77.6602]
 
-// How far off a pin can be. A lookup that only recognised the locality has put
-// the pin at the middle of a neighbourhood, which is not where anybody lives —
-// drawn as a circle so it never passes for a doorstep. A pin a volunteer placed
-// by hand ('manual') is the most trustworthy thing on this map.
-const spreadOf = (source) => (/-pincode$/.test(source) ? 1800 : /-area$/.test(source) ? 700 : 0)
+// How far off a pin can be, in metres. `radius_m` on the row is the real answer
+// where we have it — a BBMP ward is 450m to 1.5km across, a postal area three or
+// four — and it is drawn as a circle so it never passes for a doorstep. The
+// fallback is for older rows written before that column existed. Zero means a
+// point: a building-level match, or a pin a volunteer placed by hand, which is
+// the most trustworthy thing on this map.
+const spreadOf = (g) => (
+  g?.radius_m != null ? g.radius_m
+    : /-pincode$/.test(g?.source || '') ? 1800
+      : /-area$/.test(g?.source || '') ? 700 : 0
+)
 
 function loadLeaflet() {
   if (window.L) return Promise.resolve(window.L)
@@ -96,7 +102,7 @@ export default function HolderMap({ holders, onToast }) {
 
   useEffect(() => {
     let alive = true
-    supabase.from('person_geo').select('person_id, lat, lng, source').then(({ data, error }) => {
+    supabase.from('person_geo').select('person_id, lat, lng, source, radius_m').then(({ data, error }) => {
       if (!alive) return
       if (error) { setErr(error.message); return }
       const m = {}
@@ -134,7 +140,7 @@ export default function HolderMap({ holders, onToast }) {
         const g = geo[h.id]
         if (!g) continue
         const key = `${g.lat.toFixed(5)},${g.lng.toFixed(5)},${g.source}`
-        const spot = spots.get(key) || { lat: g.lat, lng: g.lng, source: g.source, people: [] }
+        const spot = spots.get(key) || { lat: g.lat, lng: g.lng, source: g.source, spread: spreadOf(g), people: [] }
         spot.people.push(h)
         spots.set(key, spot)
       }
@@ -142,7 +148,7 @@ export default function HolderMap({ holders, onToast }) {
       const pts = []
       for (const spot of spots.values()) {
         pts.push([spot.lat, spot.lng])
-        const spread = spreadOf(spot.source)
+        const spread = spot.spread
         // Name and number only. No address line — see the note at the top.
         const lines = spot.people
           .map((h) => `<b>${safe(h.full_name)}</b> · ${safe(h.phone || 'no number')}`)
@@ -151,7 +157,7 @@ export default function HolderMap({ holders, onToast }) {
           L.circle([spot.lat, spot.lng], {
             radius: spread, color: '#b06a1f', weight: 1, fillColor: '#e8a04a', fillOpacity: 0.15,
           }).addTo(layerRef.current)
-            .bindPopup(`${lines}<br/><i>Somewhere in this circle — nobody has placed the pin yet.</i>`)
+            .bindPopup(`${lines}<br/><i>Somewhere in this ${Math.round(spread * 2 / 100) / 10}km circle — the address only named a ${spot.source === 'pincode-area' ? 'postal area' : 'neighbourhood'}. Place the pin to fix it.</i>`)
         } else {
           L.marker([spot.lat, spot.lng]).addTo(layerRef.current).bindPopup(lines)
         }
@@ -209,7 +215,9 @@ export default function HolderMap({ holders, onToast }) {
     setSaving(true)
     const row = {
       person_id: fixing.id, lat: draft.lat, lng: draft.lng,
-      source: 'manual', geocoded_at: new Date().toISOString(),
+      // A hand-placed pin is a point. Clearing the radius is what turns the
+      // circle into a marker — leaving it would keep drawing the old guess.
+      source: 'manual', radius_m: null, geocoded_at: new Date().toISOString(),
     }
     const { error } = await supabase.from('person_geo').upsert(row, { onConflict: 'person_id' })
     setSaving(false)
@@ -220,16 +228,17 @@ export default function HolderMap({ holders, onToast }) {
   }, [fixing, draft, onToast, stopFixing])
 
   const all = holders || []
-  const exact = geo ? all.filter((h) => geo[h.id] && !spreadOf(geo[h.id].source)).length : 0
-  const rough = geo ? all.filter((h) => geo[h.id] && spreadOf(geo[h.id].source)).length : 0
+  const exact = geo ? all.filter((h) => geo[h.id] && !spreadOf(geo[h.id])).length : 0
+  const rough = geo ? all.filter((h) => geo[h.id] && spreadOf(geo[h.id])).length : 0
   const noAddress = all.filter((h) => !h.hasAddress).length
   const unplaced = all.length - exact - rough - noAddress
 
   // Who is worth a volunteer's minute: nobody has a pin, or the pin is only a
   // neighbourhood. Someone with no address at all needs a phone call, not a map.
   const needsPin = geo
-    ? all.filter((h) => h.hasAddress && (!geo[h.id] || spreadOf(geo[h.id].source)))
-      .sort((a, b) => (geo[a.id] ? 1 : 0) - (geo[b.id] ? 1 : 0) || String(a.full_name).localeCompare(String(b.full_name)))
+    ? all.filter((h) => h.hasAddress && (!geo[h.id] || spreadOf(geo[h.id])))
+      // Widest guess first: a four-kilometre circle is the one most worth a minute.
+      .sort((a, b) => (spreadOf(geo[b.id]) || 1e9) - (spreadOf(geo[a.id]) || 1e9) || String(a.full_name).localeCompare(String(b.full_name)))
     : []
 
   return (
@@ -302,7 +311,7 @@ export default function HolderMap({ holders, onToast }) {
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{h.full_name}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--muted-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {geo?.[h.id] ? 'neighbourhood only' : 'no pin'} · {[h.street, h.city].filter(Boolean).join(', ')}
+                    {geo?.[h.id] ? `within ${Math.round(spreadOf(geo[h.id]) * 2 / 100) / 10}km` : 'no pin'} · {[h.street, h.city].filter(Boolean).join(', ')}
                   </div>
                 </div>
                 <button className="btn btn-ghost" onClick={() => startFixing(h)}>Place</button>
@@ -315,6 +324,7 @@ export default function HolderMap({ holders, onToast }) {
       <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginTop: 8, lineHeight: 1.5 }}>
         Volunteers only — guests never see this. Pins show a name and number; the address stays on the person's record.
         A shaded circle means nobody has placed that pin yet — the person is somewhere inside it, not at its centre.
+        Those circles are BBMP ward and postal-area boundaries from <a href="https://github.com/datameet" target="_blank" rel="noreferrer">DataMeet</a>, CC BY-SA 2.5 IN.
       </div>
     </div>
   )
