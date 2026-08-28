@@ -17,8 +17,14 @@ export function eventDays(start, end) {
   return out
 }
 
+// The Asia/Kolkata calendar date -- NOT `toISOString().slice(0,10)`, which is the
+// UTC date and so does not roll over until 05:30 local. Everything that asks
+// "is it today yet?" -- event stages, series windows, attendance capture -- is
+// asking about the day as it is lived in Bangalore, and answering in UTC kept
+// the whole app on yesterday until half past five in the morning.
+const IST_TODAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' })
 export function todayISO() {
-  return new Date().toISOString().slice(0, 10)
+  return IST_TODAY.format(new Date())
 }
 
 // Day 0 = the day before the event's own first day (a setup/pre-event day some
