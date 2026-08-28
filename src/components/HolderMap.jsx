@@ -88,6 +88,7 @@ export default function HolderMap({ holders, onToast }) {
   const mapRef = useRef(null)
   const layerRef = useRef(null)
   const draftRef = useRef(null)
+  const highlightRef = useRef(null)
   const fixingRef = useRef(null)
   const [geo, setGeo] = useState(null)
   const [err, setErr] = useState(null)
@@ -130,6 +131,7 @@ export default function HolderMap({ holders, onToast }) {
       }
       const map = mapRef.current
       if (layerRef.current) layerRef.current.remove()
+      if (highlightRef.current) { highlightRef.current.remove(); highlightRef.current = null }
       layerRef.current = L.layerGroup().addTo(map)
 
       // Several holders share one apartment complex, and everyone placed by
@@ -153,15 +155,46 @@ export default function HolderMap({ holders, onToast }) {
         const lines = spot.people
           .map((h) => `<b>${safe(h.full_name)}</b> · ${safe(h.phone || 'no number')}`)
           .join('<br/>')
-        if (spread) {
-          L.circle([spot.lat, spot.lng], {
-            radius: spread, color: '#b06a1f', weight: 1, fillColor: '#e8a04a', fillOpacity: 0.15,
-          }).addTo(layerRef.current)
-            .bindPopup(`${lines}<br/><i>Somewhere in this ${Math.round(spread * 2 / 100) / 10}km circle — the address only named a ${spot.source === 'pincode-area' ? 'postal area' : 'neighbourhood'}. Place the pin to fix it.</i>`)
-        } else {
+
+        if (!spread) {
+          // A confirmed location. The ordinary pin means exactly one thing on
+          // this map: somebody's home is here.
           L.marker([spot.lat, spot.lng]).addTo(layerRef.current).bindPopup(lines)
+          continue
         }
+
+        // Everyone else. Painting the extent as a filled circle was honest and
+        // unreadable: four postal areas overlapping is a wash of orange with the
+        // streets hidden underneath, and thirty-four people look the same as
+        // three. So the default mark is a badge that says how many are in there
+        // and, by being obviously not a pin, that nobody has said where. The
+        // circle is still the truth — it is one click away, on the badge.
+        const km = Math.round(spread * 2 / 100) / 10
+        const n = spot.people.length
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="width:34px;height:34px;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);
+            border:2px dashed #b06a1f;background:rgba(232,160,74,.28);
+            display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(60,40,20,.25)">
+            <span style="transform:rotate(45deg);font:700 13px/1 system-ui,sans-serif;color:#7a4610">${n}</span>
+          </div>`,
+          iconSize: [34, 34], iconAnchor: [17, 32], popupAnchor: [0, -30],
+        })
+        const where = spot.source === 'pincode-area' ? 'postal area' : 'neighbourhood'
+        const marker = L.marker([spot.lat, spot.lng], { icon }).addTo(layerRef.current)
+          .bindPopup(`<i>${n} ${n === 1 ? 'holder' : 'holders'} somewhere in this ${km}km ${where} — not at this point.</i>
+            <br/>Their addresses are on record; nobody has placed them yet.<br/><br/>${lines}`)
+        marker.on('click', () => {
+          if (highlightRef.current) highlightRef.current.remove()
+          highlightRef.current = L.circle([spot.lat, spot.lng], {
+            radius: spread, color: '#b06a1f', weight: 1, dashArray: '4 4',
+            fillColor: '#e8a04a', fillOpacity: 0.12,
+          }).addTo(map)
+        })
       }
+      map.on('popupclose', () => {
+        if (highlightRef.current) { highlightRef.current.remove(); highlightRef.current = null }
+      })
       if (pts.length && !fixingRef.current) map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 })
     }).catch((e) => setErr(e.message))
     return () => { alive = false }
@@ -323,8 +356,9 @@ export default function HolderMap({ holders, onToast }) {
 
       <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginTop: 8, lineHeight: 1.5 }}>
         Volunteers only — guests never see this. Pins show a name and number; the address stays on the person's record.
-        A shaded circle means nobody has placed that pin yet — the person is somewhere inside it, not at its centre.
-        Those circles are BBMP ward and postal-area boundaries from <a href="https://github.com/datameet" target="_blank" rel="noreferrer">DataMeet</a>, CC BY-SA 2.5 IN.
+        A plain pin is a confirmed home. A dashed badge is a count of people whose address is on record but whose
+        location nobody has confirmed — click it to see how wide that guess really is. Those extents are BBMP ward and
+        postal-area boundaries from <a href="https://github.com/datameet" target="_blank" rel="noreferrer">DataMeet</a>, CC BY-SA 2.5 IN.
       </div>
     </div>
   )
