@@ -123,6 +123,11 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
   const [ptype, setPtype] = useState('all')
   const [err, setErr] = useState(null)
   const [centre, setCentre] = useState('')
+  // Which centre's holders to show. Separate from `centre` above, which is the
+  // centre a confirmed pooja gets filed under — that must stay a real centre
+  // even while the list is showing everybody.
+  const [centres, setCentres] = useState([])
+  const [centreFilter, setCentreFilter] = useState('all')
   const [creating, setCreating] = useState(false)
   // Guests waiting on a yes/no, across every pooja still ahead. Sits on the tab
   // so it is answerable at a glance — see countWaitingGuests().
@@ -151,10 +156,16 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
 
   const myCentre = me?.center_id
   useEffect(() => {
-    supabase.from('centers').select('id, name').eq('active', true).then(({ data }) => {
+    supabase.from('centers').select('id, name').eq('active', true).order('name').then(({ data }) => {
       const real = (data || []).filter((c) => !['all', 'unassigned'].includes(c.id))
       const mine = myCentre && !['all', 'unassigned'].includes(myCentre) ? myCentre : ''
       setCentre(mine || real[0]?.id || '')
+      // 'unassigned' stays in the filter list. It is a real place people sit in
+      // the data, and leaving it out would hide them from every choice but
+      // "All centres" without saying so.
+      setCentres((data || []).filter((c) => c.id !== 'all'))
+      // A volunteer's own centre is the list they actually work, so open there.
+      if (mine) setCentreFilter(mine)
     })
   }, [myCentre])
 
@@ -246,14 +257,21 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
             )}
           </div>
 
-          {tab === 'calls' && (
+          {(tab === 'calls' || tab === 'map') && (
             <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+              <select aria-label="Centre" style={filterSelect} value={centreFilter} onChange={(e) => setCentreFilter(e.target.value)}>
+                <option value="all">All centres</option>
+                {centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
+              </select>
+              {tab === 'calls' && (
               <select aria-label="Pooja type" style={filterSelect} value={ptype} onChange={(e) => setPtype(e.target.value)}>
                 <option value="all">All holders</option>
                 <option value="sannidhi">Sannidhi holders</option>
                 <option value="yantra">Yantra holders</option>
                 <option value="both">Holds both</option>
               </select>
+              )}
+              {tab === 'calls' && (
               <select aria-label="Pooja date" style={filterSelect}
                 value={selected?.date || ''}
                 onChange={(e) => setSelected(shownDates.find((d) => d.date === e.target.value) || null)}>
@@ -263,6 +281,7 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
                   </option>
                 ))}
               </select>
+              )}
             </div>
           )}
 
@@ -271,10 +290,11 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
           )}
           {tab === 'calls' && selected && (
             <CallList date={selected.date} types={shownTypes} onlyBoth={ptype === 'both'}
-              me={me} centre={centre} isCoordinator={isCoordinator} onToast={onToast} />
+              me={me} centre={centre} centreFilter={centreFilter}
+              isCoordinator={isCoordinator} onToast={onToast} />
           )}
           {tab === 'posted' && <PostedPoojas me={me} isCoordinator={isCoordinator} onToast={onToast} onCountsChanged={refreshWaiting} />}
-          {tab === 'map' && <MapTab onToast={onToast} />}
+          {tab === 'map' && <MapTab centreFilter={centreFilter} onToast={onToast} />}
         </>
       )}
 
@@ -287,7 +307,7 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
 
 // ── Hosts to call ──────────────────────────────────────────────────────────
 
-function CallList({ date, types, onlyBoth = false, me, centre, isCoordinator, onToast }) {
+function CallList({ date, types, onlyBoth = false, me, centre, centreFilter = 'all', isCoordinator, onToast }) {
   const [all, setAll] = useState(null)
   const [err, setErr] = useState(null)
   // types is a fresh array each render; key on its content or the load loops.
@@ -305,7 +325,10 @@ function CallList({ date, types, onlyBoth = false, me, centre, isCoordinator, on
 
   // "Holds both" is a filter on people, applied after the fetch — the query is
   // per pooja type and cannot express "has two of them".
-  const rows = onlyBoth ? all.filter((r) => r.types.length > 1) : all
+  const byBoth = onlyBoth ? all.filter((r) => r.types.length > 1) : all
+  // Centre is a filter on people, applied after the fetch for the same reason:
+  // one small request per date, narrowed in memory.
+  const rows = centreFilter === 'all' ? byBoth : byBoth.filter((r) => r.center_id === centreFilter)
   const total = rows.length
   const answered = rows.filter((r) => r.answered).length
 
@@ -782,17 +805,19 @@ function ShareAll({ rows, onToast }) {
   )
 }
 
-function MapTab({ onToast }) {
+function MapTab({ centreFilter = 'all', onToast }) {
   const [holders, setHolders] = useState(null)
   useEffect(() => {
     supabase.from('people')
-      .select('id, full_name, phone, street, city, pincode')
+      .select('id, full_name, phone, street, city, pincode, center_id')
       .or('has_sadhguru_sannidhi.eq.true,has_devi_yantra.eq.true')
       .then(({ data }) => setHolders((data || []).map((p) => ({ ...p, hasAddress: !!(p.street && p.street.trim()) }))))
   }, [])
   if (!holders) return <Loading label="Loading holders…" />
+  const shown = centreFilter === 'all' ? holders : holders.filter((p) => p.center_id === centreFilter)
   if (!holders.length) return <Empty label="No holders on record yet — nothing to map." />
-  return <HolderMap holders={holders} onToast={onToast} />
+  if (!shown.length) return <Empty label="No holders at that centre — pick another, or All centres." />
+  return <HolderMap holders={shown} onToast={onToast} />
 }
 
 function PoojaRow({ pooja, me, isCoordinator, expanded, onToggle, onChanged, onToast }) {
