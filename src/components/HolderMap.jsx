@@ -43,7 +43,11 @@ const EC_UNKNOWN = 4000
 // alone. Rows written before this shipped carry an older stamp (or none), so
 // this constant is the line between "never asked with this code" and "asked, and
 // the answer was no". Move it only to force a re-sweep of everybody.
-const SWEPT_AFTER = '2026-08-28T13:00:00Z'
+// NOTE: this must be in the PAST. It was first set nine minutes into the future,
+// which meant every stamp written compared as older than it, nothing ever counted
+// as asked, and the sweep ran the same forty-five hopeless lookups on every
+// single page load — the exact thing the stamp exists to prevent.
+const SWEPT_AFTER = '2026-08-28T00:00:00Z'
 const asked = (g) => !!(g?.geocoded_at && g.geocoded_at > SWEPT_AFTER)
 
 // How far off a pin can be, in metres. `radius_m` on the row is the real answer
@@ -411,7 +415,12 @@ export default function HolderMap({ holders, onToast }) {
           // A miss. Record that we asked, so tomorrow's page load does not ask
           // again — the whole point of doing this without a button.
           if (!geoRef.current?.[person.id]) return  // nothing to stamp; retried next session
-          try { await markAsked(person.id) } catch { /* the circle is still right */ }
+          try { await markAsked(person.id) } catch (e) {
+            // Swallowing this is how the sweep silently becomes permanent: the
+            // lookups still run tomorrow, and nothing says why.
+            setErr('Pins can be read but not updated on this account, so these lookups will run again next time: ' + (e.message || e))
+            return
+          }
           if (aliveRef.current) setGeo((g) => ({ ...(g || {}), [person.id]: { ...g[person.id], geocoded_at: stamp } }))
         },
       })
