@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { placeMissing } from '../lib/poojaHosts'
+import { placeMissing, markAsked, clearPin } from '../lib/poojaHosts'
 
 // Where the holders are. VOLUNTEER-ONLY — this screen is never reachable
 // without a login, and no guest-facing page imports it.
@@ -35,6 +35,16 @@ const EC = [12.8452, 77.6602]
 // How wide "somewhere in Electronic City" is. Not a guess about one person —
 // it is the whole area, and it is drawn that way so nobody mistakes it for one.
 const EC_UNKNOWN = 4000
+
+// Everything the geocoder is ever going to place, it places the first time it is
+// asked. Re-asking on every page load would spend a minute a time to change
+// nothing, so a miss has to be remembered — and there is nowhere to record one
+// except `geocoded_at`, which a miss now stamps while leaving the placement
+// alone. Rows written before this shipped carry an older stamp (or none), so
+// this constant is the line between "never asked with this code" and "asked, and
+// the answer was no". Move it only to force a re-sweep of everybody.
+const SWEPT_AFTER = '2026-08-28T13:00:00Z'
+const asked = (g) => !!(g?.geocoded_at && g.geocoded_at > SWEPT_AFTER)
 
 // How far off a pin can be, in metres. `radius_m` on the row is the real answer
 // where we have it — a BBMP ward is 450m to 1.5km across, a postal area three or
@@ -104,13 +114,19 @@ export default function HolderMap({ holders, onToast }) {
   const [saving, setSaving] = useState(false)
   const [bulk, setBulk] = useState(null)      // {done,total,placed} while the sweep runs
   const aliveRef = useRef(true)
+  const sweptRef = useRef(false)
+  const geoRef = useRef(null)
+  const holdersRef = useRef(null)
+  const startFixingRef = useRef(null)
+  useEffect(() => { geoRef.current = geo }, [geo])
+  useEffect(() => { holdersRef.current = holders }, [holders])
   useEffect(() => () => { aliveRef.current = false }, [])
 
   useEffect(() => { fixingRef.current = fixing }, [fixing])
 
   useEffect(() => {
     let alive = true
-    supabase.from('person_geo').select('person_id, lat, lng, source, radius_m').then(({ data, error }) => {
+    supabase.from('person_geo').select('person_id, lat, lng, source, radius_m, geocoded_at').then(({ data, error }) => {
       if (!alive) return
       if (error) { setErr(error.message); return }
       const m = {}
@@ -160,6 +176,18 @@ export default function HolderMap({ holders, onToast }) {
         mapRef.current.on('popupclose', () => {
           if (highlightRef.current) { highlightRef.current.remove(); highlightRef.current = null }
         })
+        // Popup content is an HTML string, so its button has to be wired when
+        // the popup opens. Registered once, here, like the handler above.
+        mapRef.current.on('popupopen', (e) => {
+          const el = e.popup.getElement()
+          if (!el) return
+          for (const b of el.querySelectorAll('[data-fix]')) {
+            b.addEventListener('click', () => {
+              const h = (holdersRef.current || []).find((x) => String(x.id) === b.dataset.fix)
+              if (h) { mapRef.current.closePopup(); startFixingRef.current?.(h) }
+            })
+          }
+        })
       }
       const map = mapRef.current
       if (layerRef.current) layerRef.current.remove()
@@ -191,8 +219,16 @@ export default function HolderMap({ holders, onToast }) {
 
         if (!spread) {
           // A confirmed location. The ordinary pin means exactly one thing on
-          // this map: somebody's home is here.
-          L.marker([spot.lat, spot.lng]).addTo(layerRef.current).bindPopup(lines)
+          // this map: somebody's home is here — which is why a wrong one has to
+          // be challengeable from the pin itself. Until this button existed a
+          // bad pin could not be removed by anybody: one holder sat sixty
+          // kilometres east of Electronic City with no way to say so.
+          const body = spot.people
+            .map((h) => `<div style="margin:2px 0">${safe(h.full_name)} · ${safe(h.phone || 'no number')}`
+              + ` <button data-fix="${safe(h.id)}" style="margin-left:4px;border:0;background:none;`
+              + `color:#b06a1f;text-decoration:underline;cursor:pointer;font:inherit;font-size:11.5px">not here?</button></div>`)
+            .join('')
+          L.marker([spot.lat, spot.lng]).addTo(layerRef.current).bindPopup(body)
           continue
         }
 
@@ -303,6 +339,10 @@ export default function HolderMap({ holders, onToast }) {
     setQuery([h.street, h.city].filter(Boolean).join(', ').slice(0, 120))
   }, [geo])
 
+  // The map's popup handler is registered once and would otherwise close over
+  // the first startFixing it ever saw.
+  useEffect(() => { startFixingRef.current = startFixing }, [startFixing])
+
   const stopFixing = useCallback(() => {
     setFixing(null); setDraft(null); setResults(null); setQuery('')
   }, [])
@@ -324,6 +364,18 @@ export default function HolderMap({ holders, onToast }) {
     stopFixing()
   }, [fixing, draft, onToast, stopFixing])
 
+  const removePin = useCallback(async () => {
+    if (!fixing) return
+    setSaving(true)
+    try {
+      await clearPin(fixing.id)
+      setGeo((g) => { const n = { ...(g || {}) }; delete n[fixing.id]; return n })
+      onToast?.(`${fixing.full_name}'s pin is gone. They are in the Electronic City circle until someone places them.`)
+      stopFixing()
+    } catch (e) { setErr('Could not remove the pin: ' + (e.message || e)) }
+    finally { setSaving(false) }
+  }, [fixing, onToast, stopFixing])
+
   // Ask the geocoder about every address that has never been through it. Almost
   // everyone here is in a ward or postal circle because the street line was
   // skipped and they were placed from the pincode alone — not because the
@@ -335,16 +387,23 @@ export default function HolderMap({ holders, onToast }) {
     try {
       const placed = await placeMissing(list, {
         alive: () => aliveRef.current,
-        onProgress: ({ done, total, placed: n, person, hit }) => {
+        onProgress: async ({ done, total, placed: n, person, hit }) => {
           if (!aliveRef.current) return
           setBulk({ done, total, placed: n })
-          if (hit) setGeo((g) => ({ ...(g || {}), [person.id]: { lat: hit.lat, lng: hit.lng, source: hit.source, radius_m: hit.radius_m ?? null } }))
+          const stamp = new Date().toISOString()
+          if (hit) {
+            setGeo((g) => ({ ...(g || {}), [person.id]: { lat: hit.lat, lng: hit.lng, source: hit.source, radius_m: hit.radius_m ?? null, geocoded_at: stamp } }))
+            return
+          }
+          // A miss. Record that we asked, so tomorrow's page load does not ask
+          // again — the whole point of doing this without a button.
+          if (!geoRef.current?.[person.id]) return  // nothing to stamp; retried next session
+          try { await markAsked(person.id) } catch { /* the circle is still right */ }
+          if (aliveRef.current) setGeo((g) => ({ ...(g || {}), [person.id]: { ...g[person.id], geocoded_at: stamp } }))
         },
       })
       if (!aliveRef.current) return
-      onToast?.(placed
-        ? `${placed} of ${list.length} placed at the building. The rest kept their circle — those need a person who has been there.`
-        : 'The geocoder could not place any of them. They keep the circles they had.')
+      if (placed) onToast?.(`${placed} of ${list.length} placed at the building. The rest need someone who has been there.`)
     } catch (e) {
       // A refused write, not a miss. Say so: an earlier version of this swept
       // the whole list, had every result discarded by RLS, and looked fine.
@@ -353,6 +412,18 @@ export default function HolderMap({ holders, onToast }) {
       if (aliveRef.current) setBulk(null)
     }
   }, [onToast])
+
+  // Run it on open, not on a button. Only people never asked with this code are
+  // in the list, so the first load after this ships does one pass and every load
+  // after it does nothing at all. The map is already drawn by the time this
+  // starts — pins drop in behind it, and nothing waits on it.
+  useEffect(() => {
+    if (!geo || !holders || sweptRef.current) return
+    const todo = holders.filter((h) => h.hasAddress && !asked(geo[h.id]) && (!geo[h.id] || spreadOf(geo[h.id])))
+    if (!todo.length) return
+    sweptRef.current = true
+    runSweep(todo)
+  }, [geo, holders, runSweep])
 
   const all = holders || []
   const exact = geo ? all.filter((h) => geo[h.id] && !spreadOf(geo[h.id])).length : 0
@@ -420,6 +491,13 @@ export default function HolderMap({ holders, onToast }) {
               {saving ? 'Saving…' : draft ? 'Save this spot' : 'Pick a spot first'}
             </button>
             <button className="btn btn-ghost" onClick={stopFixing}>Cancel</button>
+            {geo?.[fixing.id] && (
+              <button className="btn btn-ghost" disabled={saving} onClick={removePin}
+                style={{ marginLeft: 'auto', color: '#b3261e' }}
+                title="Take this pin off the map — better nothing than a pin on the wrong house">
+                Remove this pin
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -430,21 +508,15 @@ export default function HolderMap({ holders, onToast }) {
         <div style={{ marginTop: 12 }}>
           <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>
             {needsPin.length} {needsPin.length === 1 ? 'holder is' : 'holders are'} not placed properly.
-            Most of them are in a circle because nobody ever looked their address up, not because it is vague —
-            try the geocoder first, and hand-place whatever it cannot find.
+            The geocoder has already been asked about these and could not find them — a door number and a
+            landmark is not something it can resolve. Someone who has been there can, in one click each.
           </div>
-          <div style={{ marginBottom: 8 }}>
-            <button className="btn btn-primary" disabled={!!bulk} onClick={() => runSweep(needsPin)}>
-              {bulk
-                ? `Looking up ${bulk.done} of ${bulk.total}… ${bulk.placed} placed`
-                : `Look up ${needsPin.length} ${needsPin.length === 1 ? 'address' : 'addresses'}`}
-            </button>
-            {bulk && (
-              <span style={{ fontSize: 11.5, color: 'var(--muted-2)', marginLeft: 10 }}>
-                One a second — that is the geocoder&apos;s rule. Leaving this screen stops it; what is placed stays placed.
-              </span>
-            )}
-          </div>
+          {bulk && (
+            <div style={{ fontSize: 11.5, color: 'var(--muted-2)', marginBottom: 8 }}>
+              Looking up {bulk.done} of {bulk.total} in the background · {bulk.placed} placed.
+              One a second — that is the geocoder&apos;s rule. Nothing here is waiting on it.
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 190, overflowY: 'auto' }}>
             {needsPin.map((h) => (
               <div key={h.id} style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', padding: '6px 2px', borderBottom: '1px solid var(--border)' }}>
