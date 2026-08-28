@@ -128,6 +128,11 @@ export default function HolderMap({ holders, onToast }) {
           if (!fixingRef.current) return
           setDraft({ lat: e.latlng.lat, lng: e.latlng.lng })
         })
+        // Registered once, here. Hanging this off the redraw effect instead
+        // added a fresh listener every time the centre filter changed.
+        mapRef.current.on('popupclose', () => {
+          if (highlightRef.current) { highlightRef.current.remove(); highlightRef.current = null }
+        })
       }
       const map = mapRef.current
       if (layerRef.current) layerRef.current.remove()
@@ -192,9 +197,6 @@ export default function HolderMap({ holders, onToast }) {
           }).addTo(map)
         })
       }
-      map.on('popupclose', () => {
-        if (highlightRef.current) { highlightRef.current.remove(); highlightRef.current = null }
-      })
       if (pts.length && !fixingRef.current) map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 })
     }).catch((e) => setErr(e.message))
     return () => { alive = false }
