@@ -226,7 +226,7 @@ function Portal({ profile, email, sections }) {
   const content = useMemo(() => {
     switch (activeView) {
       case 'dashboard':
-        return <Dashboard me={profile} onNavigate={setView} onOpenList={openList} onOpenEvent={openEventHub} />
+        return <Dashboard me={profile} sections={sections} isAdmin={isAdmin} onNavigate={setView} onOpenList={openList} onOpenEvent={openEventHub} />
       case 'volunteers':
         return <Volunteers me={profile} onToast={showToast} onNavigate={setView} preset={presetFor('volunteers')} onPresetConsumed={clearPreset} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
       case 'campaigns':
@@ -256,7 +256,7 @@ function Portal({ profile, email, sections }) {
       default:
         return <Placeholder view={activeView} title={TAB_LABELS[activeView]} />
     }
-  }, [activeView, showToast, isCoordinator, canWorkPoojas, isAdmin, profile, pendingEventId, requestCreate, openEventHub, openCampaign, startCampaignForEvent, endCampaignDraft, campaignDraft, recipientDraft, startAddRecipients, endRecipientDraft, pendingInterestEventId, pendingCampaignId, pendingHubEventId, openList, presetFor, clearPreset])
+  }, [activeView, showToast, isCoordinator, canWorkPoojas, isAdmin, sections, profile, pendingEventId, requestCreate, openEventHub, openCampaign, startCampaignForEvent, endCampaignDraft, campaignDraft, recipientDraft, startAddRecipients, endRecipientDraft, pendingInterestEventId, pendingCampaignId, pendingHubEventId, openList, presetFor, clearPreset])
 
   // Event Hub's "+ Create event" lives in the Topbar on desktop (right side, same
   // row as the title) — only shown while Hub is showing the event LIST (not a
