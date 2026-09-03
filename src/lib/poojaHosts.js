@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { checkMobile } from './phone'
-import { istIso } from './poojaWrites'
+import { istIso, listPoojas } from './poojaWrites'
 
 // Host-side of pooja hosting: the dates Isha publishes, the holders eligible on
 // each date, and what came back when a volunteer rang them.
@@ -442,4 +442,62 @@ export async function addGuestByPhone(activityId, { name, phone, party = 1, by =
   }).select('id, token').single()
   if (error) throw error
   return data
+}
+
+/**
+ * The Consecrated spaces report for the Dashboard: where the calling stands for
+ * the NEXT date of each pooja type, plus the queue and the cold list.
+ *
+ * Next date only, not the month. Confirmation is per date (see the hosting
+ * flow), so "how is the calling going" is a question about one evening; a
+ * month of rows would be a plan, and the Dashboard is a worklist.
+ *
+ * `centreId` narrows holders and posted poojas to that centre; null shows all.
+ * Reuses listHoldersFor / listPoojas rather than new queries so the numbers
+ * here can never disagree with the screen the buttons open.
+ */
+export async function poojaDashboardReport({ centreId = null } = {}) {
+  const inCentre = (row) => !centreId || row.center_id === centreId
+
+  const dates = await listPoojaDates({ limit: 20 })
+  const nextOf = (type) => dates.find((d) => d.types.includes(type))?.date || null
+  const next = { sannidhi: nextOf('sannidhi'), yantra: nextOf('yantra') }
+
+  const [holderLists, everCalled, poojas] = await Promise.all([
+    Promise.all(Object.keys(POOJA_TYPES).map((t) => (next[t] ? listHoldersFor(next[t], t) : Promise.resolve([])))),
+    supabase.from('pooja_host_outreach').select('person_id').then(({ data, error }) => {
+      if (error) throw error
+      return new Set((data || []).map((r) => r.person_id))
+    }),
+    listPoojas(),
+  ])
+
+  const byType = {}
+  const everyHolder = new Map()
+  Object.keys(POOJA_TYPES).forEach((t, i) => {
+    const rows = holderLists[i].filter(inCentre)
+    rows.forEach((r) => everyHolder.set(r.id, r))
+    const outcome = (o) => rows.filter((r) => r.outreach?.outcome === o).length
+    byType[t] = {
+      date: next[t],
+      eligible: rows.length,
+      called: rows.filter((r) => r.outreach).length,
+      yes: outcome('confirmed'),
+      declined: outcome('declined'),
+      noAnswer: outcome('no_answer'),
+      posted: rows.filter((r) => r.listing).length,
+      // A yes with no address on file cannot be published — it is a call to make.
+      yesNoAddress: rows.filter((r) => r.outreach?.outcome === 'confirmed' && !r.hasAddress).length,
+    }
+  })
+
+  const live = poojas.filter((p) => p.status !== 'cancelled' && inCentre(p))
+  return {
+    byType,
+    neverContacted: [...everyHolder.values()].filter((h) => !everCalled.has(h.id)).length,
+    guestsWaiting: live.reduce((n, p) => n + (p.pending_count || 0), 0),
+    postedUpcoming: live.length,
+    seatsLeft: live.reduce((n, p) => n + (p.seats_left || 0), 0),
+    postedEmpty: live.filter((p) => !p.approved_headcount).length,
+  }
 }
