@@ -161,6 +161,12 @@ function Portal({ profile, email, sections }) {
   // this only decides which controls to render.)
   const isCoordinator = ['admin', 'sector_nurturer', 'center_coordinator'].includes(profile?.role)
   const isAdmin = profile?.role === 'admin'
+  // Consecrated spaces is the one screen where "may open it" and "may work it" are
+  // the same thing: the tab IS the call list, and a role granted it (a temple-
+  // offerings POC, say) exists to ring holders, record a yes and approve guests.
+  // Gating those buttons on the three built-in coordinator keys left every
+  // admin-created role with a read-only page. RLS still decides server-side.
+  const canWorkPoojas = isCoordinator || (sections || []).includes('poojas')
 
   // Tabs come from the role's granted sections (admin sees all + Admin). Data
   // scope is separately enforced by RLS (centre) + can_see_section — this is the
@@ -240,7 +246,7 @@ function Portal({ profile, email, sections }) {
       case 'hub':
         return <Hub me={profile} isCoordinator={isCoordinator} onToast={showToast} openEventId={pendingHubEventId} onEventConsumed={() => setPendingHubEventId(null)} onOpenCampaign={openCampaign} onStartCampaign={startCampaignForEvent} onOpenInterestInbox={(id) => { setPendingInterestEventId(id); setView('interest') }} onListModeChange={setHubListMode} onCreateEvent={isCoordinator ? () => requestCreate(null, 'hub') : undefined} />
       case 'poojas':
-        return <Poojas me={profile} isCoordinator={isCoordinator} onToast={showToast} />
+        return <Poojas me={profile} isCoordinator={canWorkPoojas} onToast={showToast} />
       case 'unresolved':
         return <Unresolved me={profile} isCoordinator={isCoordinator} onToast={showToast} />
       case 'admin':
@@ -250,7 +256,7 @@ function Portal({ profile, email, sections }) {
       default:
         return <Placeholder view={activeView} title={TAB_LABELS[activeView]} />
     }
-  }, [activeView, showToast, isCoordinator, isAdmin, profile, pendingEventId, requestCreate, openEventHub, openCampaign, startCampaignForEvent, endCampaignDraft, campaignDraft, recipientDraft, startAddRecipients, endRecipientDraft, pendingInterestEventId, pendingCampaignId, pendingHubEventId, openList, presetFor, clearPreset])
+  }, [activeView, showToast, isCoordinator, canWorkPoojas, isAdmin, profile, pendingEventId, requestCreate, openEventHub, openCampaign, startCampaignForEvent, endCampaignDraft, campaignDraft, recipientDraft, startAddRecipients, endRecipientDraft, pendingInterestEventId, pendingCampaignId, pendingHubEventId, openList, presetFor, clearPreset])
 
   // Event Hub's "+ Create event" lives in the Topbar on desktop (right side, same
   // row as the title) — only shown while Hub is showing the event LIST (not a
