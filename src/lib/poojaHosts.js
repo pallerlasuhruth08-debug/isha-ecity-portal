@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { checkMobile } from './phone'
 import { istIso, listPoojas } from './poojaWrites'
+import { summariseUpcoming, hostingHistory as historyFromListings } from './poojaSummary'
 
 // Host-side of pooja hosting: the dates Isha publishes, the holders eligible on
 // each date, and what came back when a volunteer rang them.
@@ -178,7 +179,7 @@ async function decorate(rows, date, type) {
   const ids = rows.map((p) => p.id)
   const [{ data: outreach }, { data: listings }] = await Promise.all([
     supabase.from('pooja_host_outreach')
-      .select('person_id, outcome, note, activity_id, decided_at')
+      .select('person_id, outcome, note, activity_id, decided_at, decided_by')
       .eq('pooja_date', date).eq('pooja_type', type).in('person_id', ids),
     supabase.from('pooja_listings')
       .select('activity_id, host_person_id, status, seats, area, starts_at')
@@ -500,4 +501,139 @@ export async function poojaDashboardReport({ centreId = null } = {}) {
     seatsLeft: live.reduce((n, p) => n + (p.seats_left || 0), 0),
     postedEmpty: live.filter((p) => !p.approved_headcount).length,
   }
+}
+
+// ── Who called, who hosted, what was said ─────────────────────────────────
+
+/** Display names for profile ids — "Called by Priya", not a uuid. */
+export async function callerNames(ids) {
+  const want = [...new Set((ids || []).filter(Boolean))]
+  if (!want.length) return {}
+  const { data, error } = await supabase.from('profiles').select('id, full_name, email').in('id', want)
+  if (error) throw error
+  return Object.fromEntries((data || []).map((p) => [p.id, p.full_name || p.email || 'Someone']))
+}
+
+/**
+ * { person_id: { count, last } } for everyone who has hosted before — the
+ * "Hosted 3× · last 14 Jul" badge. One query for the whole call list.
+ */
+export async function hostingHistory(personIds) {
+  const ids = [...new Set((personIds || []).filter(Boolean))]
+  if (!ids.length) return {}
+  const { data, error } = await supabase.from('pooja_listings')
+    .select('host_person_id, starts_at, status')
+    .in('host_person_id', ids)
+    .lt('starts_at', new Date().toISOString())
+  if (error) throw error
+  return historyFromListings(data || [])
+}
+
+// Notes and help asks live in pooja_host_notes — one thread per person, every
+// entry kept with its author. See supabase/migrations/20260903_pooja_host_notes.sql.
+export const NOTE_KINDS = {
+  note: { label: 'Note', help: false },
+  help_setup: { label: 'Needs help setting up', help: true },
+  help_materials: { label: 'Needs pooja materials', help: true },
+  follow_up: { label: 'Needs a follow-up call', help: true },
+  other: { label: 'Needs help — other', help: true },
+}
+const NOTE_COLS = 'id, person_id, kind, body, author_id, created_at, resolved_at, resolved_by'
+
+export async function listHostNotes(personId) {
+  const { data, error } = await supabase.from('pooja_host_notes')
+    .select(NOTE_COLS).eq('person_id', personId).order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+export async function addHostNote(personId, { kind = 'note', body, by = null }) {
+  const text = (body || '').trim()
+  if (!text) throw new Error('Write something first.')
+  if (!NOTE_KINDS[kind]) throw new Error(`Unknown note kind: ${kind}`)
+  const { error } = await supabase.from('pooja_host_notes')
+    .insert({ person_id: personId, kind, body: text, author_id: by })
+  if (error) throw error
+}
+
+export async function resolveHostNote(id, { by = null, resolved = true } = {}) {
+  const { error } = await supabase.from('pooja_host_notes')
+    .update(resolved
+      ? { resolved_at: new Date().toISOString(), resolved_by: by }
+      : { resolved_at: null, resolved_by: null })
+    .eq('id', id)
+  if (error) throw error
+}
+
+/** Every unresolved help ask, with the person it is about. Oldest first. */
+export async function listOpenHelp() {
+  const { data, error } = await supabase.from('pooja_host_notes')
+    .select(`${NOTE_COLS}, person:people(id, full_name, phone, center_id)`)
+    .neq('kind', 'note').is('resolved_at', null)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+/** Open help asks per person, for the pill on the call-list row. */
+export async function openHelpByPerson(personIds) {
+  const ids = [...new Set((personIds || []).filter(Boolean))]
+  if (!ids.length) return {}
+  const { data, error } = await supabase.from('pooja_host_notes')
+    .select('person_id, kind').in('person_id', ids).neq('kind', 'note').is('resolved_at', null)
+  if (error) throw error
+  const out = {}
+  for (const r of data || []) (out[r.person_id] = out[r.person_id] || []).push(r.kind)
+  return out
+}
+
+// ── The Upcoming tab ──────────────────────────────────────────────────────
+
+/**
+ * Every upcoming pooja date with the calling summarised — four queries for the
+ * whole tab, not two per date. The arithmetic is in poojaSummary.js.
+ *
+ * `includePast` adds the dates that have already happened (from the listings
+ * that exist for them), so "who hosted in July" is one switch away.
+ */
+export async function upcomingCallSummary({ centreId = null, includePast = false, limit = 12 } = {}) {
+  const [dates, holders, outreach, poojas] = await Promise.all([
+    listPoojaDates({ limit }),
+    supabase.from('people')
+      .select('id, center_id, has_sadhguru_sannidhi, has_devi_yantra')
+      .or('has_sadhguru_sannidhi.eq.true,has_devi_yantra.eq.true')
+      .then(async ({ data, error }) => {
+        if (error) throw error
+        const out = await listOptOuts()
+        return (data || []).filter((p) => !out.has(p.id))
+      }),
+    supabase.from('pooja_host_outreach')
+      .select('pooja_date, pooja_type, person_id, outcome')
+      .gte('pooja_date', includePast ? '2000-01-01' : todayIso())
+      .then(({ data, error }) => { if (error) throw error; return data || [] }),
+    listPoojas({ includePast }),
+  ])
+
+  let allDates = dates
+  if (includePast) {
+    // Past dates come from what was actually posted, newest first, above the
+    // upcoming ones. The calendar table only holds the future.
+    const today = todayIso()
+    const seen = new Set(dates.map((d) => d.date))
+    const past = new Map()
+    for (const p of poojas) {
+      const d = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(p.starts_at))
+      if (d >= today || seen.has(d)) continue
+      if (!past.has(d)) past.set(d, { date: d, types: [] })
+    }
+    for (const o of outreach) {
+      if (o.pooja_date >= today || seen.has(o.pooja_date)) continue
+      const e = past.get(o.pooja_date) || { date: o.pooja_date, types: [] }
+      if (!e.types.includes(o.pooja_type)) e.types.push(o.pooja_type)
+      past.set(o.pooja_date, e)
+    }
+    allDates = [...[...past.values()].sort((a, b) => (a.date < b.date ? 1 : -1)), ...dates]
+  }
+
+  return summariseUpcoming({ dates: allDates, holders, outreach, listings: poojas, centreId })
 }
