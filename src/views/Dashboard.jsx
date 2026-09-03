@@ -4,6 +4,7 @@ import { Icon } from '../lib/icons'
 import { pill } from '../lib/ui'
 import { Pad, ErrorCard } from '../components/View'
 import KpiCard from '../components/KpiCard'
+import PoojaReport from '../components/PoojaReport'
 
 // A count(*) helper — head:true keeps it cheap (no rows returned).
 async function countRows(table, build = (q) => q) {
@@ -37,7 +38,19 @@ function daysAgoISO(n) {
   return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
 }
 
-export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
+export default function Dashboard({ me, sections, isAdmin, onNavigate, onOpenList, onOpenEvent }) {
+  // The Dashboard follows the role's SECTIONS, like the sidebar does. It used to
+  // be one fixed screen of volunteer and meditator numbers, which was fine while
+  // every role that could open it also held every people tab. A role built for
+  // one job — a temple-offerings POC with only Consecrated spaces — would have
+  // landed on ten counts about people he has no screen for, and if RLS hides
+  // those tables from him, on an error card instead. So every count, card and
+  // row here names the section it belongs to, and is only fetched and shown
+  // when the role holds that section. Admin holds all of them.
+  const has = (sec) => !!isAdmin || (sections || []).includes(sec)
+  const secKey = (sections || []).join(',')
+  // Any section the existing worklist and glance panels are about.
+  const peopleRole = ['volunteers', 'meditators', 'advance', 'interest', 'nurturing', 'event_hub'].some(has)
   // Greeting name = the REAL logged-in profile (never a hardcoded/persona name).
   // Falls back to the email local-part, then a bare greeting.
   const rawName = (me?.full_name || '').trim() || (me?.email ? me.email.split('@')[0] : '')
@@ -57,31 +70,33 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
 
   useEffect(() => {
     let alive = true
+    // A count the role has no section for is not fetched — 0, not a request.
+    const cnt = (sec, table, build) => (has(sec) ? countRows(table, build) : Promise.resolve(0))
     ;(async () => {
       try {
         const [
           activeVols, newThisMonth, inNurturing, activitiesWeek, meditators,
           quietVols, newIe, advanceNew, noPhone, untriaged,
         ] = await Promise.all([
-          countRows('people', (q) => q.eq('is_volunteer', true)),
-          countRows('volunteer_profiles', (q) => q.gte('interest_date', monthStartISO())),
+          cnt('volunteers', 'people', (q) => q.eq('is_volunteer', true)),
+          cnt('volunteers', 'volunteer_profiles', (q) => q.gte('interest_date', monthStartISO())),
           // People who actually have a nurturer. This used to count `journeys` rows
           // with status='active' and call the result "In nurturing journey" — 6,954,
           // which was MORE than the 6,096 meditators and 1,285 volunteers on record,
           // because one person can hold several journeys. A number larger than the
           // population it describes teaches a coordinator to distrust the whole panel.
-          countRows('nurturing_assignments', (q) => q.eq('active', true).not('nurturer_person_id', 'is', null)),
+          cnt('nurturing', 'nurturing_assignments', (q) => q.eq('active', true).not('nurturer_person_id', 'is', null)),
           // Bounded to THIS week at both ends. It was `>= monday` with no upper bound,
           // so every future activity ever scheduled counted as "this week".
-          countRows('activities', (q) => q.gte('activity_date', weekStartISO()).lte('activity_date', weekEndISO()).is('archived_at', null)),
-          countRows('people', (q) => q.eq('is_meditator', true)),
+          cnt('event_hub', 'activities', (q) => q.gte('activity_date', weekStartISO()).lte('activity_date', weekEndISO()).is('archived_at', null)),
+          cnt('meditators', 'people', (q) => q.eq('is_meditator', true)),
           // ---- the four numbers behind "Needs attention" — all live queries ----
-          countRows('people', (q) => q.eq('is_volunteer', true).lt('last_active_date', daysAgoISO(90))),
-          countRows('people', (q) => q.eq('is_meditator', true).gte('ie_date', daysAgoISO(60))),
-          countRows('advanced_interest', (q) => q.eq('status', 'new')),
-          countRows('people', (q) => q.eq('is_volunteer', true).is('phone', null)),
+          cnt('volunteers', 'people', (q) => q.eq('is_volunteer', true).lt('last_active_date', daysAgoISO(90))),
+          cnt('meditators', 'people', (q) => q.eq('is_meditator', true).gte('ie_date', daysAgoISO(60))),
+          cnt('advance', 'advanced_interest', (q) => q.eq('status', 'new')),
+          cnt('volunteers', 'people', (q) => q.eq('is_volunteer', true).is('phone', null)),
           // The largest untouched queue in the app, and it was nowhere on this screen.
-          countRows('interest_inbox_list', (q) => q.eq('status_bucket', 'interested')),
+          cnt('interest', 'interest_inbox_list', (q) => q.eq('status_bucket', 'interested')),
         ])
         if (!alive) return
         setKpis({ activeVols, newThisMonth, inNurturing, activitiesWeek, meditators, quietVols, newIe, advanceNew, noPhone, untriaged })
@@ -92,7 +107,8 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
     return () => {
       alive = false
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secKey, isAdmin])
 
 
   const loading = !kpis && !err
@@ -105,7 +121,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
       // 1,311 people raised their hand and are still sitting at "Interested". This
       // was the biggest backlog in the product and the landing screen said nothing
       // about it. It goes first: someone waiting for a reply outranks a report.
-      key: 'untriaged',
+      key: 'untriaged', sec: 'interest',
       n: k.untriaged,
       tag: 'INTEREST INBOX',
       title: `${(k.untriaged || 0).toLocaleString('en-IN')} people offered to help and haven't been answered`,
@@ -115,7 +131,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
       tint: 'var(--info-bg)', ink: 'var(--info-fg)',
     },
     {
-      key: 'quiet',
+      key: 'quiet', sec: 'volunteers',
       n: k.quietVols,
       tag: 'VOLUNTEERS',
       // Was "no activity in 90+ days", which read as "we have not spoken to them".
@@ -130,7 +146,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
       tint: 'var(--pill-warm-bg)', ink: 'var(--pill-warm-fg)',
     },
     {
-      key: 'newIe',
+      key: 'newIe', sec: 'meditators',
       n: k.newIe,
       tag: 'NEW MEDITATORS',
       title: `${k.newIe} finished Inner Engineering in the last 60 days`,
@@ -140,7 +156,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
       tint: 'var(--pill-orange-bg)', ink: 'var(--pill-orange-fg)',
     },
     {
-      key: 'advance',
+      key: 'advance', sec: 'advance',
       n: k.advanceNew,
       tag: 'ADVANCE PROGRAMMES',
       title: `${k.advanceNew} advance-programme interests not yet contacted`,
@@ -150,7 +166,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
       tint: 'var(--pill-rust-bg)', ink: 'var(--pill-rust-fg)',
     },
     {
-      key: 'noPhone',
+      key: 'noPhone', sec: 'volunteers',
       n: k.noPhone,
       tag: 'DATA',
       title: `${k.noPhone} volunteers have no phone number on record`,
@@ -167,7 +183,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
     // Stated as a ratio rather than a scary absolute, and it links straight to the
     // list filtered to people who need one, where bulk assign already lives.
     ...(k.activeVols > 0 && k.inNurturing / k.activeVols < 0.25 ? [{
-      key: 'nurturerGap',
+      key: 'nurturerGap', sec: 'volunteers',
       n: k.activeVols - k.inNurturing,
       tag: 'NURTURING',
       title: `Only ${k.inNurturing} of ${k.activeVols} volunteers has a nurturer`,
@@ -177,7 +193,7 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
       tint: 'var(--pill-rust-bg)', ink: 'var(--pill-rust-fg)',
       unit: 'uncovered',
     }] : []),
-  ].filter((r) => r.n > 0)
+  ].filter((r) => has(r.sec) && r.n > 0)
 
   return (
     <Pad>
@@ -188,7 +204,11 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
 
       {err && <ErrorCard>Couldn't load live counts: {err}</ErrorCard>}
 
-      {/* Needs attention — every row is a live count, and only shows if it's real. */}
+      {/* Needs attention — every row is a live count, and only shows if it's real.
+          The whole block goes when the role holds none of the people sections:
+          "Nothing needs attention" would be a lie to someone whose queue lives
+          in the pooja report below. */}
+      {peopleRole && (<>
       <h3 style={{ fontSize: 'var(--fs-h2)', fontWeight: 600, margin: '0 0 6px' }}>Needs attention</h3>
       <div className="mobile-hide" style={{ fontSize: 'var(--fs-body)', color: 'var(--muted)', marginBottom: 14 }}>
         Counted live from your records right now. Opening a row takes you to that exact list, already filtered.
@@ -230,6 +250,9 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
           </div>
         ))}
       </div>
+      </>)}
+
+      {has('poojas') && <PoojaReport me={me} onNavigate={onNavigate} />}
 
       {/* The centre at a glance — deliberately BELOW the worklist. These numbers are
           orientation, not instruction; putting six of them above the fold made the
@@ -245,45 +268,46 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
           because it is already a worklist card above, with a button that opens the
           list — a number you cannot act on next to the same number you can is
           noise. */}
+      {peopleRole && (<>
       <h3 style={{ fontSize: 'var(--fs-h2)', fontWeight: 600, margin: '30px 0 14px' }}>The centre at a glance</h3>
       <div
         className="dash-grid"
         style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}
       >
-        <KpiCard
+        {has('volunteers') && <KpiCard
           loading={loading}
           icon={Icon.volunteers(19)}
           tint="var(--pill-orange-bg)"
           ink="var(--pill-orange-fg)"
           value={k.activeVols}
           label="Volunteers on record"
-        />
-        <KpiCard
+        />}
+        {has('volunteers') && <KpiCard
           loading={loading}
           icon={Icon.interest(19)}
           tint="var(--info-bg)"
           ink="var(--info-fg)"
           value={k.newThisMonth}
           label="New this month"
-        />
-        <KpiCard
+        />}
+        {has('nurturing') && <KpiCard
           loading={loading}
           icon={Icon.nurturing(19)}
           tint="var(--pill-rust-bg)"
           ink="var(--pill-rust-fg)"
           value={k.inNurturing}
           label="People with a nurturer"
-        />
-        <KpiCard
+        />}
+        {has('event_hub') && <KpiCard
           loading={loading}
           icon={Icon.planning(19)}
           tint="var(--success-bg)"
           ink="var(--success-fg)"
           value={k.activitiesWeek}
           label="Activities this week"
-        />
+        />}
       </div>
-      <div
+      {has('meditators') && <div
         className="dash-grid2"
         style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 30 }}
       >
@@ -295,7 +319,8 @@ export default function Dashboard({ me, onNavigate, onOpenList, onOpenEvent }) {
           value={k.meditators}
           label="Meditators on record"
         />
-      </div>
+      </div>}
+      </>)}
 
     </Pad>
   )
