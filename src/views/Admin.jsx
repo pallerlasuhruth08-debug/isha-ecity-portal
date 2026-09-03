@@ -18,6 +18,10 @@ const SECTIONS = [
   { k: 'meditators', label: 'Meditators' },
   { k: 'advance', label: 'Advance Programmes' },
   { k: 'event_hub', label: 'Event Hub' },
+  // Was missing until 2026-09-03: the migration granted `poojas` to the built-in
+  // coordinator roles, so nobody noticed that an admin-created role (e.g. a
+  // temple-offerings POC) could never be given Consecrated spaces from here.
+  { k: 'poojas', label: 'Consecrated spaces' },
   { k: 'attendance', label: 'Attendance' },
   { k: 'nurturing', label: 'Nurturing & Care' },
   { k: 'interest', label: 'Interest Inbox' },
