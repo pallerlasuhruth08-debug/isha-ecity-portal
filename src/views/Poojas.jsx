@@ -4,13 +4,14 @@ import { telHref, smsHref, waHref } from '../lib/phone'
 import { Pad, ErrorCard, Loading, Empty, Pager } from '../components/View'
 import HolderMap from '../components/HolderMap'
 import {
-  createPooja, listPoojas, listRequests, approveRequest, declineRequest,
+  createPooja, listRequests, approveRequest, declineRequest,
   setSeats, closePooja, reopenPooja, cancelPooja, istIso, countWaitingGuests,
 } from '../lib/poojaWrites'
 import {
   POOJA_TYPES, fmtDate, listPoojaDates, datesRemaining, listHostsForDate,
   searchHostsForDate, recordOutreach, confirmHost, updatePersonAddress, addGuestByPhone,
-  optOutOfHosting,
+  optOutOfHosting, hostingHistory, callerNames, openHelpByPerson,
+  listHostNotes, addHostNote, resolveHostNote, listOpenHelp, NOTE_KINDS, upcomingCallSummary,
 } from '../lib/poojaHosts'
 
 // Volunteer side of pooja hosting. Hosts have no logins: a volunteer rings each
@@ -231,9 +232,12 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
             <div className="scroll-tabs" role="tablist" aria-label="Pooja views"
               style={{ display: 'flex', gap: 8, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
+              {/* "Poojas posted" became Upcoming: the same dates the calling is
+                  about, with the posted poojas and their guests under each one.
+                  Two date lists side by side was one too many. */}
               {[
                 { k: 'calls', label: 'Space holders' },
-                { k: 'posted', label: 'Poojas posted', n: waiting },
+                { k: 'upcoming', label: 'Upcoming', n: waiting },
                 { k: 'map', label: 'Map' },
               ].map((t) => (
                 <button key={t.k} className="tap44" role="tab" aria-selected={tab === t.k} onClick={() => setTab(t.k)}
@@ -257,8 +261,7 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
             )}
           </div>
 
-          {(tab === 'calls' || tab === 'map') && (
-            <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
               <select aria-label="Centre" style={filterSelect} value={centreFilter} onChange={(e) => setCentreFilter(e.target.value)}>
                 <option value="all">All centres</option>
                 {centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
@@ -282,8 +285,7 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
                 ))}
               </select>
               )}
-            </div>
-          )}
+          </div>
 
           {tab === 'calls' && !selected && (
             <Empty label={`No upcoming ${POOJA_TYPES[ptype]?.short || ''} date is loaded. Yantra Pooja falls only on purnima, so there are far fewer of them — switch to "Both poojas", or re-import from Isha's lunar calendar.`} />
@@ -293,13 +295,21 @@ export default function Poojas({ me, isCoordinator = false, onToast }) {
               me={me} centre={centre} centreFilter={centreFilter}
               isCoordinator={isCoordinator} onToast={onToast} />
           )}
-          {tab === 'posted' && <PostedPoojas me={me} isCoordinator={isCoordinator} onToast={onToast} onCountsChanged={refreshWaiting} />}
+          {tab === 'upcoming' && (
+            <UpcomingTab me={me} isCoordinator={isCoordinator} centreFilter={centreFilter} onToast={onToast}
+              onCountsChanged={refreshWaiting}
+              onOpenDate={(date) => {
+                const d = (dates || []).find((x) => x.date === date)
+                if (!d) return
+                setPtype('all'); setSelected(d); setTab('calls')
+              }} />
+          )}
           {tab === 'map' && <MapTab centreFilter={centreFilter} onToast={onToast} />}
         </>
       )}
 
       {creating && (
-        <CreatePoojaModal me={me} onClose={() => setCreating(false)} onToast={onToast} onCreated={() => { setCreating(false); setTab('posted') }} />
+        <CreatePoojaModal me={me} onClose={() => setCreating(false)} onToast={onToast} onCreated={() => { setCreating(false); setTab('upcoming') }} />
       )}
     </Pad>
   )
@@ -314,8 +324,21 @@ function CallList({ date, types, onlyBoth = false, me, centre, centreFilter = 'a
   const typeKey = types.join(',')
 
   const load = useCallback(async () => {
-    try { setErr(null); setAll(await listHostsForDate(date, typeKey.split(','))) }
-    catch (e) { setErr(e.message || String(e)) }
+    try {
+      setErr(null)
+      const rows = await listHostsForDate(date, typeKey.split(','))
+      // Three more small requests for the whole list: who has hosted before,
+      // who made each recorded call, and who has an open help ask. Failures
+      // here must not take the call list down — the calls can still be made.
+      const ids = rows.map((r) => r.id)
+      const callers = rows.flatMap((r) => Object.values(r.outreachByType || {}).map((o) => o.decided_by))
+      const [history, names, help] = await Promise.all([
+        hostingHistory(ids).catch(() => ({})),
+        callerNames(callers).catch(() => ({})),
+        openHelpByPerson(ids).catch(() => ({})),
+      ])
+      setAll(rows.map((r) => ({ ...r, history: history[r.id] || null, callerNames: names, openHelp: help[r.id] || [] })))
+    } catch (e) { setErr(e.message || String(e)) }
   }, [date, typeKey])
 
   useEffect(() => { load() }, [load])
@@ -487,6 +510,10 @@ function HolderRow({ holder: h, date, me, centre, isCoordinator, onChanged, onTo
   const answers = types.map((t) => h.outreachByType?.[t]?.outcome).filter(Boolean)
   const allSame = answers.length === types.length && new Set(answers).size === 1
   const pill = allSame ? OUTCOME_PILL[answers[0]] : null
+  // Who made the most recent call for this date — the question "did anyone
+  // already ring them?" that two volunteers on the same list keep asking.
+  const lastCall = types.map((t) => h.outreachByType?.[t]).filter(Boolean)
+    .sort((a, b) => (a.decided_at < b.decided_at ? 1 : -1))[0] || null
 
   return (
     <div className="card" style={{ padding: 13 }}>
@@ -504,10 +531,28 @@ function HolderRow({ holder: h, date, me, centre, isCoordinator, onChanged, onTo
               <span className="pill" style={{ background: 'var(--warning-bg)', color: 'var(--warning-fg)' }}>part answered</span>
             )}
             {!h.hasAddress && <span className="pill" style={{ background: 'var(--danger-bg)', color: 'var(--danger-fg)' }}>no address</span>}
+            {/* A reliable yes is worth knowing before dialling. */}
+            {h.history && (
+              <span className="pill" style={{ background: 'var(--success-bg)', color: 'var(--success-fg)' }}
+                title="Poojas hosted at this home before">
+                Hosted {h.history.count}× · last {fmtDate(h.history.last)}
+              </span>
+            )}
+            {h.openHelp?.length > 0 && (
+              <span className="pill" style={{ background: 'var(--danger-bg)', color: 'var(--danger-fg)' }}
+                title={h.openHelp.map((k) => NOTE_KINDS[k]?.label || k).join('; ')}>needs help</span>
+            )}
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
             {h.phone || 'no number'}{h.pincode ? ` · ${h.pincode}` : ''}{h.address ? ` · ${h.address}` : ''}
           </div>
+          {lastCall && (
+            <div style={{ fontSize: 12, color: 'var(--muted-2)', marginTop: 2 }}>
+              {OUTCOME_PILL[lastCall.outcome]?.label || lastCall.outcome} — recorded by {h.callerNames?.[lastCall.decided_by] || 'someone'}
+              {lastCall.decided_at ? `, ${fmtWhen(lastCall.decided_at)}` : ''}
+              {lastCall.note ? ` · "${lastCall.note}"` : ''}
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -569,6 +614,18 @@ function HolderRow({ holder: h, date, me, centre, isCoordinator, onChanged, onTo
         </div>
       )}
 
+      <div style={{ display: 'flex', gap: 7, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button className="btn btn-ghost tap44" disabled={busy} style={smallBtn}
+          onClick={() => setMode(mode === 'notes' ? null : 'notes')}
+          title="What was said on earlier calls, and anything they need help with">
+          {mode === 'notes' ? 'Hide notes' : 'Notes & help'}
+        </button>
+      </div>
+
+      {mode === 'notes' && (
+        <HostNotes person={h} me={me} onToast={onToast} onChanged={onChanged} />
+      )}
+
       {mode === 'address' && (
         <AddressEditor person={h} busy={busy}
           onCancel={() => setMode(null)}
@@ -605,6 +662,84 @@ function HolderRow({ holder: h, date, me, centre, isCoordinator, onChanged, onTo
             }, `Pooja posted at ${first}'s home.`)} />
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * The thread on one holder: every note ever left, with who wrote it and when,
+ * plus the open help asks. A help ask is a note with a kind other than 'note';
+ * it stays open until somebody marks it done. Kept in its own table so nothing
+ * is overwritten by the next call — see pooja_host_notes.
+ */
+function HostNotes({ person, me, onToast, onChanged }) {
+  const [rows, setRows] = useState(null)
+  const [names, setNames] = useState({})
+  const [kind, setKind] = useState('note')
+  const [body, setBody] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const load = useCallback(async () => {
+    try {
+      setErr(null)
+      const list = await listHostNotes(person.id)
+      setRows(list)
+      setNames(await callerNames(list.flatMap((n) => [n.author_id, n.resolved_by])).catch(() => ({})))
+    } catch (e) { setErr(e.message || String(e)); setRows([]) }
+  }, [person.id])
+  useEffect(() => { load() }, [load])
+
+  const act = async (fn, msg) => {
+    setBusy(true)
+    try { await fn(); onToast?.(msg); await load(); await onChanged?.() }
+    catch (e) { onToast?.(e.message || String(e)) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+      {err && <div className="field-error" role="alert" style={{ marginBottom: 8 }}>Notes are not available: {err}</div>}
+      {rows === null && !err && <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>Loading…</div>}
+      {rows?.length === 0 && <div style={{ fontSize: 12, color: 'var(--muted-2)', marginBottom: 8 }}>Nothing noted yet.</div>}
+      {rows?.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+          {rows.map((n) => {
+            const k = NOTE_KINDS[n.kind] || NOTE_KINDS.note
+            const open = k.help && !n.resolved_at
+            return (
+              <div key={n.id} style={{ background: open ? 'var(--warning-bg)' : 'var(--panel)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 10px' }}>
+                {k.help && (
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: open ? 'var(--warning-fg)' : 'var(--muted-2)' }}>
+                    {k.label}{n.resolved_at ? ` · done by ${names[n.resolved_by] || 'someone'}, ${fmtWhen(n.resolved_at)}` : ''}
+                  </div>
+                )}
+                <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 3, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span>{names[n.author_id] || 'Someone'} · {fmtWhen(n.created_at)}</span>
+                  {open && (
+                    <button className="btn btn-ghost tap44" disabled={busy} style={{ ...smallBtn, padding: '2px 8px' }}
+                      onClick={() => act(() => resolveHostNote(n.id, { by: me?.id }), 'Marked done.')}>Mark done</button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <select aria-label="What kind of note" value={kind} onChange={(e) => setKind(e.target.value)} style={{ ...input, width: 210 }}>
+          {Object.entries(NOTE_KINDS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={2}
+          placeholder={NOTE_KINDS[kind].help ? 'What do they need, and by when?' : 'What was said on the call…'}
+          style={{ ...input, flex: 1, minWidth: 200, resize: 'vertical' }} />
+        <button className="btn btn-primary tap44" disabled={busy || !body.trim()} style={smallBtn}
+          onClick={() => act(async () => { await addHostNote(person.id, { kind, body, by: me?.id }); setBody(''); setKind('note') },
+            NOTE_KINDS[kind].help ? 'Help ask recorded — it shows under Upcoming until marked done.' : 'Note saved.')}>
+          Save
+        </button>
+      </div>
     </div>
   )
 }
@@ -678,43 +813,71 @@ function ConfirmPanel({ holder, date, types, centre, busy, onConfirm, onCancel }
   )
 }
 
-// ── Poojas already posted ──────────────────────────────────────────────────
+// ── Upcoming ───────────────────────────────────────────────────────────────
 
-function PostedPoojas({ me, isCoordinator, onToast, onCountsChanged }) {
+const todayIst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())
+
+/**
+ * Every pooja date, with how the calling went and what got posted under it.
+ *
+ * This replaced a separate "Poojas posted" list. The dates the volunteer rings
+ * about and the poojas that came out of those calls are one story per evening;
+ * two tabs made her flip between them to answer "so is the 10th covered?".
+ * Past dates are one switch away, which is also where "who hosted in July" lives.
+ */
+function UpcomingTab({ me, isCoordinator, centreFilter = 'all', onToast, onCountsChanged, onOpenDate }) {
   const [rows, setRows] = useState(null)
+  const [help, setHelp] = useState([])
   const [err, setErr] = useState(null)
   const [includePast, setIncludePast] = useState(false)
   const [openId, setOpenId] = useState(null)
+  const centreId = centreFilter === 'all' ? null : centreFilter
 
   const load = useCallback(async () => {
-    try { setErr(null); setRows(await listPoojas({ includePast })); onCountsChanged?.() }
-    catch (e) { setErr(e.message || String(e)) }
-  }, [includePast, onCountsChanged])
+    try {
+      setErr(null)
+      const [r, h] = await Promise.all([
+        upcomingCallSummary({ centreId, includePast }),
+        // The notes table is newer than the rest; if it is not there yet the
+        // tab must still work without it.
+        listOpenHelp().catch(() => []),
+      ])
+      setRows(r)
+      setHelp(h.filter((x) => !centreId || x.person?.center_id === centreId))
+      onCountsChanged?.()
+    } catch (e) { setErr(e.message || String(e)) }
+  }, [centreId, includePast, onCountsChanged])
   useEffect(() => { load() }, [load])
 
   if (err) return <ErrorCard>{err}</ErrorCard>
   if (!rows) return <Loading />
 
-  const waitingHere = rows.reduce((n, p) => n + (p.pending_count || 0), 0)
+  const today = todayIst()
+  const upcoming = rows.filter((d) => d.date >= today)
+  const past = rows.filter((d) => d.date < today)
+  const livePoojas = upcoming.flatMap((d) => d.posted).filter((p) => p.status !== 'cancelled')
+  const waitingHere = upcoming.reduce((n, d) => n + d.guestsWaiting, 0)
 
   return (
     <>
       <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-        <select aria-label="Which poojas" style={filterSelect}
+        <select aria-label="Which dates" style={filterSelect}
           value={includePast ? 'all' : 'upcoming'} onChange={(e) => setIncludePast(e.target.value === 'all')}>
-          <option value="upcoming">Upcoming</option>
-          <option value="all">All, including past</option>
+          <option value="upcoming">Upcoming dates</option>
+          <option value="all">Including past dates</option>
         </select>
       </div>
+
+      {help.length > 0 && <HelpQueue items={help} me={me} onToast={onToast} onChanged={load} />}
 
       {/* One share for the whole list. A group gets told about the poojas that
           are on, not pooja-by-pooja — five separate messages is spam, and the
           volunteer would have to send them one at a time. */}
-      {rows.length > 0 && <ShareAll rows={rows} onToast={onToast} />}
+      {livePoojas.length > 0 && <ShareAll rows={livePoojas} onToast={onToast} />}
 
       {/* Guests only ever appear inside a pooja, so say plainly whether any are
           waiting rather than making someone expand rows to find out. */}
-      {rows.length > 0 && (
+      {livePoojas.length > 0 && (
         <div className="card" style={{
           padding: '10px 13px', marginBottom: 12, fontSize: 13,
           background: waitingHere ? 'var(--warning-bg)' : 'var(--panel)',
@@ -727,16 +890,108 @@ function PostedPoojas({ me, isCoordinator, onToast, onCountsChanged }) {
         </div>
       )}
 
-      {rows.length === 0 && <Empty label={includePast ? 'No poojas have been posted yet.' : 'No upcoming poojas.'} />}
+      {upcoming.length === 0 && <Empty label="No upcoming pooja dates are loaded." />}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {rows.map((p) => (
-          <PoojaRow key={p.activity_id} pooja={p} me={me} isCoordinator={isCoordinator}
-            expanded={openId === p.activity_id}
-            onToggle={() => setOpenId(openId === p.activity_id ? null : p.activity_id)}
-            onChanged={load} onToast={onToast} />
+        {upcoming.map((d) => (
+          <DateCard key={d.date} day={d} me={me} isCoordinator={isCoordinator} onToast={onToast}
+            openId={openId} setOpenId={setOpenId} onChanged={load} onOpenDate={onOpenDate} />
         ))}
       </div>
+
+      {includePast && (
+        <>
+          <h3 style={{ fontSize: 'var(--fs-h2)', fontWeight: 600, margin: '26px 0 10px' }}>Past dates</h3>
+          {past.length === 0 && <Empty label="No poojas have been posted before." />}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {past.map((d) => (
+              <DateCard key={d.date} day={d} me={me} isCoordinator={isCoordinator} onToast={onToast}
+                openId={openId} setOpenId={setOpenId} onChanged={load} past />
+            ))}
+          </div>
+        </>
+      )}
     </>
+  )
+}
+
+function DateCard({ day: d, me, isCoordinator, onToast, openId, setOpenId, onChanged, onOpenDate, past = false }) {
+  const stillToRing = d.eligible - d.called
+  return (
+    <div className="card" style={{ padding: 14, opacity: past ? 0.85 : 1 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 15, fontWeight: 700 }}>{fmtDate(d.date)}</span>
+            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{d.types.map((t) => POOJA_TYPES[t]?.label || t).join(' + ')}</span>
+            {d.guestsWaiting > 0 && <span className="pill" style={{ background: 'var(--warning-bg)', color: 'var(--warning-fg)' }}>{d.guestsWaiting} waiting</span>}
+          </div>
+          {/* The calling in one line. `called` includes anyone whose pooja is
+              posted even without a recorded call — a posted pooja IS a yes. */}
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>
+            {d.eligible === 0
+              ? 'No holders on record for this date.'
+              : <>
+                  {d.eligible} holder{d.eligible === 1 ? '' : 's'} · <b style={{ color: stillToRing > 0 && !past ? 'var(--warning-fg)' : 'inherit' }}>{stillToRing} still to ring</b>
+                  {' · '}{d.yes} said yes · {d.declined} not this time · {d.noAnswer} no answer
+                </>}
+            {' · '}{d.posted.length} pooja{d.posted.length === 1 ? '' : 's'} posted
+          </div>
+        </div>
+        {!past && onOpenDate && (
+          <button className="btn btn-primary tap44" style={smallBtn} onClick={() => onOpenDate(d.date)}>
+            {stillToRing > 0 ? 'Ring for this date' : 'Open the call list'}
+          </button>
+        )}
+      </div>
+
+      {d.posted.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+          {d.posted.map((p) => (
+            <PoojaRow key={p.activity_id} pooja={p} me={me} isCoordinator={isCoordinator}
+              expanded={openId === p.activity_id}
+              onToggle={() => setOpenId(openId === p.activity_id ? null : p.activity_id)}
+              onChanged={onChanged} onToast={onToast} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Every open help ask, oldest first, above the dates — because a host who
+ * asked for a lamp and heard nothing is the reason they will not host again.
+ */
+function HelpQueue({ items, me, onToast, onChanged }) {
+  const [busy, setBusy] = useState(false)
+  const done = async (id) => {
+    setBusy(true)
+    try { await resolveHostNote(id, { by: me?.id }); onToast?.('Marked done.'); await onChanged() }
+    catch (e) { onToast?.(e.message || String(e)) }
+    finally { setBusy(false) }
+  }
+  return (
+    <div className="card" style={{ padding: '12px 13px', marginBottom: 12, background: 'var(--warning-bg)', borderColor: 'var(--border-strong)' }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--warning-fg)', marginBottom: 8 }}>
+        {items.length} {items.length === 1 ? 'host needs' : 'hosts need'} help
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {items.map((n) => (
+          <div key={n.id} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 10px' }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600 }}>
+                {n.person?.full_name || '(no name)'}
+                <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {NOTE_KINDS[n.kind]?.label || n.kind}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', whiteSpace: 'pre-wrap' }}>{n.body}</div>
+              <div style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 2 }}>asked {fmtWhen(n.created_at)}</div>
+            </div>
+            {telHref(n.person?.phone) && <a className="btn btn-ghost tap44" style={linkBtn} href={telHref(n.person.phone)}>Call</a>}
+            <button className="btn btn-ghost tap44" style={smallBtn} disabled={busy} onClick={() => done(n.id)}>Mark done</button>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
