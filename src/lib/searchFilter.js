@@ -19,4 +19,10 @@ export function multiFieldOr(term, fields) {
 }
 
 // Canonical people-record search fields, phone-keyed like everywhere else.
-export const PEOPLE_SEARCH_FIELDS = ['full_name', 'phone', 'email', 'pincode']
+// street/city/area are the address: `street` is filled for 91% of records and
+// `area` for only 4%, so searching all three is what makes an address term
+// actually find someone. volunteer_list carries the same four columns, so this
+// one list serves the Volunteers and Meditators screens alike.
+export const PEOPLE_SEARCH_FIELDS = [
+  'full_name', 'phone', 'email', 'pincode', 'street', 'city', 'area',
+]

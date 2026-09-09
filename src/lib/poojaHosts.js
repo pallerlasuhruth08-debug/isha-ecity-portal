@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { sanitizeSearch } from './searchFilter'
 import { checkMobile } from './phone'
 import { istIso, listPoojas } from './poojaWrites'
 import { summariseUpcoming, hostingHistory as historyFromListings } from './poojaSummary'
@@ -157,13 +158,19 @@ function mergeByPerson(types, lists) {
  * Sannidhi being recorded in Ishangam, and until the holder extract has been run
  * the shortlist is empty. This keeps the screen usable in both cases.
  */
+// Name plus the address, so "find another host" works when you know where they
+// live but not how their name is spelled. Phone is handled separately, on digits.
+const HOST_SEARCH_FIELDS = ['full_name', 'pincode', 'street', 'city', 'area']
+
 export async function searchPeopleForHost(date, type, term) {
-  const q = (term || '').trim()
+  // sanitizeSearch strips the PostgREST/LIKE syntax breakers — needed now that
+  // an address term (which often contains a comma) reaches the filter.
+  const q = sanitizeSearch(term)
   if (q.length < 2) return []
-  const digits = q.replace(/\D/g, '')
-  const filter = digits.length >= 3
-    ? `phone.ilike.%${digits}%,full_name.ilike.%${q}%`
-    : `full_name.ilike.%${q}%`
+  const digits = (term || '').replace(/\D/g, '')
+  const clauses = HOST_SEARCH_FIELDS.map((f) => `${f}.ilike.%${q}%`)
+  if (digits.length >= 3) clauses.unshift(`phone.ilike.%${digits}%`)
+  const filter = clauses.join(',')
   const { data, error } = await supabase.from('people')
     .select('id, full_name, phone, area, street, city, pincode, center_id')
     .or(filter)
