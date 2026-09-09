@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { initials } from '../lib/ui'
 import { Pad, ErrorCard, Loading, Empty } from '../components/View'
 import { ensureParticipation } from '../lib/volunteers'
+import PersonProfile from '../components/PersonProfile'
 
 const last10 = (p) => String(p || '').replace(/\D/g, '').slice(-10)
 const fmtWhen = (iso) => {
@@ -16,12 +17,16 @@ const fmtWhen = (iso) => {
 // Names that aren't real identifying names (legacy imports + fallbacks).
 const NA_NAMES = ['NA', 'na', 'n/a', 'N/A', '(no name)', '(walk-in)', 'Unknown', 'unknown', '']
 
-export default function Unresolved({ me, isCoordinator = false, onToast }) {
-  const [tab, setTab] = useState('unresolved') // 'unresolved' | 'na'
+export default function Unresolved({ me, isCoordinator = false, isAdmin = false, onToast }) {
+  const [tab, setTab] = useState('unresolved') // 'unresolved' | 'na' | 'pincode'
   const [rows, setRows] = useState(null)
   const [naRows, setNaRows] = useState(null)
   const [err, setErr] = useState(null)
   const [resolveFor, setResolveFor] = useState(null) // entry being resolved
+  const [pinRows, setPinRows] = useState(null)   // pincodes that aren't on the map
+  const [noPinRows, setNoPinRows] = useState(null) // people with no pincode at all
+  const [centres, setCentres] = useState([])
+  const [profileId, setProfileId] = useState(null)
 
   const load = useCallback(async () => {
     try {
@@ -55,7 +60,52 @@ export default function Unresolved({ me, isCoordinator = false, onToast }) {
     }
   }, [])
 
-  useEffect(() => { load(); loadNa() }, [load, loadNa])
+  // Two different problems, deliberately loaded and shown apart.
+  //
+  // 594 people fall outside the pincode map. Only 26 of them have a pincode that
+  // simply is not mapped yet (22 distinct pincodes) — those are one admin action
+  // each. The other 568 have NO pincode recorded, and 452 of those have no
+  // street or city either, so the only fix is asking them. Rolling the two into
+  // one number would make a 22-row job look like a 594-row one.
+  const loadPincodes = useCallback(async () => {
+    try {
+      const [pins, nopin, cs] = await Promise.all([
+        supabase.from('pincode_unmapped')
+          .select('pincode, people_count, volunteers, meditators')
+          .order('people_count', { ascending: false }),
+        supabase.from('people_missing_pincode')
+          .select('id, full_name, phone, street, city, area, is_volunteer, is_meditator')
+          .order('is_volunteer', { ascending: false })
+          .order('full_name', { ascending: true })
+          .limit(500),
+        supabase.from('centers').select('id, name').order('name'),
+      ])
+      if (pins.error) throw pins.error
+      if (nopin.error) throw nopin.error
+      setPinRows(pins.data || [])
+      setNoPinRows(nopin.data || [])
+      // 'all' and 'unassigned' are sentinels, never a real destination.
+      setCentres((cs.data || []).filter((c) => !['all', 'unassigned'].includes(c.id)))
+    } catch (e) {
+      setErr(e.message || String(e))
+    }
+  }, [])
+
+  // Writing settings.pincode_map is admin-only at the policy layer
+  // (settings_write), which is why the control below is gated on isAdmin rather
+  // than isCoordinator — a coordinator pressing it would just get a denial.
+  const assignPincode = useCallback(async (pin, centreId) => {
+    if (!pin || !centreId) return
+    const { data, error } = await supabase.from('settings').select('value').eq('key', 'pincode_map').single()
+    if (error) { onToast?.(error.message || String(error)); return }
+    const next = { ...(data?.value || {}), [pin]: centreId }
+    const { error: e2 } = await supabase.from('settings').update({ value: next }).eq('key', 'pincode_map')
+    if (e2) { onToast?.(e2.message || String(e2)); return }
+    onToast?.(`${pin} now maps to ${centreId}.`)
+    loadPincodes()
+  }, [onToast, loadPincodes])
+
+  useEffect(() => { load(); loadNa(); loadPincodes() }, [load, loadNa, loadPincodes])
 
   const loading = !rows && !err
   if (loading) return <Pad><Loading label="Loading unresolved walk-ins…" /></Pad>
@@ -71,6 +121,12 @@ export default function Unresolved({ me, isCoordinator = false, onToast }) {
     )
   }
 
+  // The badge counts PEOPLE, not rows — 22 pincodes and 568 records are the same
+  // kind of debt to whoever has to clear it.
+  const pinCount = pinRows && noPinRows
+    ? pinRows.reduce((a, r) => a + (r.people_count || 0), 0) + noPinRows.length
+    : undefined
+
   const tabBtn = (k, label, n) => (
     <button onClick={() => setTab(k)} className="btn" style={{ padding: '8px 14px', fontSize: 13, background: tab === k ? '#241B14' : '#fff', color: tab === k ? '#F6ECDC' : 'var(--ink-soft)', border: tab === k ? 'none' : '1px solid var(--border)' }}>
       {label} <span style={{ opacity: 0.6 }}>{n ?? '·'}</span>
@@ -82,6 +138,7 @@ export default function Unresolved({ me, isCoordinator = false, onToast }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
         {tabBtn('unresolved', 'Unresolved walk-ins', rows?.length)}
         {tabBtn('na', 'Needs a name', naRows?.length)}
+        {tabBtn('pincode', 'Pincode', pinCount)}
       </div>
 
       {tab === 'unresolved' && (
@@ -123,6 +180,80 @@ export default function Unresolved({ me, isCoordinator = false, onToast }) {
             ))}
           </div>
         </>
+      )}
+
+      {tab === 'pincode' && (
+        <>
+          <p className="mobile-hide" style={{ margin: '0 0 18px', fontSize: 14, color: 'var(--muted)', maxWidth: 620 }}>
+            People the pincode map can’t place. Until a pincode is mapped, its people fall to the default centre — so they show up on someone’s screen, just possibly the wrong someone’s.
+          </p>
+
+          <h3 style={{ fontSize: 'var(--fs-h2)', fontWeight: 600, margin: '0 0 4px' }}>Pincodes not on the map</h3>
+          <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--muted)', marginBottom: 12 }}>
+            A real pincode that no centre claims. One assignment fixes everyone on that pincode at once.
+            {!isAdmin && ' Only an admin can change the map — send them this list.'}
+          </div>
+          {pinRows === null && <Loading label="Loading pincodes…" />}
+          {pinRows && pinRows.length === 0 && <Empty label="Every pincode on record is mapped to a centre." />}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 30 }}>
+            {(pinRows || []).map((r) => (
+              <div key={r.pincode} className="card" style={{ padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>{r.pincode}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
+                    {r.people_count} {r.people_count === 1 ? 'person' : 'people'}
+                    {r.volunteers > 0 && ` · ${r.volunteers} volunteer${r.volunteers === 1 ? '' : 's'}`}
+                    {r.meditators > 0 && ` · ${r.meditators} meditator${r.meditators === 1 ? '' : 's'}`}
+                  </div>
+                </div>
+                {isAdmin && (
+                  <select
+                    defaultValue=""
+                    aria-label={`Assign pincode ${r.pincode} to a centre`}
+                    onChange={(e) => { const v = e.target.value; e.target.value = ''; assignPincode(r.pincode, v) }}
+                    style={{ padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, fontSize: 13, fontFamily: 'inherit', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer', minHeight: 40 }}
+                  >
+                    <option value="">Assign to centre…</option>
+                    {centres.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
+                  </select>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <h3 style={{ fontSize: 'var(--fs-h2)', fontWeight: 600, margin: '0 0 4px' }}>No pincode on record</h3>
+          <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--muted)', marginBottom: 12 }}>
+            Nothing to map — these need the pincode asked for and typed in. Volunteers first, because they are the ones being called anyway. Open a row to edit the record.
+          </div>
+          {noPinRows === null && <Loading label="Loading records…" />}
+          {noPinRows && noPinRows.length === 0 && <Empty label="Everyone has a pincode." />}
+          {noPinRows && noPinRows.length === 500 && (
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>
+              Showing the first 500. Clear some and the rest will follow.
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(noPinRows || []).map((p) => (
+              <div key={p.id} className="rowhover card" onClick={() => setProfileId(p.id)}
+                style={{ padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, cursor: 'pointer', flexWrap: 'wrap', background: profileId === p.id ? '#FBF1E6' : undefined }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 15.5, fontWeight: 600 }}>{p.full_name || '(no name)'}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 3 }}>
+                    {p.phone || 'no phone'}
+                    {[p.street, p.area, p.city].filter(Boolean).length > 0 && ` · ${[p.street, p.area, p.city].filter(Boolean).join(', ')}`}
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted-2)' }}>
+                  {[p.is_volunteer && 'volunteer', p.is_meditator && 'meditator'].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {profileId && (
+        <PersonProfile personId={profileId} me={me} onClose={() => setProfileId(null)} onToast={onToast} onChanged={loadPincodes} />
       )}
 
       {resolveFor && (

@@ -458,8 +458,8 @@ function HostSearch({ date, types, me, centre, isCoordinator, onChanged, onToast
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Find another host — name or phone"
-        aria-label="Find a host by name or phone"
+        placeholder="Find another host — name, phone or address"
+        aria-label="Find a host by name, phone or address"
         style={{ ...input, maxWidth: 420 }}
       />
       {busy && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>Searching…</div>}
