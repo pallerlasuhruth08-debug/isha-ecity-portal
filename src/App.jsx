@@ -248,7 +248,7 @@ function Portal({ profile, email, sections }) {
       case 'poojas':
         return <Poojas me={profile} isCoordinator={canWorkPoojas} onToast={showToast} />
       case 'unresolved':
-        return <Unresolved me={profile} isCoordinator={isCoordinator} onToast={showToast} />
+        return <Unresolved me={profile} isCoordinator={isCoordinator} isAdmin={isAdmin} onToast={showToast} />
       case 'admin':
         // Hard gate: even if the view is somehow selected, non-admins get nothing
         // (RLS also blocks every write these pages make).
