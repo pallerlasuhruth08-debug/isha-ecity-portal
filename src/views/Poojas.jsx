@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { telHref, smsHref, waHref } from '../lib/phone'
 import { Pad, ErrorCard, Loading, Empty, Pager } from '../components/View'
@@ -11,7 +11,7 @@ import {
   POOJA_TYPES, fmtDate, listPoojaDates, datesRemaining, listHostsForDate,
   searchHostsForDate, recordOutreach, confirmHost, updatePersonAddress, addGuestByPhone,
   optOutOfHosting, hostingHistory, callerNames, openHelpByPerson,
-  listHostNotes, addHostNote, resolveHostNote, listOpenHelp, NOTE_KINDS, upcomingCallSummary,
+  listHostNotes, addHostNote, updateHostNote, resolveHostNote, listOpenHelp, NOTE_KINDS, upcomingCallSummary,
 } from '../lib/poojaHosts'
 
 // Volunteer side of pooja hosting. Hosts have no logins: a volunteer rings each
@@ -690,6 +690,44 @@ function HostNotes({ person, me, onToast, onChanged }) {
   }, [person.id])
   useEffect(() => { load() }, [load])
 
+  // Autosave: 1.5s after typing stops the note is saved (inserted once, then
+  // updated in place). Leaving the box, pressing Save or closing the panel
+  // finishes it and clears the box for the next note.
+  const [saveState, setSaveState] = useState('') // '' | 'saving' | 'saved' | error text
+  const draft = useRef({ id: null, kind: 'note', body: '', timer: null, chain: Promise.resolve() })
+  const flush = useCallback(() => {
+    const d = draft.current
+    clearTimeout(d.timer)
+    const kindNow = d.kind, bodyNow = d.body
+    d.chain = d.chain.then(async () => {
+      if (!bodyNow.trim()) return
+      setSaveState('saving')
+      try {
+        if (d.id) await updateHostNote(d.id, { kind: kindNow, body: bodyNow })
+        else d.id = await addHostNote(person.id, { kind: kindNow, body: bodyNow, by: me?.id })
+        setSaveState('saved')
+      } catch (e) { setSaveState('Not saved: ' + (e.message || String(e))) }
+    })
+    return d.chain
+  }, [person.id, me?.id])
+  const edit = (nextKind, nextBody) => {
+    const d = draft.current
+    d.kind = nextKind; d.body = nextBody
+    clearTimeout(d.timer)
+    d.timer = setTimeout(flush, 1500)
+  }
+  const finish = async () => {
+    await flush()
+    const d = draft.current
+    if (!d.id) return
+    const wasHelp = NOTE_KINDS[d.kind]?.help
+    d.id = null; d.body = ''; d.kind = 'note'
+    setBody(''); setKind('note'); setSaveState('')
+    onToast?.(wasHelp ? 'Help ask recorded — it shows under Upcoming until marked done.' : 'Note saved.')
+    await load(); await onChanged?.()
+  }
+  useEffect(() => () => { flush() }, [flush])
+
   const act = async (fn, msg) => {
     setBusy(true)
     try { await fn(); onToast?.(msg); await load(); await onChanged?.() }
@@ -728,18 +766,21 @@ function HostNotes({ person, me, onToast, onChanged }) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <select aria-label="What kind of note" value={kind} onChange={(e) => setKind(e.target.value)} style={{ ...input, width: 210 }}>
+        <select aria-label="What kind of note" value={kind} onChange={(e) => { setKind(e.target.value); edit(e.target.value, body) }} style={{ ...input, width: 210 }}>
           {Object.entries(NOTE_KINDS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={2}
+        <textarea value={body} onChange={(e) => { setBody(e.target.value); edit(kind, e.target.value) }} onBlur={(e) => { if (e.relatedTarget?.tagName !== 'SELECT') finish() }} rows={2}
           placeholder={NOTE_KINDS[kind].help ? 'What do they need, and by when?' : 'What was said on the call…'}
           style={{ ...input, flex: 1, minWidth: 200, resize: 'vertical' }} />
-        <button className="btn btn-primary tap44" disabled={busy || !body.trim()} style={smallBtn}
-          onClick={() => act(async () => { await addHostNote(person.id, { kind, body, by: me?.id }); setBody(''); setKind('note') },
-            NOTE_KINDS[kind].help ? 'Help ask recorded — it shows under Upcoming until marked done.' : 'Note saved.')}>
+        <button className="btn btn-primary tap44" disabled={busy || !body.trim()} style={smallBtn} onClick={finish}>
           Save
         </button>
       </div>
+      {saveState && (
+        <div role="status" style={{ fontSize: 11, marginTop: 4, color: saveState.startsWith('Not saved') ? 'var(--red)' : 'var(--muted-2)' }}>
+          {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved' : saveState}
+        </div>
+      )}
     </div>
   )
 }
