@@ -13,6 +13,7 @@ import CampaignScriptPanel from '../components/CampaignScriptPanel'
 import AddCallerDialog from '../components/AddCallerDialog'
 import EditCampaignDialog from '../components/EditCampaignDialog'
 import KebabMenu from '../components/KebabMenu'
+import { csvField, downloadCSV } from '../lib/teamExport'
 import SidePanel, { PanelHeader } from '../components/SidePanel'
 
 const CAMP_STATUS_PILL = {
@@ -974,6 +975,23 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
   const safeCallPage = Math.min(callPage, callPageCount - 1)
   const pageShown = shown.slice(safeCallPage * callPageSize, safeCallPage * callPageSize + callPageSize)
 
+  // Download the call list as it's currently filtered ("All" = every recipient).
+  function downloadCallList() {
+    const head = ['Name', 'Phone', 'Status', messaging ? 'Batch claimed by' : 'Caller', 'Last call', 'Last outcome', 'Last remarks']
+    const rows = shown.map((x) => {
+      const l = x.logs[0]
+      return [
+        x.name, x.phone,
+        messaging ? labelForMessage(x.messageStatus) : x.status,
+        messaging ? x.assignedTo || '' : x.callerKey ? x.assigned : '',
+        l ? new Date(l.logged_at).toLocaleString('en-IN') : '', l?.reachability || '', l?.remarks || '',
+      ]
+    })
+    const csv = [head, ...rows].map((r) => r.map(csvField).join(',')).join('\r\n')
+    const tag = callFilter === 'all' ? '' : '-' + callFilter.replace(/\s+/g, '_')
+    downloadCSV(`${(c.name || 'campaign').replace(/[^\w'-]+/g, '_')}-call-list${tag}.csv`, csv)
+  }
+
   // ---- coordinator mutations (RLS is the real backstop) ----
   async function removeRecipient(row) {
     if (!window.confirm(`Remove ${row.name} from this campaign? Their call history is kept; they're marked removed, not deleted.`)) return
@@ -1142,6 +1160,9 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
               </>
             )}
           </div>
+        )}
+        {isCoordinator && (
+          <button className="btn btn-ghost" style={{ height: 36, padding: '0 14px', fontSize: 12 }} disabled={!c.ready || shown.length === 0} onClick={downloadCallList}>Download</button>
         )}
         {isCoordinator && unassignedCount > 0 && (
           <span className="pill" style={{ background: 'var(--danger-bg)', color: 'var(--danger-fg)', fontWeight: 600 }}>{unassignedCount} unassigned ⚠</span>
