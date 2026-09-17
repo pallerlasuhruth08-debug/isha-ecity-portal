@@ -258,6 +258,11 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
     const splitByNumber = Object.fromEntries(splitList.map((x) => [x.split_number, x]))
     const ready = detailId === openId
     const bucket = { ...c, contacts: [], removed: [], callers: {}, callerPool, splitCount: splitList.length, splitByNumber, ready }
+    // Seed the roster from the pool so a caller added via "Add caller" shows up before
+    // any recipient is assigned to them (the rows below only count assignments).
+    for (const cp of ready ? callerPool : []) {
+      bucket.callers[cp.key] = { key: cp.key, name: cp.name + (cp.source === 'nurturing_team' ? ' · Care group' : ' · Volunteer'), assigned: 0, contacted: 0, responded: 0 }
+    }
     for (const j of ready ? journeys : []) {
       const logs = logsByJourney[j.id] || []
       const status = contactStatus(logs)
@@ -1010,6 +1015,14 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
       const ids = affected.map((x) => x.journeyId)
       if (ids.length) {
         const { error } = await supabase.from('journeys').update({ caller_source: null, caller_id: null, assigned_to: null }).in('id', ids)
+        if (error) throw error
+      }
+      // Also drop them from the campaign's pool, or a caller with no assignments
+      // would stay listed after "Remove".
+      const seg = c.segment || {}
+      if (Array.isArray(seg.callers) && seg.callers.some((cc) => `${cc?.source}:${cc?.id}` === key)) {
+        const callers = seg.callers.filter((cc) => `${cc?.source}:${cc?.id}` !== key)
+        const { error } = await supabase.from('campaigns').update({ segment: { ...seg, callers } }).eq('id', c.id)
         if (error) throw error
       }
       onToast?.(`${caller.name} removed — ${affected.length} recipient(s) now unassigned.`)
