@@ -44,7 +44,7 @@ export function buildTeamRoster({ ev, blocks, assigns, people, blockPhases = {},
   })
 }
 
-function csvField(v) {
+export function csvField(v) {
   const s = v == null ? '' : String(v)
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
 }
