@@ -14,7 +14,7 @@ import { useBreakpoint } from '../lib/useBreakpoint'
 import { multiFieldOr } from '../lib/searchFilter'
 import { useTableSelection } from '../lib/useTableSelection'
 import { addRecipientsToCampaign } from '../lib/campaignRecipients'
-import { eventDays, fmtDay } from '../lib/planning'
+import { eventDays, fmtDay, todayISO } from '../lib/planning'
 import { fetchSkills, ensureSkill } from '../lib/skills'
 
 // Interest types are DERIVED from existing data, not a new schema field:
@@ -118,6 +118,8 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
   const [eventFilter, setEventFilter] = useState('all')
   const [evList, setEvList] = useState([])
   const [areaFilter, setAreaFilter] = useState('all')
+  const [dateFrom, setDateFrom] = useState('') // 'YYYY-MM-DD', IST day the interest was added
+  const [dateTo, setDateTo] = useState('')
   const [areaOpts, setAreaOpts] = useState([]) // settings.volunteer_interest_areas
   const [progOpts, setProgOpts] = useState([]) // [{v,label}] programmes actually present
 
@@ -210,6 +212,8 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
     if (statusFilter !== 'all') q = q.eq('status_bucket', statusFilter)
     if (eventFilter !== 'all') q = q.eq('event_id', eventFilter)
     if (areaFilter !== 'all') q = q.contains('interests', [areaFilter])
+    if (dateFrom) q = q.gte('sort_date', `${dateFrom}T00:00:00+05:30`)
+    if (dateTo) q = q.lte('sort_date', `${dateTo}T23:59:59.999+05:30`)
     // One haystack column instead of name-OR-phone: typing "shoonya",
     // "online calling" or an event name used to return nothing, which is exactly
     // what people came to the Inbox to look up. Terms are ANDed, so "priya
@@ -218,7 +222,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       q = q.ilike('search_text', `%${term}%`)
     }
     return q
-  }, [typeFilter, statusFilter, eventFilter, areaFilter, debounced])
+  }, [typeFilter, statusFilter, eventFilter, areaFilter, dateFrom, dateTo, debounced])
 
   const fetchAllKeys = useCallback(
     () => fetchAllMatchingIds(() => applyFilters(supabase.from('interest_inbox_list').select('key')), 'key'),
@@ -239,7 +243,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
 
   // A new filter is a new list: back to page 1, selection dropped. (Rows-per-page
   // resets the page inside usePagedQuery, so it is not repeated here.)
-  useEffect(() => { setPage(0); sel.clear() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [debounced, typeFilter, statusFilter, eventFilter, areaFilter, setPage])
+  useEffect(() => { setPage(0); sel.clear() /* eslint-disable-line react-hooks/exhaustive-deps */ }, [debounced, typeFilter, statusFilter, eventFilter, areaFilter, dateFrom, dateTo, setPage])
 
   const patchRow = (key, fields) => {
     setRows((prev) => (prev || []).map((r) => (r.key === key ? { ...r, ...fields } : r)))
@@ -591,7 +595,7 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
         <MobileFilterSheet
           always
-          count={(typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (eventFilter !== 'all' ? 1 : 0) + (areaFilter !== 'all' ? 1 : 0)}
+          count={(typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (eventFilter !== 'all' ? 1 : 0) + (areaFilter !== 'all' ? 1 : 0) + (dateFrom || dateTo ? 1 : 0)}
         >
           <FilterSelect label="Interest" value={typeFilter} onChange={setTypeFilter}
             options={[{ v: 'all', label: 'Any interest' }, ...TYPE_PILLS]}
@@ -606,10 +610,18 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
             <FilterSelect label="Event" value={eventFilter} onChange={setEventFilter}
               options={[{ v: 'all', label: 'Any event' }, ...evList.map((e) => ({ v: e.id, label: e.name }))]} />
           )}
+          {[['Added from', dateFrom, setDateFrom], ['Added to', dateTo, setDateTo]].map(([lbl, val, set]) => (
+            <label key={lbl} style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 168, flex: '1 1 168px' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>{lbl}</span>
+              <input type="date" value={val} onChange={(e) => set(e.target.value)}
+                style={{ minHeight: 40, fontSize: 13.5, fontFamily: 'inherit', padding: '8px 10px', borderRadius: 9, background: '#fff',
+                  border: val ? '1.5px solid var(--orange)' : '1px solid var(--border)', color: val ? 'var(--ink)' : 'var(--ink-soft)' }} />
+            </label>
+          ))}
         </MobileFilterSheet>
-        {(typeFilter !== 'all' || statusFilter !== 'all' || eventFilter !== 'all' || areaFilter !== 'all') && (
+        {(typeFilter !== 'all' || statusFilter !== 'all' || eventFilter !== 'all' || areaFilter !== 'all' || dateFrom || dateTo) && (
           <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 11px' }}
-            onClick={() => { setTypeFilter('all'); setStatusFilter('all'); setEventFilter('all'); setAreaFilter('all') }}>
+            onClick={() => { setTypeFilter('all'); setStatusFilter('all'); setEventFilter('all'); setAreaFilter('all'); setDateFrom(''); setDateTo('') }}>
             Clear filters
           </button>
         )}
@@ -945,13 +957,13 @@ export function AddImport({ onClose, onToast, onDone, lockEventId = null }) {
   // Attach interest for an already-resolved person id, per the current segment.
   async function attachInterest(pid, prog) {
     if (segment === 'event') {
-      const { error } = await supabase.from('event_interest').upsert({ activity_id: eventId, person_id: pid, source: 'search' }, { onConflict: 'activity_id,person_id' })
+      const { error } = await supabase.from('event_interest').upsert({ activity_id: eventId, person_id: pid, source: 'search', created_at: new Date().toISOString() }, { onConflict: 'activity_id,person_id' })
       if (error) throw error
     } else if (segment === 'volunteering') {
-      const { error } = await supabase.from('volunteer_profiles').upsert({ person_id: pid, status: 'new', interest_source: 'manual' }, { onConflict: 'person_id' })
+      const { error } = await supabase.from('volunteer_profiles').upsert({ person_id: pid, status: 'new', interest_source: 'manual', interest_date: todayISO() }, { onConflict: 'person_id' })
       if (error) throw error
     } else {
-      const { error } = await supabase.from('advanced_interest').upsert({ person_id: pid, program: (prog || program || 'bsp').toLowerCase(), status: 'new', source: 'manual' }, { onConflict: 'person_id,program' })
+      const { error } = await supabase.from('advanced_interest').upsert({ person_id: pid, program: (prog || program || 'bsp').toLowerCase(), status: 'new', source: 'manual', interest_date: todayISO() }, { onConflict: 'person_id,program' })
       if (error) throw error
     }
   }
