@@ -558,8 +558,19 @@ export async function addHostNote(personId, { kind = 'note', body, by = null }) 
   const text = (body || '').trim()
   if (!text) throw new Error('Write something first.')
   if (!NOTE_KINDS[kind]) throw new Error(`Unknown note kind: ${kind}`)
-  const { error } = await supabase.from('pooja_host_notes')
+  const { data, error } = await supabase.from('pooja_host_notes')
     .insert({ person_id: personId, kind, body: text, author_id: by })
+    .select('id').single()
+  if (error) throw error
+  return data.id
+}
+
+/** Autosave: the note being typed is inserted once, then kept up to date here. */
+export async function updateHostNote(id, { kind = 'note', body }) {
+  const text = (body || '').trim()
+  if (!text) return
+  if (!NOTE_KINDS[kind]) throw new Error(`Unknown note kind: ${kind}`)
+  const { error } = await supabase.from('pooja_host_notes').update({ kind, body: text }).eq('id', id)
   if (error) throw error
 }
 
