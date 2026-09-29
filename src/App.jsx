@@ -234,7 +234,7 @@ function Portal({ profile, email, sections }) {
       case 'meditators':
         return <Meditators me={profile} onToast={showToast} preset={presetFor('meditators')} onPresetConsumed={clearPreset} campaignDraft={campaignDraft} onClearCampaignDraft={endCampaignDraft} onDone={endCampaignDraft} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
       case 'interest':
-        return <Interest onToast={showToast} eventScopeId={pendingInterestEventId} onScopeConsumed={() => setPendingInterestEventId(null)} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} />
+        return <Interest onToast={showToast} eventScopeId={pendingInterestEventId} onScopeConsumed={() => setPendingInterestEventId(null)} recipientDraft={recipientDraft} onRecipientsDone={endRecipientDraft} preset={presetFor('interest')} onPresetConsumed={clearPreset} />
       case 'advance':
         return <Advance me={profile} onToast={showToast} />
       case 'nurturing':
