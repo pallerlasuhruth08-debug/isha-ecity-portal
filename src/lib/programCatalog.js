@@ -11,7 +11,12 @@
 // build time to emit SQL from it.
 
 export const PROGRAMS = [
-  { key: 'ie', label: 'Inner Engineering', col: 'ie_date', chip: 'IE' },
+  // `ie_any_date` is a generated column: greatest(ie_date, ieo_date). Online and
+  // classroom are the SAME milestone (see eligibility.js), and 143 people on the
+  // roster sat IE years ago then IEO recently — reading ie_date alone files them
+  // as 2015 meditators and hides them from every recency filter. The raw columns
+  // are still there for anyone who needs the distinction.
+  { key: 'ie', label: 'Inner Engineering', col: 'ie_any_date', chip: 'IE' },
   { key: 'bsp', label: 'Bhava Spandana', col: 'bsp_date', chip: 'BSP' },
   { key: 'shoonya', label: 'Shoonya', col: 'shoonya_date', chip: 'Shoonya' },
   { key: 'samyama', label: 'Samyama', col: 'samyama_date', chip: 'Samyama' },

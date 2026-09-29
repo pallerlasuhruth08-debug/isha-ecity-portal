@@ -21,17 +21,23 @@ import { PROGRAM_BY_KEY, MIN_ROWS_TO_TRUST } from './programCatalog.js'
 // not guess prerequisites — a fabricated eligibility rule is worse than none,
 // because it sends a real volunteer to make a real phone call.
 
-// Programme keys whose date column doubles as "the same milestone".
-const IE_KEYS = ['ie', 'ieo']
+// Columns that all record the SAME milestone. `ie_any_date` is the generated
+// greatest(ie_date, ieo_date) and is what the catalogue points IE at, but this
+// engine is handed plain rows from several screens — some select only the raw
+// columns — so all three are read and the LATEST wins. Taking the max rather
+// than the first match matters: 143 people sat IE years ago and IEO recently,
+// and their initiation is the recent one.
+const IE_COLS = ['ie_any_date', 'ie_date', 'ieo_date']
 
 /** Date a person's Shambhavi Initiation was completed, or null. */
 export function initiatedOn(person) {
   if (!person) return null
-  for (const k of IE_KEYS) {
-    const col = PROGRAM_BY_KEY[k]?.col || `${k}_date`
-    if (person[col]) return new Date(person[col])
-  }
-  return null
+  const times = IE_COLS
+    .map((col) => person[col])
+    .filter(Boolean)
+    .map((v) => new Date(v).getTime())
+    .filter((t) => !Number.isNaN(t))
+  return times.length ? new Date(Math.max(...times)) : null
 }
 
 /** Date a person completed `key`, or null. `ie` resolves via initiatedOn(). */
