@@ -32,10 +32,27 @@ function readyLabel(v) {
 const RECENCY = [{ key: 'any', label: 'Isha activity · any time' }, ...ISHA_ACTIVITY_OPTIONS.map((o) => ({ key: o.v, label: o.label }))]
 
 const daysAgoISO = (d) => new Date(Date.now() - d * 86400000).toISOString().slice(0, 10)
+// Chips carry the year they did it: "Shoonya '23" reads very differently from
+// "Shoonya '26", and without it the column says only that it happened, ever.
 function progList(p) {
-  return PROGRAMS.filter((pr) => p[pr.col]).map((pr) => pr.chip)
+  return PROGRAMS.filter((pr) => p[pr.col]).map((pr) => {
+    const y = String(p[pr.col]).slice(0, 4)
+    return /^\d{4}$/.test(y) ? `${pr.chip} '${y.slice(2)}` : pr.chip
+  })
 }
 
+
+// When they did the selected programme. Pairs with the programme dropdown; the
+// recent windows are the outreach ones (a fresh graduate is at their most open),
+// "before 2020" is the other end — people who did it long ago and drifted.
+const PROG_WHEN = [
+  { key: 'any', label: 'Did it \u00b7 any time', chip: 'Any time' },
+  { key: '30', label: 'Did it \u00b7 last 30 days', chip: 'Last 30 days' },
+  { key: '90', label: 'Did it \u00b7 last 90 days', chip: 'Last 90 days' },
+  { key: '180', label: 'Did it \u00b7 last 180 days', chip: 'Last 180 days' },
+  { key: 'year', label: 'Did it \u00b7 this year', chip: 'This year' },
+  { key: 'old', label: 'Did it \u00b7 before 2020', chip: 'Before 2020' },
+]
 
 // Satsang attendance filter. "Never" is the cohort worth calling; the rest are
 // recency windows over person_satsang.last_satsang.
@@ -78,6 +95,9 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const [eventPersonIds, setEventPersonIds] = useState(null) // null = no event filter; array = resolved ids
   // Satsang: 'any' | 'ever' | '30' | '90' | '180' | 'never'. Resolved to a person-id
   // set from person_satsang (portal attendance + the Ishangam date, whichever is later).
+  // When they did the chosen programme. Only meaningful once a programme is
+  // picked, so it appears next to it — same pattern as Event + Status.
+  const [progWhen, setProgWhen] = useState('any')
   const [centre, setCentre] = useState('all')
   const [centres, setCentres] = useState([])
   const [satsang, setSatsang] = useState('any')
@@ -142,7 +162,14 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     (q) => {
       q = q.eq('is_meditator', true)
       const pd = PROGRAM_BY_KEY[prog]
-      if (pd && pd.col) q = q.not(pd.col, 'is', null)
+      if (pd && pd.col) {
+        q = q.not(pd.col, 'is', null)
+        if (progWhen !== 'any') {
+          if (progWhen === 'year') q = q.gte(pd.col, new Date().getFullYear() + '-01-01')
+          else if (progWhen === 'old') q = q.lt(pd.col, '2020-01-01')
+          else q = q.gte(pd.col, daysAgoISO(Number(progWhen)))
+        }
+      }
       // Event filter: intersect with the resolved attendee/registrant set for the chosen event.
       if (Array.isArray(eventPersonIds)) {
         q = eventPersonIds.length ? q.in('id', eventPersonIds) : q.eq('id', '00000000-0000-0000-0000-000000000000')
@@ -165,7 +192,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       if (searchOr) q = q.or(searchOr)
       return q
     },
-    [prog, recency, ieWindow, debounced, needsNurt, coveredIds, eventPersonIds, readyIds, satsang, satsangIds, centre],
+    [prog, progWhen, recency, ieWindow, debounced, needsNurt, coveredIds, eventPersonIds, readyIds, satsang, satsangIds, centre],
   )
 
   const fetchAllIds = useCallback(
@@ -198,7 +225,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     setPage(0)
     sel.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounced, prog, recency, needsNurt, eventId, attStatus, ready, ieWindow, satsang, centre, setPage])
+  }, [debounced, prog, progWhen, recency, needsNurt, eventId, attStatus, ready, ieWindow, satsang, centre, setPage])
 
   async function openCampaign() {
     if (sel.count(total) === 0) {
@@ -269,10 +296,11 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     ...(needsNurt ? [{ key: 'nurt', label: 'Nurturer', value: 'Needs a nurturer', onRemove: () => setNeedsNurt(false) }] : []),
     ...(ieWindow !== 'any' ? [{ key: 'iew', label: 'Inner Engineering', value: 'Finished · last 60 days', onRemove: () => setIeWindow('any') }] : []),
     ...(ready !== 'all' ? [{ key: 'ready', label: 'Ready for', value: readyLabel(ready), onRemove: () => setReady('all') }] : []),
+    ...(prog !== 'all' && progWhen !== 'any' ? [{ key: 'progwhen', label: 'Did it', value: PROG_WHEN.find((o) => o.key === progWhen)?.chip || progWhen, onRemove: () => setProgWhen('any') }] : []),
     ...(centre !== 'all' ? [{ key: 'centre', label: 'Centre', value: centres.find((c) => c.id === centre)?.name || centre, onRemove: () => setCentre('all') }] : []),
     ...(satsang !== 'any' ? [{ key: 'satsang', label: 'Satsang', value: SATSANG.find((o) => o.key === satsang)?.chip || satsang, onRemove: () => setSatsang('any') }] : []),
   ]
-  const clearAllFilters = () => { setSearch(''); setProg('all'); setEventId('all'); setAttStatus('all'); setRecency('any'); setNeedsNurt(false); setReady('all'); setIeWindow('any'); setSatsang('any'); setCentre('all') }
+  const clearAllFilters = () => { setSearch(''); setProg('all'); setEventId('all'); setAttStatus('all'); setRecency('any'); setNeedsNurt(false); setReady('all'); setIeWindow('any'); setSatsang('any'); setCentre('all'); setProgWhen('any') }
 
   return (
     <Pad>
@@ -331,7 +359,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
           {Icon.search(15)}
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email, address or pincode…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
-        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0) + (eventId !== 'all' ? 1 : 0) + (ready !== 'all' ? 1 : 0) + (ieWindow !== 'any' ? 1 : 0) + (satsang !== 'any' ? 1 : 0) + (centre !== 'all' ? 1 : 0)}>
+        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0) + (eventId !== 'all' ? 1 : 0) + (ready !== 'all' ? 1 : 0) + (ieWindow !== 'any' ? 1 : 0) + (satsang !== 'any' ? 1 : 0) + (centre !== 'all' ? 1 : 0) + (prog !== 'all' && progWhen !== 'any' ? 1 : 0)}>
           <select value={centre} onChange={(e) => setCentre(e.target.value)} style={selStyle}>
             <option value="all">All centres</option>
             {centres.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
@@ -340,6 +368,11 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
             <option value="all">All programmes</option>
             {PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => (<option key={p.key} value={p.key}>{p.label}</option>))}
           </select>
+          {prog !== 'all' && (
+            <select value={progWhen} onChange={(e) => setProgWhen(e.target.value)} style={selStyle}>
+              {PROG_WHEN.map((o) => (<option key={o.key} value={o.key}>{o.label}</option>))}
+            </select>
+          )}
           <select value={eventId} onChange={(e) => setEventId(e.target.value)} style={selStyle}>
             <option value="all">All events</option>
             {eventOpts.map((ev) => (<option key={ev.id} value={ev.id}>{ev.name}{ev.activity_date ? ` · ${ev.activity_date}` : ''}</option>))}
