@@ -32,6 +32,9 @@ const TYPE_PILLS = [
   { v: 'volunteering', label: 'Volunteering' },
   { v: 'ashram', label: 'Ashram Volunteering' },
   { v: 'ieo', label: 'IEO – Volunteering' },
+  // Ticked "I need support with my practice" on the IE completion form. Highest
+  // intent in the inbox: they asked, unprompted, the day the programme ended.
+  { v: 'practice_support', label: 'Practice support' },
   { v: 'advanced', label: 'Advanced Program' },
 ]
 // Status vocabulary is shared VISUALLY (same 5-pill look as the old Event Interests
@@ -105,7 +108,7 @@ async function ensurePersonId(name, phone) {
   return data.id
 }
 
-export default function Interest({ onToast, eventScopeId = null, onScopeConsumed, recipientDraft = null, onRecipientsDone }) {
+export default function Interest({ onToast, eventScopeId = null, onScopeConsumed, recipientDraft = null, onRecipientsDone, preset = null, onPresetConsumed }) {
   const { isPhone } = useBreakpoint()
 
   const [search, setSearch] = useState('')
@@ -166,6 +169,13 @@ export default function Interest({ onToast, eventScopeId = null, onScopeConsumed
 
   // Arriving from an event hub's "Volunteer Interests" jump → scope to that event.
   useEffect(() => { if (eventScopeId) { setEventFilter(eventScopeId); onScopeConsumed?.() } }, [eventScopeId, onScopeConsumed])
+  // Land with the Dashboard's filter already applied — same contract as Meditators.
+  useEffect(() => {
+    if (!preset) return
+    if (preset.type) setTypeFilter(preset.type)
+    if (preset.status) setStatusFilter(preset.status)
+    onPresetConsumed?.()
+  }, [preset, onPresetConsumed])
 
   // Distinct events for the event pill row — spans all pages. Re-read on reload:
   // a newly triaged interest can be the first one for its event, and the pill row

@@ -76,7 +76,7 @@ export default function Dashboard({ me, sections, isAdmin, onNavigate, onOpenLis
       try {
         const [
           activeVols, newThisMonth, inNurturing, activitiesWeek, meditators,
-          quietVols, newIe, advanceNew, noPhone, untriaged,
+          quietVols, newIe, advanceNew, noPhone, untriaged, practiceSupport, ieVolunteers,
         ] = await Promise.all([
           cnt('volunteers', 'people', (q) => q.eq('is_volunteer', true)),
           cnt('volunteers', 'volunteer_profiles', (q) => q.gte('interest_date', monthStartISO())),
@@ -97,9 +97,13 @@ export default function Dashboard({ me, sections, isAdmin, onNavigate, onOpenLis
           cnt('volunteers', 'people', (q) => q.eq('is_volunteer', true).is('phone', null)),
           // The largest untouched queue in the app, and it was nowhere on this screen.
           cnt('interest', 'interest_inbox_list', (q) => q.eq('status_bucket', 'interested')),
+          // Straight from the IE completion form: they ticked "I need support with
+          // my practice". Nobody could see these until the form was wired in.
+          cnt('meditators', 'ie_practice_support', (q) => q.eq('status', 'new')),
+          cnt('volunteers', 'ie_completion_volunteer', (q) => q.eq('status', 'new')),
         ])
         if (!alive) return
-        setKpis({ activeVols, newThisMonth, inNurturing, activitiesWeek, meditators, quietVols, newIe, advanceNew, noPhone, untriaged })
+        setKpis({ activeVols, newThisMonth, inNurturing, activitiesWeek, meditators, quietVols, newIe, advanceNew, noPhone, untriaged, practiceSupport, ieVolunteers })
       } catch (e) {
         if (alive) setErr(e.message || String(e))
       }
@@ -128,6 +132,28 @@ export default function Dashboard({ me, sections, isAdmin, onNavigate, onOpenLis
       body: 'Every one of these is someone who volunteered and is still waiting. Triaging a row takes one tap.',
       cta: 'Open the interest inbox',
       to: 'interest',
+      tint: 'var(--info-bg)', ink: 'var(--info-fg)',
+    },
+    {
+      // Asked for help, by name, on the form they filled at the end of IE. This
+      // outranks everything below it: the ask is explicit and it goes cold fast.
+      key: 'practice', sec: 'meditators',
+      n: k.practiceSupport,
+      tag: 'PRACTICE SUPPORT',
+      title: `${k.practiceSupport} new meditators asked for help with their practice`,
+      body: 'They ticked “I need support with my practice” on the IE completion form. Call while it is fresh — the ask is only weeks old.',
+      cta: 'Open the practice-support queue',
+      to: 'interest', preset: { type: 'practice_support', status: 'interested' },
+      tint: 'var(--success-bg)', ink: 'var(--success-fg)',
+    },
+    {
+      key: 'ievol', sec: 'volunteers',
+      n: k.ieVolunteers,
+      tag: 'NEW VOLUNTEERS',
+      title: `${k.ieVolunteers} IE finishers said they want to volunteer`,
+      body: 'From the same completion form. They offered first — nobody has come back to them yet.',
+      cta: 'Open these offers',
+      to: 'interest', preset: { type: 'ieo', status: 'interested' },
       tint: 'var(--info-bg)', ink: 'var(--info-fg)',
     },
     {
