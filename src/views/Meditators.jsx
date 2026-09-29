@@ -178,7 +178,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       q = applyIshaActivity(q, recency)
       // The single most time-sensitive cohort in the whole product: someone who has
       // just finished Inner Engineering is at their most open, and that window shuts.
-      if (ieWindow === '60') q = q.gte('ie_date', daysAgoISO(60))
+      if (ieWindow === '60') q = q.gte('ie_any_date', daysAgoISO(60))
       if (needsNurt && Array.isArray(coveredIds) && coveredIds.length && !excludeTooLarge(coveredIds)) q = q.not('id', 'in', `(${coveredIds.join(',')})`)
       if (Array.isArray(satsangIds)) {
         if (satsang === 'never') {
@@ -202,7 +202,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
 
   const buildPage = useCallback(
     () => applyFilters(
-      supabase.from('people').select('id, full_name, phone, area, pincode, center_id, ie_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date', { count: 'exact' }),
+      supabase.from('people').select('id, full_name, phone, area, pincode, center_id, ie_date, ieo_date, ie_any_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date', { count: 'exact' }),
     ).order('id', { ascending: true }),
     [applyFilters],
   )

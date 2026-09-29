@@ -92,7 +92,7 @@ export default function Dashboard({ me, sections, isAdmin, onNavigate, onOpenLis
           cnt('meditators', 'people', (q) => q.eq('is_meditator', true)),
           // ---- the four numbers behind "Needs attention" — all live queries ----
           cnt('volunteers', 'people', (q) => q.eq('is_volunteer', true).lt('last_active_date', daysAgoISO(90))),
-          cnt('meditators', 'people', (q) => q.eq('is_meditator', true).gte('ie_date', daysAgoISO(60))),
+          cnt('meditators', 'people', (q) => q.eq('is_meditator', true).gte('ie_any_date', daysAgoISO(60))),
           cnt('advance', 'advanced_interest', (q) => q.eq('status', 'new')),
           cnt('volunteers', 'people', (q) => q.eq('is_volunteer', true).is('phone', null)),
           // The largest untouched queue in the app, and it was nowhere on this screen.

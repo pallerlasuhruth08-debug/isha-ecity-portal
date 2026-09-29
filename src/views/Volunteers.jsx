@@ -116,7 +116,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
     ;(async () => {
       const [centres, ieRes, atypes, inUseRes, skillRows, eventsRes, subInUseRes] = await Promise.all([
         supabase.from('centers').select('id, name').order('name'),
-        supabase.from('people').select('ie_date').eq('is_volunteer', true).not('ie_date', 'is', null).order('ie_date', { ascending: true }).limit(1),
+        supabase.from('people').select('ie_any_date').eq('is_volunteer', true).not('ie_any_date', 'is', null).order('ie_any_date', { ascending: true }).limit(1),
         fetchActivityTypes().catch(() => []),
         supabase.from('activity_types_in_use').select('id'),
         supabase.from('person_skills').select('skill:skills(id, label)').limit(5000),
@@ -135,7 +135,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       const events = (eventsRes.data || []).map((e) => ({ v: e.id, label: e.name || 'Untitled event' }))
       // Sub-activities that have actually been captured (labelled from sub_activities).
       const subs = (subInUseRes.data || []).map((r) => ({ v: r.id, label: r.label }))
-      const minYear = ieRes.data?.[0]?.ie_date ? new Date(ieRes.data[0].ie_date).getFullYear() : 2010
+      const minYear = ieRes.data?.[0]?.ie_any_date ? new Date(ieRes.data[0].ie_any_date).getFullYear() : 2010
       const nowY = new Date().getFullYear()
       const ieYears = []
       for (let y = nowY; y >= minYear; y--) ieYears.push(String(y))
@@ -298,7 +298,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
       if (fil.seen === 'never' && Array.isArray(seenIds) && seenIds.length && !excludeTooLarge(seenIds)) q = q.not('person_id', 'in', `(${seenIds.join(',')})`)
       if (Array.isArray(readyIds)) q = q.in('person_id', readyIds.length ? readyIds : [NIL])
       if (fil.centre) q = q.eq('center_id', fil.centre)
-      if (fil.ie) q = q.gte('ie_date', `${fil.ie}-01-01`).lte('ie_date', `${fil.ie}-12-31`)
+      if (fil.ie) q = q.gte('ie_any_date', `${fil.ie}-01-01`).lte('ie_any_date', `${fil.ie}-12-31`)
       if (PROGRAM_BY_KEY[fil.program]) q = q.not(PROGRAM_BY_KEY[fil.program].col, 'is', null)
       // `last_active_date` is the upstream Isha transaction date, not our contact —
       // one shared helper so the filter, the label and the other screens agree.
@@ -323,7 +323,7 @@ export default function Volunteers({ me, onToast, campaignDraft = null, onClearC
   // person_id as a stable tiebreak — so page 1 is globally most-recent.
   const buildPage = useCallback(
     () => applyFilters(
-      supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date, tags', { count: 'exact' }),
+      supabase.from('volunteer_list').select('id, person_id, status, languages, full_name, phone, pincode, area, center_id, ie_date, ieo_date, ie_any_date, bsp_date, shoonya_date, samyama_date, yogasanas_date, surya_kriya_date, guru_puja_date, eoe_date, angamardhana_date, lom_date, bhutha_shuddhi_date, last_active_date, tags', { count: 'exact' }),
     )
       // Page 1 used to be "whoever the importer touched last", because the sort was
       // on `last_activity_at` — a sync stamp that lands 917 of 941 values in a single
