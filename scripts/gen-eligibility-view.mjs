@@ -29,12 +29,10 @@ import { ELIGIBILITY_RULES, provingProgrammes } from '../src/lib/eligibility.js'
 import { PROGRAM_BY_KEY, MIN_ROWS_TO_TRUST } from '../src/lib/programCatalog.js'
 
 // Columns that genuinely exist on public.people, verified against the live
-// schema. `ieo_date` is deliberately ABSENT: the rule engine coalesces it with
-// ie_date so it keeps working the day an Ishangam sync introduces it, but SQL
-// referencing a column that does not exist would not compile, so it is skipped
-// here and the generator says so in the header. When the column lands, add it.
+// schema. `ieo_date` landed with the Ishangam IEO sync, along with the generated
+// `ie_any_date` = greatest(ie_date, ieo_date) that the catalogue now points IE at.
 const DB_COLUMNS = new Set([
-  'ie_date', 'bsp_date', 'shoonya_date', 'samyama_date', 'yogasanas_date',
+  'ie_date', 'ieo_date', 'ie_any_date', 'bsp_date', 'shoonya_date', 'samyama_date', 'yogasanas_date',
   'surya_kriya_date', 'guru_puja_date', 'eoe_date', 'angamardhana_date',
   'lom_date', 'bhutha_shuddhi_date',
 ])
