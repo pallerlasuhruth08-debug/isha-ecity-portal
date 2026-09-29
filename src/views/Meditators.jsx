@@ -37,6 +37,17 @@ function progList(p) {
 }
 
 
+// Satsang attendance filter. "Never" is the cohort worth calling; the rest are
+// recency windows over person_satsang.last_satsang.
+const SATSANG = [
+  { key: 'any', label: 'Satsang \u00b7 any', chip: 'Any' },
+  { key: 'ever', label: 'Attended satsang \u00b7 ever', chip: 'Attended ever' },
+  { key: '30', label: 'Attended satsang \u00b7 last 30 days', chip: 'Last 30 days' },
+  { key: '90', label: 'Attended satsang \u00b7 last 90 days', chip: 'Last 90 days' },
+  { key: '180', label: 'Attended satsang \u00b7 last 180 days', chip: 'Last 180 days' },
+  { key: 'never', label: 'Never attended a satsang', chip: 'Never attended' },
+]
+
 export default function Meditators({ me, onToast, campaignDraft = null, onClearCampaignDraft, onDone, recipientDraft = null, onRecipientsDone, preset = null, onPresetConsumed }) {
   const { isPhone } = useBreakpoint()
   const [search, setSearch] = useState('')
@@ -65,6 +76,10 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const [attStatus, setAttStatus] = useState('all')
   const [eventOpts, setEventOpts] = useState([])
   const [eventPersonIds, setEventPersonIds] = useState(null) // null = no event filter; array = resolved ids
+  // Satsang: 'any' | 'ever' | '30' | '90' | '180' | 'never'. Resolved to a person-id
+  // set from person_satsang (portal attendance + the Ishangam date, whichever is later).
+  const [satsang, setSatsang] = useState('any')
+  const [satsangIds, setSatsangIds] = useState(null) // null = off, 'loading', or array
   useEffect(() => { supabase.rpc('meditator_events').then(({ data }) => setEventOpts(data || [])) }, [])
   // Resolve the chosen event+status to a person-id set the people query intersects with.
   useEffect(() => {
@@ -75,6 +90,16 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       .then(({ data }) => { if (alive) setEventPersonIds([...new Set((data || []).map((r) => r.person_id))]) })
     return () => { alive = false }
   }, [eventId, attStatus])
+
+  useEffect(() => {
+    if (satsang === 'any') { setSatsangIds(null); return }
+    let alive = true
+    setSatsangIds('loading')
+    let q = supabase.from('person_satsang').select('person_id')
+    if (satsang !== 'ever' && satsang !== 'never') q = q.gte('last_satsang', daysAgoISO(Number(satsang)))
+    q.then(({ data }) => { if (alive) setSatsangIds([...new Set((data || []).map((r) => r.person_id))]) })
+    return () => { alive = false }
+  }, [satsang])
 
   // 'Needs a nurturer' -> exclude people who already have an active nurturer.
   useEffect(() => {
@@ -121,12 +146,19 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       // just finished Inner Engineering is at their most open, and that window shuts.
       if (ieWindow === '60') q = q.gte('ie_date', daysAgoISO(60))
       if (needsNurt && Array.isArray(coveredIds) && coveredIds.length && !excludeTooLarge(coveredIds)) q = q.not('id', 'in', `(${coveredIds.join(',')})`)
+      if (Array.isArray(satsangIds)) {
+        if (satsang === 'never') {
+          if (satsangIds.length && !excludeTooLarge(satsangIds)) q = q.not('id', 'in', `(${satsangIds.join(',')})`)
+        } else {
+          q = satsangIds.length ? q.in('id', satsangIds) : q.eq('id', '00000000-0000-0000-0000-000000000000')
+        }
+      }
       if (Array.isArray(readyIds)) q = readyIds.length ? q.in('id', readyIds) : q.eq('id', '00000000-0000-0000-0000-000000000000')
       const searchOr = multiFieldOr(debounced, PEOPLE_SEARCH_FIELDS) // name|phone|email|pincode, sanitized
       if (searchOr) q = q.or(searchOr)
       return q
     },
-    [prog, recency, ieWindow, debounced, needsNurt, coveredIds, eventPersonIds, readyIds],
+    [prog, recency, ieWindow, debounced, needsNurt, coveredIds, eventPersonIds, readyIds, satsang, satsangIds],
   )
 
   const fetchAllIds = useCallback(
@@ -146,7 +178,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const filtersReady =
     !(needsNurt && !Array.isArray(coveredIds)) &&
     !(eventId !== 'all' && !Array.isArray(eventPersonIds)) &&
-    readyIds !== 'loading'
+    readyIds !== 'loading' && satsangIds !== 'loading'
 
   const { rows, total, page, pageSize, loading, err, setPage, setPageSize, pageCount, reload: loadPage } =
     usePagedQuery(buildPage, { ready: filtersReady })
@@ -230,8 +262,9 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     ...(needsNurt ? [{ key: 'nurt', label: 'Nurturer', value: 'Needs a nurturer', onRemove: () => setNeedsNurt(false) }] : []),
     ...(ieWindow !== 'any' ? [{ key: 'iew', label: 'Inner Engineering', value: 'Finished · last 60 days', onRemove: () => setIeWindow('any') }] : []),
     ...(ready !== 'all' ? [{ key: 'ready', label: 'Ready for', value: readyLabel(ready), onRemove: () => setReady('all') }] : []),
+    ...(satsang !== 'any' ? [{ key: 'satsang', label: 'Satsang', value: SATSANG.find((o) => o.key === satsang)?.chip || satsang, onRemove: () => setSatsang('any') }] : []),
   ]
-  const clearAllFilters = () => { setSearch(''); setProg('all'); setEventId('all'); setAttStatus('all'); setRecency('any'); setNeedsNurt(false); setReady('all'); setIeWindow('any') }
+  const clearAllFilters = () => { setSearch(''); setProg('all'); setEventId('all'); setAttStatus('all'); setRecency('any'); setNeedsNurt(false); setReady('all'); setIeWindow('any'); setSatsang('any') }
 
   return (
     <Pad>
@@ -290,7 +323,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
           {Icon.search(15)}
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email, address or pincode…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
-        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0) + (eventId !== 'all' ? 1 : 0) + (ready !== 'all' ? 1 : 0) + (ieWindow !== 'any' ? 1 : 0)}>
+        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0) + (eventId !== 'all' ? 1 : 0) + (ready !== 'all' ? 1 : 0) + (ieWindow !== 'any' ? 1 : 0) + (satsang !== 'any' ? 1 : 0)}>
           <select value={prog} onChange={(e) => setProg(e.target.value)} style={selStyle}>
             <option value="all">All programmes</option>
             {PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => (<option key={p.key} value={p.key}>{p.label}</option>))}
@@ -316,6 +349,9 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
           <select value={needsNurt ? 'needs' : ''} onChange={(e) => setNeedsNurt(e.target.value === 'needs')} style={selStyle}>
             <option value="">Nurturer · any</option>
             <option value="needs">Needs a nurturer</option>
+          </select>
+          <select value={satsang} onChange={(e) => setSatsang(e.target.value)} style={selStyle}>
+            {SATSANG.map((o) => (<option key={o.key} value={o.key}>{o.label}</option>))}
           </select>
           <select value={ready} onChange={(e) => setReady(e.target.value)} style={selStyle}>
             <option value="all">Ready for · any</option>
