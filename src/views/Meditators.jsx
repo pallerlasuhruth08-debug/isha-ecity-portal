@@ -78,8 +78,14 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
   const [eventPersonIds, setEventPersonIds] = useState(null) // null = no event filter; array = resolved ids
   // Satsang: 'any' | 'ever' | '30' | '90' | '180' | 'never'. Resolved to a person-id
   // set from person_satsang (portal attendance + the Ishangam date, whichever is later).
+  const [centre, setCentre] = useState('all')
+  const [centres, setCentres] = useState([])
   const [satsang, setSatsang] = useState('any')
   const [satsangIds, setSatsangIds] = useState(null) // null = off, 'loading', or array
+  useEffect(() => {
+    supabase.from('centers').select('id, name').neq('id', 'all').order('name')
+      .then(({ data }) => setCentres(data || []))
+  }, [])
   useEffect(() => { supabase.rpc('meditator_events').then(({ data }) => setEventOpts(data || [])) }, [])
   // Resolve the chosen event+status to a person-id set the people query intersects with.
   useEffect(() => {
@@ -141,6 +147,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       if (Array.isArray(eventPersonIds)) {
         q = eventPersonIds.length ? q.in('id', eventPersonIds) : q.eq('id', '00000000-0000-0000-0000-000000000000')
       }
+      if (centre !== 'all') q = q.eq('center_id', centre)
       q = applyIshaActivity(q, recency)
       // The single most time-sensitive cohort in the whole product: someone who has
       // just finished Inner Engineering is at their most open, and that window shuts.
@@ -158,7 +165,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
       if (searchOr) q = q.or(searchOr)
       return q
     },
-    [prog, recency, ieWindow, debounced, needsNurt, coveredIds, eventPersonIds, readyIds, satsang, satsangIds],
+    [prog, recency, ieWindow, debounced, needsNurt, coveredIds, eventPersonIds, readyIds, satsang, satsangIds, centre],
   )
 
   const fetchAllIds = useCallback(
@@ -191,7 +198,7 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     setPage(0)
     sel.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounced, prog, recency, needsNurt, eventId, attStatus, ready, ieWindow, setPage])
+  }, [debounced, prog, recency, needsNurt, eventId, attStatus, ready, ieWindow, satsang, centre, setPage])
 
   async function openCampaign() {
     if (sel.count(total) === 0) {
@@ -262,9 +269,10 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
     ...(needsNurt ? [{ key: 'nurt', label: 'Nurturer', value: 'Needs a nurturer', onRemove: () => setNeedsNurt(false) }] : []),
     ...(ieWindow !== 'any' ? [{ key: 'iew', label: 'Inner Engineering', value: 'Finished · last 60 days', onRemove: () => setIeWindow('any') }] : []),
     ...(ready !== 'all' ? [{ key: 'ready', label: 'Ready for', value: readyLabel(ready), onRemove: () => setReady('all') }] : []),
+    ...(centre !== 'all' ? [{ key: 'centre', label: 'Centre', value: centres.find((c) => c.id === centre)?.name || centre, onRemove: () => setCentre('all') }] : []),
     ...(satsang !== 'any' ? [{ key: 'satsang', label: 'Satsang', value: SATSANG.find((o) => o.key === satsang)?.chip || satsang, onRemove: () => setSatsang('any') }] : []),
   ]
-  const clearAllFilters = () => { setSearch(''); setProg('all'); setEventId('all'); setAttStatus('all'); setRecency('any'); setNeedsNurt(false); setReady('all'); setIeWindow('any'); setSatsang('any') }
+  const clearAllFilters = () => { setSearch(''); setProg('all'); setEventId('all'); setAttStatus('all'); setRecency('any'); setNeedsNurt(false); setReady('all'); setIeWindow('any'); setSatsang('any'); setCentre('all') }
 
   return (
     <Pad>
@@ -323,7 +331,11 @@ export default function Meditators({ me, onToast, campaignDraft = null, onClearC
           {Icon.search(15)}
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email, address or pincode…" style={{ border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent', width: '100%', color: 'var(--ink)' }} />
         </div>
-        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0) + (eventId !== 'all' ? 1 : 0) + (ready !== 'all' ? 1 : 0) + (ieWindow !== 'any' ? 1 : 0) + (satsang !== 'any' ? 1 : 0)}>
+        <MobileFilterSheet count={(prog !== 'all' ? 1 : 0) + (recency !== 'any' ? 1 : 0) + (needsNurt ? 1 : 0) + (eventId !== 'all' ? 1 : 0) + (ready !== 'all' ? 1 : 0) + (ieWindow !== 'any' ? 1 : 0) + (satsang !== 'any' ? 1 : 0) + (centre !== 'all' ? 1 : 0)}>
+          <select value={centre} onChange={(e) => setCentre(e.target.value)} style={selStyle}>
+            <option value="all">All centres</option>
+            {centres.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+          </select>
           <select value={prog} onChange={(e) => setProg(e.target.value)} style={selStyle}>
             <option value="all">All programmes</option>
             {PROGRAMS.filter((p) => progKeys.has(p.key)).map((p) => (<option key={p.key} value={p.key}>{p.label}</option>))}
