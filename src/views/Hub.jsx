@@ -217,7 +217,7 @@ function EventInterestTab({ ev, me, isCoordinator, onToast }) {
           <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>Add or import against this event — stays right here.</span>
         </div>
       )}
-      <EventInterestPanel uid={me?.id} lockEventId={ev.id} reloadKey={reloadKey} onToast={onToast} isCoordinator={isCoordinator} />
+      <EventInterestPanel uid={me?.id} lockEventId={ev.id} reloadKey={reloadKey} onToast={onToast} isCoordinator={isCoordinator} isAdmin={me?.role === 'admin'} />
       {addOpen && <AddImport lockEventId={ev.id} me={me} onClose={() => setAddOpen(false)} onToast={onToast} onDone={() => { setAddOpen(false); setReloadKey((k) => k + 1) }} />}
     </div>
   )
