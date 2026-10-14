@@ -52,7 +52,7 @@ function availLabel(r, daysByEvent) {
 // Shared Event-Interest table view. Two modes:
 //  - lockEventId set → single event, no event filter pill row (Event Hub tab).
 //  - lockEventId null → all events with an "Event" pill row; scopeEventId presets it.
-export default function EventInterestPanel({ uid, lockEventId = null, scopeEventId = null, onScopeConsumed, reloadKey = 0, onToast, isCoordinator = true, recipientDraft = null, onRecipientsDone }) {
+export default function EventInterestPanel({ uid, lockEventId = null, scopeEventId = null, onScopeConsumed, reloadKey = 0, onToast, isCoordinator = true, isAdmin = false, recipientDraft = null, onRecipientsDone }) {
   const { isPhone } = useBreakpoint()
 
   // Server-side pagination
@@ -198,7 +198,7 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
       // person embed is !inner so a name/phone search filter on it narrows the
       // event_interest rows themselves (person_id is NOT NULL, so no rows are lost).
       let q = supabase.from('event_interest').select(
-        'id, created_at, status, contacted_at, approved_at, availability_dates, note, activity:activities!event_interest_activity_id_fkey(id, name, activity_date, start_date, end_date), person:people!event_interest_person_id_fkey!inner(id, full_name, phone, email)',
+        'id, created_at, status, contacted_at, approved_at, availability_dates, note, support_area_ids, activity:activities!event_interest_activity_id_fkey(id, name, activity_date, start_date, end_date), person:people!event_interest_person_id_fkey!inner(id, full_name, phone, email)',
         { count: 'exact' }
       )
       if (lockEventId) q = q.eq('activity_id', lockEventId)
@@ -286,6 +286,30 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
       patchRow(r.id, { note })
       onToast?.('Comment saved.')
     } catch (e) { onToast?.('Could not save comment: ' + (e.message || e)) }
+  }
+
+  async function saveSupportAreas(r, ids) {
+    try {
+      const { error } = await supabase.from('event_interest').update({ support_area_ids: ids }).eq('id', r.id)
+      if (error) throw error
+      patchRow(r.id, { support_area_ids: ids })
+    } catch (e) { onToast?.('Could not save support areas: ' + (e.message || e)) }
+  }
+
+  // Renames the PERSON (people.full_name), so the fix shows everywhere, not just here.
+  // RLS may refuse silently (0 rows) when the person's pincode is outside your scope.
+  async function saveName(r, fullName) {
+    const name = fullName.trim()
+    if (!name || !r.person?.id) return false
+    try {
+      const { data, error } = await supabase.from('people').update({ full_name: name }).eq('id', r.person.id).select('id')
+      if (error) throw error
+      if (!data?.length) { onToast?.("You don't have access to edit this person's name."); return false }
+      setRows((prev) => (prev || []).map((x) => (x.person?.id === r.person.id ? { ...x, person: { ...x.person, full_name: name } } : x)))
+      setSelected((s) => (s && s.person?.id === r.person.id ? { ...s, person: { ...s.person, full_name: name } } : s))
+      onToast?.(`Name updated to ${name}.`)
+      return true
+    } catch (e) { onToast?.('Could not update name: ' + (e.message || e)); return false }
   }
 
   // Fetch all person_ids matching current server-side filters (for Stage 2 "select all"
@@ -572,6 +596,10 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
           onAction={(to) => changeStatus(selected, to)}
           onAvailability={(d) => saveAvailability(selected, d)}
           onSaveNote={(n) => saveNote(selected, n)}
+          onSupportAreas={(ids) => saveSupportAreas(selected, ids)}
+          onRename={(n) => saveName(selected, n)}
+          onToast={onToast}
+          isAdmin={isAdmin}
         />
       )}
 
@@ -598,8 +626,10 @@ export default function EventInterestPanel({ uid, lockEventId = null, scopeEvent
   )
 }
 
-function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailability, onSaveNote }) {
+function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailability, onSaveNote, onSupportAreas, onRename, onToast, isAdmin }) {
   const [busy, setBusy] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
   const [note, setNote] = useState(r.note || '')
   const status = r.status || 'interested'
   const avail = r.availability_dates || []
@@ -617,7 +647,24 @@ function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailabil
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ width: 46, height: 46, borderRadius: '50%', background: avatarFor(1), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 600 }}>{initials(r.person?.full_name || '?')}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 3px' }}>{r.person?.full_name || 'Unknown'}</h2>
+            {editingName ? (
+              <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                <input value={nameDraft} autoFocus onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={async (e) => { if (e.key === 'Enter' && await onRename(nameDraft)) setEditingName(false); if (e.key === 'Escape') setEditingName(false) }}
+                  style={{ flex: 1, minWidth: 0, padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 16, fontFamily: 'inherit', outline: 'none' }} />
+                <button className="btn btn-primary" style={{ fontSize: 12, padding: '6px 12px' }} disabled={!nameDraft.trim() || nameDraft.trim() === (r.person?.full_name || '')}
+                  onClick={async () => { if (await onRename(nameDraft)) setEditingName(false) }}>Save</button>
+                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={() => setEditingName(false)}>Cancel</button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '0 0 3px' }}>
+                <h2 style={{ fontSize: 22, fontWeight: 600, margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person?.full_name || 'Unknown'}</h2>
+                {r.person?.id && (
+                  <button title="Edit name" aria-label="Edit name" onClick={() => { setNameDraft(r.person?.full_name || ''); setEditingName(true) }}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--muted-2)', fontSize: 15, padding: 4 }}>✎</button>
+                )}
+              </div>
+            )}
             <span className="pill" style={EI_STATUS_MAP[status]?.pill}>{EI_STATUS_MAP[status]?.label}</span>
           </div>
         </div>
@@ -668,6 +715,8 @@ function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailabil
           </div>
         )}
 
+        <SupportAreas value={r.support_area_ids || []} onChange={onSupportAreas} onToast={onToast} isAdmin={isAdmin} />
+
         <div className="card" style={{ padding: 18 }}>
           <SecH>Comments</SecH>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} placeholder="Notes on availability, preferences, etc…"
@@ -678,6 +727,79 @@ function InterestDetail({ r, isCoordinator, days, onClose, onAction, onAvailabil
         </div>
       </div>
     </SidePanel>
+  )
+}
+
+// "Where they want to support" — a checkbox list over ONE shared list (support_areas)
+// that every event uses. Anyone can tick; only admins may add / rename / remove options
+// (support_areas_write RLS). Removing one also clears it from every volunteer (DB trigger).
+function SupportAreas({ value, onChange, onToast, isAdmin }) {
+  const [opts, setOpts] = useState(null)
+  const [editing, setEditing] = useState(false)
+  const [newName, setNewName] = useState('')
+  const load = useCallback(async () => {
+    const { data, error } = await supabase.from('support_areas').select('id, name, sort').order('sort').order('name')
+    if (error) onToast?.('Could not load support areas: ' + error.message)
+    setOpts(data || [])
+  }, [onToast])
+  useEffect(() => { load() }, [load])
+
+  const input = { flex: 1, minWidth: 0, padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', background: '#fff', outline: 'none' }
+  const toggle = (id) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
+
+  async function add() {
+    const name = newName.trim()
+    if (!name) return
+    const sort = (opts || []).reduce((m, o) => Math.max(m, o.sort), 0) + 1
+    const { error } = await supabase.from('support_areas').insert({ name, sort })
+    if (error) return onToast?.(error.code === '23505' ? `"${name}" already exists.` : 'Could not add: ' + error.message)
+    setNewName(''); load()
+  }
+  async function rename(o, name) {
+    name = name.trim()
+    if (!name || name === o.name) return
+    const { error } = await supabase.from('support_areas').update({ name }).eq('id', o.id)
+    if (error) return onToast?.(error.code === '23505' ? `"${name}" already exists.` : 'Could not rename: ' + error.message)
+    load()
+  }
+  async function remove(o) {
+    if (!window.confirm(`Remove "${o.name}" from the list? It will also be cleared from every volunteer who picked it, in all events.`)) return
+    const { error } = await supabase.from('support_areas').delete().eq('id', o.id)
+    if (error) return onToast?.('Could not remove: ' + error.message)
+    if (value.includes(o.id)) onChange(value.filter((x) => x !== o.id))
+    load()
+  }
+
+  return (
+    <div className="card" style={{ padding: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline' }}>
+        <div style={{ flex: 1 }}><SecH>Where they want to support</SecH></div>
+        {isAdmin && <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setEditing((e) => !e)}>{editing ? 'Done' : 'Edit options'}</button>}
+      </div>
+      {opts === null ? <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>Loading…</span> : editing ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {opts.map((o) => (
+            <div key={o.id + o.name} style={{ display: 'flex', gap: 6 }}>
+              <input defaultValue={o.name} style={input} onBlur={(e) => rename(o, e.target.value)} onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 10px', color: 'var(--danger-fg)' }} onClick={() => remove(o)}>Remove</button>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder="Add an option…" style={input} />
+            <button className="btn btn-primary" style={{ fontSize: 12, padding: '6px 12px' }} disabled={!newName.trim()} onClick={add}>Add</button>
+          </div>
+        </div>
+      ) : opts.length ? (
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {opts.map((o) => (
+            <div key={o.id} onClick={() => toggle(o.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', cursor: 'pointer', fontSize: 14 }}>
+              <Checkbox state={value.includes(o.id)} label={o.name} />
+              {o.name}
+            </div>
+          ))}
+        </div>
+      ) : <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>No options yet.</span>}
+    </div>
   )
 }
 
