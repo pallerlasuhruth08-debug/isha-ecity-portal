@@ -66,7 +66,7 @@ export default function CallLogDialog({ journey, logs = [], actorNames = {}, myI
                 <div key={l.id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                   <span className="pill" style={{ ...pillForOutcome(l.reachability), flexShrink: 0 }}>{l.reachability}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 11, color: 'var(--muted-2)' }}>{fmtWhen(l.logged_at)} · by {actorOf(l.logged_by)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted-2)' }}>{fmtWhen(l.logged_at)} · by {l.logged_by ? actorOf(l.logged_by) : (l.portal_caller_label || '—')}</div>
                     {l.remarks && <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginTop: 2 }}>{l.remarks}</div>}
                   </div>
                 </div>
