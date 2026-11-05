@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { waHref, smsHref, hasDialable, fillTemplate } from '../lib/phone'
+import { waHref, smsHref, telHref, hasDialable, fillTemplate, checkMobile } from '../lib/phone'
+import Field from '../components/Field'
 import { initials, avatarFor, BRAND } from '../lib/ui'
 import { MESSAGE_STATUS, pillForMessage, labelForMessage } from '../lib/messageStatus'
 import KebabMenu from '../components/KebabMenu'
+import { LOG_OUTCOMES, DEFAULT_OUTCOME, pillForOutcome, OUTCOME_TO_STATUS } from '../lib/calllog'
 
 // Volunteer messaging portal — ONE link per campaign (campaigns.portal_token),
 // reached via #volunteer-portal/<token> or #volunteer-portal/<token>/batch/<batch_id>.
@@ -60,6 +62,10 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
   }, [token])
 
   const approved = session?.ok && session.status === 'approved'
+  // Calling campaigns reuse this page: same link, sign-in and batch claim, but
+  // rows get Call + Log instead of Sent, and a finished batch pulls the next one.
+  const calling = !!info && info.campaign_type !== 'messaging'
+  const [nextState, setNextState] = useState(null) // calling only: null | 'loading' | 'all_taken'
 
   // Checked on every visit once a phone is known (fresh submit or localStorage
   // restore). A brand-new (campaign, phone) pair runs Step 1 (phone lookup) --
@@ -177,8 +183,9 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
 
   const loadRecipients = useCallback(() => {
     if (!caller || !batchId || !gate?.ok) return
-    supabase.rpc('claim_portal_split_recipients', { p_token: token, p_split_id: batchId, p_phone: caller.phone }).then(({ data }) => setRecipients(data || []))
-  }, [caller, batchId, gate, token])
+    const fn = calling ? 'claim_portal_call_recipients' : 'claim_portal_split_recipients'
+    supabase.rpc(fn, { p_token: token, p_split_id: batchId, p_phone: caller.phone }).then(({ data }) => setRecipients(data || []))
+  }, [caller, batchId, gate, token, calling])
 
   useEffect(() => { loadRecipients() }, [loadRecipients])
 
@@ -189,7 +196,29 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
 
   // A batch is "done" once every recipient has been either messaged or marked
   // no-WhatsApp -- nothing left for the volunteer to action.
-  const allResolved = !!recipients && recipients.length > 0 && recipients.every((r) => r.message_status !== 'to_message')
+  const allResolved = !!recipients && recipients.length > 0 && (calling ? recipients.every((r) => !!r.last_outcome) : recipients.every((r) => r.message_status !== 'to_message'))
+  const loggedCount = recipients ? recipients.filter((r) => !!r.last_outcome).length : 0
+
+  // Calling: once every person in the batch has a log, claim the next free batch.
+  // Server re-checks completeness, so this can't skip people early.
+  useEffect(() => {
+    if (!calling || !allResolved || nextState) return
+    setNextState('loading')
+    supabase.rpc('claim_portal_claim_next_batch', { p_token: token, p_phone: caller.phone }).then(({ data, error }) => {
+      if (error || !data) { setNextState(null); return }
+      if (data.status === 'ok') {
+        setNextState(null)
+        setRecipients(null)
+        setBatchId(data.batch_id)
+        window.location.hash = `volunteer-portal/${token}/batch/${data.batch_id}`
+        setToast('Batch done 🙏 Here are your next people.')
+      } else if (data.status === 'all_taken') {
+        setNextState('all_taken')
+      } else {
+        setNextState(null)
+      }
+    })
+  }, [calling, allResolved, nextState, token, caller])
   const resolvedStats = recipients ? {
     total: recipients.length,
     sent: recipients.filter((r) => r.message_status === 'sent' || r.message_status === 'responded').length,
@@ -236,7 +265,7 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
 
       {info && !caller && (
         <div className="card" style={{ ...box, padding: 16 }}>
-          <div style={{ fontSize: 12, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>Volunteer messaging</div>
+          <div style={{ fontSize: 12, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-2)', fontWeight: 700 }}>{calling ? 'Volunteer calling' : 'Volunteer messaging'}</div>
           <h1 style={{ fontFamily: "'Newsreader',serif", fontSize: 22, fontWeight: 600, margin: '4px 0 16px' }}>{info.campaign_name}</h1>
           <Field label="Your name" required value={name} onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Priya Kumar" autoComplete="name" enterKeyHint="next" />
@@ -329,11 +358,18 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
               <div style={{ fontFamily: "'Newsreader',serif", fontSize: 18, fontWeight: 600, marginBottom: 2 }}>Namaskaram, {caller.name.split(' ')[0]}</div>
               <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 4 }}>{info.campaign_name}</div>
               <div style={{ fontSize: 14, color: 'var(--ink-soft)', fontWeight: 600, marginBottom: 12 }}>
-                Your outreach list — {(recipients || []).length} people
-                {recipients && recipients.length > 0 && <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {recipients.filter((r) => r.message_status === 'sent' || r.message_status === 'responded').length} sent</span>}
+                Your {calling ? 'call' : 'outreach'} list — {(recipients || []).length} people
+                {recipients && recipients.length > 0 && <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {calling ? `${loggedCount} logged` : `${recipients.filter((r) => r.message_status === 'sent' || r.message_status === 'responded').length} sent`}</span>}
               </div>
+              {calling && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>Call each person, then log how it went. When all are logged, your next people load automatically.</div>}
+              {calling && recipients?.[0]?.script && (
+                <details className="card" style={{ padding: '10px 12px', marginBottom: 12 }}>
+                  <summary style={{ fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Call script</summary>
+                  <div style={{ fontSize: 13.5, color: 'var(--ink-soft)', whiteSpace: 'pre-wrap', lineHeight: 1.5, marginTop: 8 }}>{recipients[0].script}</div>
+                </details>
+              )}
 
-              {unresolvedCount > 0 && (
+              {!calling && unresolvedCount > 0 && (
                 <div style={{ marginBottom: 14 }}>
                   <button onClick={() => setBulkConfirming(true)} style={{ fontSize: 12.5, fontWeight: 600, padding: '8px 13px', borderRadius: 9, border: '1px solid var(--border)', background: '#fff', color: 'var(--ink-soft)', cursor: 'pointer' }}>
                     ✓ Mark all as sent & finish
@@ -341,7 +377,7 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
                 </div>
               )}
 
-              {recipients && recipients.length > 0 && (() => {
+              {!calling && recipients && recipients.length > 0 && (() => {
                 const counts = { all: recipients.length }
                 for (const s of MESSAGE_STATUS) counts[s.v] = recipients.filter((r) => r.message_status === s.v).length
                 const chip = (on) => ({ fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 20, cursor: 'pointer', border: on ? 'none' : '1px solid var(--border)', background: on ? '#241B14' : '#fff', color: on ? '#F6ECDC' : 'var(--ink-soft)', whiteSpace: 'nowrap', flexShrink: 0 })
@@ -360,17 +396,30 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
                 <div className="card" style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>No one in your list yet.</div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {(recipients || []).filter((r) => statusFilter === 'all' || r.message_status === statusFilter).map((r) => (
+                {calling && (recipients || []).map((r) => (
+                  <CallRow key={r.journey_id} r={r} token={token} splitId={batchId} phone={caller.phone} myName={caller.name} label={`${caller.name} · ${caller.phone}`}
+                    onTouch={touchBatch}
+                    onLogged={(outcome, remarks) => setRecipients((prev) => prev.map((x) => (x.journey_id === r.journey_id ? { ...x, last_outcome: outcome, last_remarks: remarks, last_logged_at: new Date().toISOString() } : x)))} />
+                ))}
+                {!calling && (recipients || []).filter((r) => statusFilter === 'all' || r.message_status === statusFilter).map((r) => (
                   <RecipientRow key={r.journey_id} r={r} token={token} splitId={batchId} phone={caller.phone} myName={caller.name} label={`${caller.name} · ${caller.phone}`}
                     onTouch={touchBatch}
                     onSent={(status) => setRecipients((prev) => prev.map((x) => (x.journey_id === r.journey_id ? { ...x, message_status: status } : x)))} />
                 ))}
               </div>
-              <div style={{ textAlign: 'center', marginTop: 24, marginBottom: allResolved ? 64 : 0 }}>
+              {calling && nextState === 'loading' && <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 14, padding: 16 }}>Loading your next people…</div>}
+              {calling && nextState === 'all_taken' && (
+                <div className="card" style={{ padding: 16, textAlign: 'center', marginTop: 14 }}>
+                  <div style={{ fontSize: 22, marginBottom: 4 }}>🙏</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Everyone in this campaign has been taken</div>
+                  <div style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.5 }}>Thank you for your seva! There are no more people left to call right now.</div>
+                </div>
+              )}
+              <div style={{ textAlign: 'center', marginTop: 24, marginBottom: !calling && allResolved ? 64 : 0 }}>
                 <button onClick={signOut} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minHeight: 44, padding: '0 16px', background: 'none', border: 'none', color: 'var(--muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>Sign out</button>
               </div>
 
-              {allResolved && !celebrating && (
+              {!calling && allResolved && !celebrating && (
                 <button className="btn btn-primary done-sticky-btn" onClick={() => setCelebrating(true)} style={{ padding: '14px 22px', fontSize: 15, borderRadius: 999 }}>🎉 All done! Tap to finish</button>
               )}
               {celebrating && (
@@ -399,6 +448,71 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
       {toast && (
         <div style={{ position: 'fixed', left: '50%', bottom: 24, transform: 'translateX(-50%)', background: '#241B14', color: '#F6ECDC', padding: '11px 18px', borderRadius: 10, fontSize: 13.5, fontWeight: 600, boxShadow: 'var(--shadow-lg)', zIndex: 200, maxWidth: 'calc(100vw - 32px)', textAlign: 'center' }}>
           {toast}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Calling row: Call (tel:) + WhatsApp + Log. A log is append-only (a new call_logs
+// row via claim_portal_log_call, stamped with the volunteer's name · phone).
+function CallRow({ r, token, splitId, phone, myName, label, onTouch, onLogged }) {
+  const [open, setOpen] = useState(false)
+  const [outcome, setOutcome] = useState(DEFAULT_OUTCOME)
+  const [remarks, setRemarks] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const dialable = hasDialable(r.phone)
+  const waText = fillTemplate(r.whatsapp_template, { name: r.person_name, myName })
+
+  async function save() {
+    setBusy(true); setErr(null)
+    try {
+      const { data, error } = await supabase.rpc('claim_portal_log_call', { p_token: token, p_split_id: splitId, p_journey_id: r.journey_id, p_phone: phone, p_reachability: outcome, p_remarks: remarks, p_caller_label: label })
+      if (error) throw error
+      if (data.status !== 'ok') throw new Error(data.status === 'not_authorized' ? 'Your session expired — open the link again.' : data.status)
+      onLogged(outcome, remarks)
+      setOpen(false); setRemarks('')
+    } catch (e) {
+      setErr('Could not save: ' + (e.message || e))
+    } finally { setBusy(false) }
+  }
+
+  const btnBase = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 1, height: 38, fontSize: 13.5, fontWeight: 600, borderRadius: 8, border: '1px solid var(--border)', textDecoration: 'none', color: 'var(--ink-soft)', background: '#fff', cursor: 'pointer', boxSizing: 'border-box' }
+  const status = r.last_outcome ? (OUTCOME_TO_STATUS[r.last_outcome] || r.last_outcome) : 'To call'
+
+  return (
+    <div className="card" style={{ padding: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <div style={{ width: 30, height: 30, borderRadius: '50%', background: avatarFor(0), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initials(r.person_name)}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person_name}</div>
+          <div style={{ fontSize: 12, color: dialable ? 'var(--muted)' : 'var(--red)' }}>{r.phone || 'no phone on record'}</div>
+        </div>
+        <span className="pill" style={pillForOutcome(r.last_outcome)}>{status}</span>
+      </div>
+      {r.last_remarks && !open && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>“{r.last_remarks}”</div>}
+
+      {open ? (
+        <div style={{ background: '#FBF6EC', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+            {LOG_OUTCOMES.map((o) => (
+              <button key={o} onClick={() => setOutcome(o)} style={{ fontSize: 12.5, fontWeight: 600, padding: '7px 11px', borderRadius: 20, cursor: 'pointer', border: outcome === o ? 'none' : '1px solid var(--border)', background: outcome === o ? '#241B14' : '#fff', color: outcome === o ? '#F6ECDC' : 'var(--ink-soft)' }}>{o}</button>
+            ))}
+          </div>
+          <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} placeholder="Remarks (optional) — what was said, callback time…"
+            style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 13.5, fontFamily: 'inherit', boxSizing: 'border-box', resize: 'vertical', marginBottom: 8 }} />
+          {err && <div style={{ fontSize: 12.5, color: 'var(--red)', marginBottom: 8 }}>{err}</div>}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button disabled={busy} onClick={() => setOpen(false)} style={btnBase}>Cancel</button>
+            <button disabled={busy} onClick={save} style={{ ...btnBase, border: 'none', background: 'var(--orange)', color: '#fff' }}>{busy ? 'Saving…' : 'Save log'}</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 6 }}>
+          <a href={telHref(r.phone) || undefined} onClick={onTouch} aria-disabled={!dialable} style={{ ...btnBase, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>📞 Call</a>
+          <a href={waHref(r.phone, waText)} target="_blank" rel="noopener noreferrer" onClick={onTouch} aria-disabled={!dialable} style={{ ...btnBase, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>WhatsApp</a>
+          <button onClick={() => { setOutcome(r.last_outcome || DEFAULT_OUTCOME); setOpen(true) }} style={{ ...btnBase, border: '1px solid ' + (r.last_outcome ? '#4E7C3F' : 'var(--border)'), background: r.last_outcome ? '#EAF2E5' : '#fff', color: r.last_outcome ? '#4E7C3F' : 'var(--ink-soft)' }}>{r.last_outcome ? '✓ Logged' : 'Log'}</button>
         </div>
       )}
     </div>

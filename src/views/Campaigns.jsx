@@ -174,7 +174,7 @@ export default function Campaigns({ me, isCoordinator = false, onToast, onNaviga
         for (let i = 0; i < jIds.length; i += CALL_LOG_CHUNK) {
           const { data: ls, error: e3 } = await supabase
             .from('call_logs')
-            .select('id, journey_id, reachability, remarks, logged_at, logged_by')
+            .select('id, journey_id, reachability, remarks, logged_at, logged_by, portal_caller_label')
             .in('journey_id', jIds.slice(i, i + CALL_LOG_CHUNK))
             .order('logged_at', { ascending: false })
           if (e3) throw e3
@@ -620,7 +620,7 @@ const VERIFIED_LABEL = { phone: 'phone', email: 'email', coordinator: 'coordinat
 // live campaign would silently reshuffle recipients out from under volunteers
 // already mid-way through their batch.
 function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
-  const [perBatch, setPerBatch] = useState(30) // batch SIZE (people per batch), default 30
+  const [perBatch, setPerBatch] = useState(campaign.campaign_type === 'messaging' ? 30 : 5) // batch SIZE; calling campaigns default 5
   const [busy, setBusy] = useState(false)
   const [sessions, setSessions] = useState([])
   const [showBatches, setShowBatches] = useState(false) // accordion: batch rows hidden by default
@@ -733,7 +733,7 @@ function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
     const batchCount = contacts.length ? Math.ceil(contacts.length / size) : 0
     return (
       <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-soft)' }}>
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Split the list into batches of a set size (default 30 each). Volunteers self-assign to one via a single shared link — no per-batch link to hand out.</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Split the list into batches of a set size (default {campaign.campaign_type === 'messaging' ? 30 : 5} each). Volunteers self-assign to one via a single shared link — no per-batch link to hand out.</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input type="number" min={1} max={contacts.length} value={perBatch} onChange={(e) => setPerBatch(Number(e.target.value))}
             style={{ width: 70, padding: '7px 9px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 14, fontFamily: 'inherit' }} />
@@ -771,7 +771,7 @@ function CampaignSplits({ campaign, contacts, splits, myId, reload, onToast }) {
           <span style={{ display: 'inline-block', transition: 'transform .15s', transform: showBatches ? 'rotate(90deg)' : 'none', fontSize: 10 }}>▶</span>
           Batches ({splits.length})
         </button>
-        <button className="btn btn-ghost" style={{ height: 28, padding: '0 10px', fontSize: 12, marginLeft: 'auto' }} disabled={busy} onClick={copyLink}>Copy portal link</button>
+        <button className="btn btn-ghost" style={{ height: 28, padding: '0 10px', fontSize: 12, marginLeft: 'auto' }} disabled={busy} onClick={copyLink}>{campaign.campaign_type === 'messaging' ? 'Copy portal link' : 'Copy calling link'}</button>
       </div>
       {showBatches && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
