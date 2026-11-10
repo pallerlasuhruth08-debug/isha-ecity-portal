@@ -464,6 +464,7 @@ function CallRow({ r, token, splitId, phone, myName, label, onTouch, onLogged })
   const [err, setErr] = useState(null)
   const dialable = hasDialable(r.phone)
   const waText = fillTemplate(r.whatsapp_template, { name: r.person_name, myName })
+  const smsText = fillTemplate(r.sms_template, { name: r.person_name, myName })
 
   async function save() {
     setBusy(true); setErr(null)
@@ -511,6 +512,7 @@ function CallRow({ r, token, splitId, phone, myName, label, onTouch, onLogged })
       ) : (
         <div style={{ display: 'flex', gap: 6 }}>
           <a href={telHref(r.phone) || undefined} onClick={onTouch} aria-disabled={!dialable} style={{ ...btnBase, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>📞 Call</a>
+          <a href={smsHref(r.phone, smsText) || undefined} onClick={onTouch} aria-disabled={!dialable} style={{ ...btnBase, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>SMS</a>
           <a href={waHref(r.phone, waText)} target="_blank" rel="noopener noreferrer" onClick={onTouch} aria-disabled={!dialable} style={{ ...btnBase, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>WhatsApp</a>
           <button onClick={() => { setOutcome(r.last_outcome || DEFAULT_OUTCOME); setOpen(true) }} style={{ ...btnBase, border: '1px solid ' + (r.last_outcome ? '#4E7C3F' : 'var(--border)'), background: r.last_outcome ? '#EAF2E5' : '#fff', color: r.last_outcome ? '#4E7C3F' : 'var(--ink-soft)' }}>{r.last_outcome ? '✓ Logged' : 'Log'}</button>
         </div>
