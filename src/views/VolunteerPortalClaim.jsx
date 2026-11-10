@@ -20,6 +20,17 @@ import { LOG_OUTCOMES, DEFAULT_OUTCOME, pillForOutcome, OUTCOME_TO_STATUS } from
 
 const credKey = (token) => `claim_portal_${token}`
 const box = { maxWidth: 480, margin: '0 auto', width: '100%' }
+// Cards / List preference for the calling list — per device, convenience only.
+const VIEW_KEY = 'portal_call_view'
+const readView = () => { try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'cards' } catch { return 'cards' } }
+const ViewToggle = ({ view, setView }) => (
+  <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 9, overflow: 'hidden', flexShrink: 0 }}>
+    {[['cards', 'Cards'], ['list', 'List']].map(([v, l]) => (
+      <button key={v} onClick={() => { setView(v); try { localStorage.setItem(VIEW_KEY, v) } catch { /* ignore */ } }} aria-pressed={view === v}
+        style={{ fontSize: 12.5, fontWeight: 600, padding: '6px 12px', border: 'none', cursor: 'pointer', background: view === v ? '#241B14' : '#fff', color: view === v ? '#F6ECDC' : 'var(--ink-soft)' }}>{l}</button>
+    ))}
+  </div>
+)
 
 export default function VolunteerPortalClaim({ token, splitId: initialBatchId }) {
   const [info, setInfo] = useState(undefined) // undefined=loading, null=invalid, {}=valid
@@ -42,6 +53,7 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
   const [gate, setGate] = useState(undefined) // undefined=checking, {ok:true,...} | {ok:false,...}
   const [recipients, setRecipients] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
+  const [callView, setCallView] = useState(readView)
   const [celebrating, setCelebrating] = useState(false)
   const [bulkConfirming, setBulkConfirming] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -361,7 +373,12 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
                 Your {calling ? 'call' : 'outreach'} list — {(recipients || []).length} people
                 {recipients && recipients.length > 0 && <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {calling ? `${loggedCount} logged` : `${recipients.filter((r) => r.message_status === 'sent' || r.message_status === 'responded').length} sent`}</span>}
               </div>
-              {calling && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>Call each person, then log how it went. When all are logged, your next people load automatically.</div>}
+              {calling && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)', flex: 1 }}>Call each person, then log how it went. When all are logged, your next people load automatically.</div>
+                  <ViewToggle view={callView} setView={setCallView} />
+                </div>
+              )}
               {calling && recipients?.[0]?.script && (
                 <details className="card" style={{ padding: '10px 12px', marginBottom: 12 }}>
                   <summary style={{ fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Call script</summary>
@@ -395,9 +412,9 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
               {recipients && recipients.length === 0 && (
                 <div className="card" style={{ padding: 16, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>No one in your list yet.</div>
               )}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className={calling && callView === 'list' ? 'card' : undefined} style={calling && callView === 'list' ? { display: 'flex', flexDirection: 'column', overflow: 'hidden' } : { display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {calling && (recipients || []).map((r) => (
-                  <CallRow key={r.journey_id} r={r} token={token} splitId={batchId} phone={caller.phone} myName={caller.name} label={`${caller.name} · ${caller.phone}`}
+                  <CallRow key={r.journey_id} list={callView === 'list'} r={r} token={token} splitId={batchId} phone={caller.phone} myName={caller.name} label={`${caller.name} · ${caller.phone}`}
                     onTouch={touchBatch}
                     onLogged={(outcome, remarks) => setRecipients((prev) => prev.map((x) => (x.journey_id === r.journey_id ? { ...x, last_outcome: outcome, last_remarks: remarks, last_logged_at: new Date().toISOString() } : x)))} />
                 ))}
@@ -456,7 +473,7 @@ export default function VolunteerPortalClaim({ token, splitId: initialBatchId })
 
 // Calling row: Call (tel:) + WhatsApp + Log. A log is append-only (a new call_logs
 // row via claim_portal_log_call, stamped with the volunteer's name · phone).
-function CallRow({ r, token, splitId, phone, myName, label, onTouch, onLogged }) {
+function CallRow({ r, token, splitId, phone, myName, label, onTouch, onLogged, list = false }) {
   const [open, setOpen] = useState(false)
   const [outcome, setOutcome] = useState(DEFAULT_OUTCOME)
   const [remarks, setRemarks] = useState('')
@@ -482,6 +499,45 @@ function CallRow({ r, token, splitId, phone, myName, label, onTouch, onLogged })
   const btnBase = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 1, height: 38, fontSize: 13.5, fontWeight: 600, borderRadius: 8, border: '1px solid var(--border)', textDecoration: 'none', color: 'var(--ink-soft)', background: '#fff', cursor: 'pointer', boxSizing: 'border-box' }
   const status = r.last_outcome ? (OUTCOME_TO_STATUS[r.last_outcome] || r.last_outcome) : 'To call'
 
+  const logForm = (
+    <div style={{ background: '#FBF6EC', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+        {LOG_OUTCOMES.map((o) => (
+          <button key={o} onClick={() => setOutcome(o)} style={{ fontSize: 12.5, fontWeight: 600, padding: '7px 11px', borderRadius: 20, cursor: 'pointer', border: outcome === o ? 'none' : '1px solid var(--border)', background: outcome === o ? '#241B14' : '#fff', color: outcome === o ? '#F6ECDC' : 'var(--ink-soft)' }}>{o}</button>
+        ))}
+      </div>
+      <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} placeholder="Remarks (optional) — what was said, callback time…"
+        style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 13.5, fontFamily: 'inherit', boxSizing: 'border-box', resize: 'vertical', marginBottom: 8 }} />
+      {err && <div style={{ fontSize: 12.5, color: 'var(--red)', marginBottom: 8 }}>{err}</div>}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button disabled={busy} onClick={() => setOpen(false)} style={btnBase}>Cancel</button>
+        <button disabled={busy} onClick={save} style={{ ...btnBase, border: 'none', background: 'var(--orange)', color: '#fff' }}>{busy ? 'Saving…' : 'Save log'}</button>
+      </div>
+    </div>
+  )
+
+  if (list) {
+    const icon = { ...btnBase, flex: 'none', width: 36, height: 34, fontSize: 13, padding: 0, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }
+    return (
+      <div style={{ padding: '9px 10px', borderBottom: '1px solid var(--border-soft)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.person_name}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+              <span style={{ fontSize: 12, color: dialable ? 'var(--muted)' : 'var(--red)' }}>{r.phone || 'no phone'}</span>
+              <span className="pill" style={{ ...pillForOutcome(r.last_outcome), fontSize: 11 }}>{status}</span>
+            </div>
+          </div>
+          <a href={telHref(r.phone) || undefined} onClick={onTouch} title="Call" style={icon}>📞</a>
+          <a href={smsHref(r.phone, smsText) || undefined} onClick={onTouch} title="SMS" style={icon}>SMS</a>
+          <a href={waHref(r.phone, waText)} target="_blank" rel="noopener noreferrer" onClick={onTouch} title="WhatsApp" style={icon}>WA</a>
+          <button onClick={() => { setOutcome(r.last_outcome || DEFAULT_OUTCOME); setOpen((o) => !o) }} style={{ ...btnBase, flex: 'none', height: 34, padding: '0 10px', fontSize: 12.5, border: '1px solid ' + (r.last_outcome ? '#4E7C3F' : 'var(--border)'), background: r.last_outcome ? '#EAF2E5' : '#fff', color: r.last_outcome ? '#4E7C3F' : 'var(--ink-soft)' }}>{r.last_outcome ? '✓' : 'Log'}</button>
+        </div>
+        {open && <div style={{ marginTop: 8 }}>{logForm}</div>}
+      </div>
+    )
+  }
+
   return (
     <div className="card" style={{ padding: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -494,22 +550,7 @@ function CallRow({ r, token, splitId, phone, myName, label, onTouch, onLogged })
       </div>
       {r.last_remarks && !open && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>“{r.last_remarks}”</div>}
 
-      {open ? (
-        <div style={{ background: '#FBF6EC', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-            {LOG_OUTCOMES.map((o) => (
-              <button key={o} onClick={() => setOutcome(o)} style={{ fontSize: 12.5, fontWeight: 600, padding: '7px 11px', borderRadius: 20, cursor: 'pointer', border: outcome === o ? 'none' : '1px solid var(--border)', background: outcome === o ? '#241B14' : '#fff', color: outcome === o ? '#F6ECDC' : 'var(--ink-soft)' }}>{o}</button>
-            ))}
-          </div>
-          <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} placeholder="Remarks (optional) — what was said, callback time…"
-            style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 13.5, fontFamily: 'inherit', boxSizing: 'border-box', resize: 'vertical', marginBottom: 8 }} />
-          {err && <div style={{ fontSize: 12.5, color: 'var(--red)', marginBottom: 8 }}>{err}</div>}
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button disabled={busy} onClick={() => setOpen(false)} style={btnBase}>Cancel</button>
-            <button disabled={busy} onClick={save} style={{ ...btnBase, border: 'none', background: 'var(--orange)', color: '#fff' }}>{busy ? 'Saving…' : 'Save log'}</button>
-          </div>
-        </div>
-      ) : (
+      {open ? logForm : (
         <div style={{ display: 'flex', gap: 6 }}>
           <a href={telHref(r.phone) || undefined} onClick={onTouch} aria-disabled={!dialable} style={{ ...btnBase, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>📞 Call</a>
           <a href={smsHref(r.phone, smsText) || undefined} onClick={onTouch} aria-disabled={!dialable} style={{ ...btnBase, opacity: dialable ? 1 : 0.45, pointerEvents: dialable ? 'auto' : 'none' }}>SMS</a>

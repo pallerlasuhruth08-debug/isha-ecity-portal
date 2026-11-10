@@ -871,6 +871,9 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
   const [logFor, setLogFor] = useState(null) // {journeyId, personId, name, phone}
   const [assignFor, setAssignFor] = useState(null) // recipient row being reassigned (kebab → Assign caller)
   const [detailFor, setDetailFor] = useState(null) // recipient row shown in the View-details panel
+  // Phone only: Cards (actions inline) or List (dense one-tap rows). Per-device preference.
+  const [listView, setListView] = useState(() => { try { return localStorage.getItem('campaign_call_view') === 'list' } catch { return false } })
+  const pickView = (v) => { setListView(v); try { localStorage.setItem('campaign_call_view', v ? 'list' : 'cards') } catch { /* ignore */ } }
   const [showRemoved, setShowRemoved] = useState(false)
   const [busyId, setBusyId] = useState(null)
   const [addOpen, setAddOpen] = useState(false) // source-chooser popover
@@ -1187,6 +1190,16 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           </select>
         )}
       </div>
+      {isPhone && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 9, overflow: 'hidden' }}>
+            {[[false, 'Cards'], [true, 'List']].map(([v, l]) => (
+              <button key={l} onClick={() => pickView(v)} aria-pressed={listView === v}
+                style={{ fontSize: 12.5, fontWeight: 600, padding: '6px 12px', border: 'none', cursor: 'pointer', background: listView === v ? 'var(--sb-bg)' : '#fff', color: listView === v ? 'var(--sb-ink)' : 'var(--ink-soft)' }}>{l}</button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
         {!isPhone && (
           <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12, padding: '13px 22px', background: '#FAF4EA', borderBottom: '1px solid var(--border-soft)', fontSize: 12, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted-2)' }}>
@@ -1208,7 +1221,23 @@ function Detail({ c, me, isCoordinator, logsByJourney, actorNames, eventNames = 
           <Empty label="No contacts in this status." />
         ) : null}
 
-        {isPhone && pageShown.map((p, i) => (
+        {isPhone && listView && pageShown.map((p) => {
+          const lastBy = p.logs[0] ? (p.logs[0].logged_by ? actorNames[p.logs[0].logged_by] : p.logs[0].portal_caller_label) : null
+          const who = messaging ? p.assignedTo : (lastBy || (p.callerKey ? p.assigned : null))
+          return (
+            <div key={p.journeyId} className="rowhover" onClick={() => setDetailFor(p)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderBottom: '1px solid var(--border-soft)', cursor: 'pointer' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {p.phone || 'no phone'}{p.splitNumber != null ? ` · B${p.splitNumber}` : ''}{who ? ` · ${String(who).split(' · ')[0]}` : ''}{p.last ? ` · ${p.last}` : ''}
+                </div>
+              </div>
+              <span className="pill" style={{ ...(messaging ? pillForMessage(p.messageStatus) : pillFor(p.status)), flexShrink: 0 }}>{messaging ? labelForMessage(p.messageStatus) : p.status}</span>
+            </div>
+          )
+        })}
+
+        {isPhone && !listView && pageShown.map((p, i) => (
           <div key={p.journeyId} className="rowhover" onClick={() => setDetailFor(p)} style={{ padding: '8px 14px', borderBottom: '1px solid var(--border-soft)', cursor: 'pointer' }}>
             {/* Row 1: avatar, name + phone, status */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
